@@ -100,9 +100,13 @@ const Index = () => {
                 variant="outline"
                 size="sm"
                 className="h-7 gap-1.5 text-[12px]"
-                onClick={() => {
-                  syncAllDirtyTasks();
-                  toast({ title: "Changes saved", description: `${dirtyCount} task(s) marked as synced` });
+                onClick={async () => {
+                  try {
+                    await syncAllDirtyTasks();
+                    toast({ title: "Synced to Jira", description: `${dirtyCount} task(s) pushed to Jira` });
+                  } catch {
+                    toast({ title: "Sync failed", description: "Some tasks could not be synced", variant: "destructive" });
+                  }
                 }}
               >
                 <CloudUpload className="h-3.5 w-3.5" />

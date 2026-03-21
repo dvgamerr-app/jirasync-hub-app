@@ -43,6 +43,7 @@ export interface WorkLog {
   logDate: string;
   comment: string | null;
   createdAt: string;
+  jiraWorklogId?: string | null;
 }
 
 export type StoryLevel = 1 | 2 | 3 | 5;

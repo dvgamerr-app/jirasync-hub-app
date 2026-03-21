@@ -39,7 +39,7 @@ export async function syncNow(): Promise<void> {
 
       // 3. For each project, fetch issues assigned to current user — skip projects with none
       for (const project of projects) {
-        const { tasks, statuses } = await fetchJiraIssues(account, project.jiraProjectKey);
+        const { tasks, statuses, worklogsByTaskId } = await fetchJiraIssues(account, project.jiraProjectKey);
         if (tasks.length === 0) continue;
 
         totalProjects++;
@@ -64,6 +64,15 @@ export async function syncNow(): Promise<void> {
           } else {
             await db.tasks.put(task);
           }
+
+          // Sync work logs: replace Jira-sourced logs, keep locally-created ones
+          const freshLogs = worklogsByTaskId[task.id] ?? [];
+          const existing_wls = await db.workLogs.where("taskId").equals(task.id).toArray();
+          const jiraSourcedIds = existing_wls
+            .filter((wl: any) => !!wl.jiraWorklogId)
+            .map((wl: any) => wl.id);
+          if (jiraSourcedIds.length > 0) await db.workLogs.bulkDelete(jiraSourcedIds);
+          if (freshLogs.length > 0) await db.workLogs.bulkPut(freshLogs);
         }
       }
     }

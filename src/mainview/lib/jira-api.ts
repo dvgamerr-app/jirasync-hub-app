@@ -1,6 +1,6 @@
 import { getJiraBaseUrl, type JiraAccount } from "./jira-db";
 import { bunJiraFetch, rpcAvailable } from "./window-rpc";
-import type { Organization, Project, Task } from "@/types/jira";
+import type { Organization, Project, Task, WorkLog } from "@/types/jira";
 
 const ISSUE_TYPE_MAP: Partial<Record<string, Task["type"]>> = {
   Bug: "Bug",
@@ -151,12 +151,13 @@ function mapIssueToTask(issue: any, account: JiraAccount, projectKey: string): T
 export async function fetchJiraIssues(
   account: JiraAccount,
   projectKey: string,
-): Promise<{ tasks: Task[]; statuses: string[] }> {
+): Promise<{ tasks: Task[]; statuses: string[]; worklogsByTaskId: Record<string, WorkLog[]> }> {
   const jql = `project = "${projectKey}" AND (assignee = currentUser() OR assignee was currentUser()) ORDER BY updated DESC`;
-  const fields = ["summary", "status", "issuetype", "priority", "assignee", "description", "created", "updated", "customfield_10016", "parent"];
+  const fields = ["summary", "status", "issuetype", "priority", "assignee", "description", "created", "updated", "customfield_10016", "parent", "worklog"];
 
   const allTasks: Task[] = [];
   const statusSet = new Set<string>();
+  const worklogsByTaskId: Record<string, WorkLog[]> = {};
   let nextPageToken: string | undefined;
 
   while (true) {
@@ -172,7 +173,10 @@ export async function fetchJiraIssues(
     for (const issue of data.issues ?? []) {
       const status = issue.fields.status?.name ?? null;
       if (status) statusSet.add(status);
-      allTasks.push(mapIssueToTask(issue, account, projectKey));
+      const task = mapIssueToTask(issue, account, projectKey);
+      allTasks.push(task);
+      const wls = mapWorklogsFromIssue(issue, task.id);
+      if (wls.length > 0) worklogsByTaskId[task.id] = wls;
     }
 
     if (data.isLast) break;
@@ -180,7 +184,20 @@ export async function fetchJiraIssues(
     if (!nextPageToken) break;
   }
 
-  return { tasks: allTasks, statuses: Array.from(statusSet) };
+  return { tasks: allTasks, statuses: Array.from(statusSet), worklogsByTaskId };
+}
+
+function mapWorklogsFromIssue(issue: any, taskId: string): WorkLog[] {
+  const worklogs: any[] = issue.fields.worklog?.worklogs ?? [];
+  return worklogs.map((wl: any) => ({
+    id: `wl-jira-${wl.id}`,
+    taskId,
+    timeSpentMinutes: Math.round((wl.timeSpentSeconds ?? 0) / 60),
+    logDate: (wl.started as string).slice(0, 10),
+    comment: wl.comment ? adfToText(wl.comment).trim() || null : null,
+    createdAt: wl.started,
+    jiraWorklogId: wl.id,
+  }));
 }
 
 function mapPriorityToSeverity(priority: string | undefined): Task["severity"] {
@@ -219,15 +236,15 @@ export async function transitionJiraIssue(
   });
 }
 
-// Add work log to Jira
+// Add work log to Jira — returns the Jira worklog ID
 export async function addJiraWorkLog(
   account: JiraAccount,
   issueKey: string,
   timeSpentMinutes: number,
   started: string,
   comment: string | null,
-): Promise<void> {
-  await jiraFetch(`issue/${issueKey}/worklog`, account, {
+): Promise<string | null> {
+  const res = await jiraFetch(`issue/${issueKey}/worklog`, account, {
     method: "POST",
     body: JSON.stringify({
       timeSpentSeconds: timeSpentMinutes * 60,
@@ -243,5 +260,16 @@ export async function addJiraWorkLog(
         : {}),
     }),
   });
+  const data = await res.json();
+  return data.id ?? null;
+}
+
+// Delete a work log from Jira
+export async function deleteJiraWorkLog(
+  account: JiraAccount,
+  issueKey: string,
+  worklogId: string,
+): Promise<void> {
+  await jiraFetch(`issue/${issueKey}/worklog/${worklogId}`, account, { method: "DELETE" });
 }
 
