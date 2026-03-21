@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "@/hooks/use-toast";
-import { openExternal } from "@/lib/window-rpc";
+import { openExternal } from "@/lib/desktop";
 import { LogWorkModal, formatMinutes, parseTimeInput } from "@/components/LogWorkModal";
 import { AdfRenderer, countAdfLines } from "@/components/AdfRenderer";
 
@@ -265,7 +265,9 @@ export function TaskDetailPanel() {
           <button
             type="button"
             className="flex min-w-0 items-center gap-1 rounded text-muted-foreground hover:text-primary"
-            onClick={() => task.refUrl && openExternal(task.refUrl)}
+            onClick={() => {
+              if (task.refUrl) void openExternal(task.refUrl);
+            }}
             title={task.refUrl ?? undefined}
           >
             {project && (

@@ -8,7 +8,7 @@ import {
 } from "@/lib/jira-db";
 import { testJiraConnection } from "@/lib/jira-api";
 import { startBackgroundSync } from "@/lib/sync-service";
-import { openExternal } from "@/lib/window-rpc";
+import { openExternal } from "@/lib/desktop";
 import {
   Dialog,
   DialogContent,
@@ -295,7 +295,7 @@ export function JiraSettingsDialog({ open, onOpenChange }: Props) {
                   type="button"
                   className="text-primary underline"
                   onClick={() =>
-                    openExternal("https://id.atlassian.net/manage-profile/security/api-tokens")
+                    void openExternal("https://id.atlassian.net/manage-profile/security/api-tokens")
                   }
                 >
                   Atlassian API tokens

@@ -1,5 +1,4 @@
 import { getJiraBaseUrl, type JiraAccount } from "./jira-db";
-import { bunJiraFetch, rpcAvailable } from "./window-rpc";
 import type { Organization, Project, Task, WorkLog } from "@/types/jira";
 
 const ISSUE_TYPE_MAP: Partial<Record<string, Task["type"]>> = {
@@ -31,33 +30,6 @@ async function jiraFetch(
     Accept: "application/json",
   };
 
-  // Route through Bun process — no cookie store, no XSRF issues
-  if (rpcAvailable()) {
-    const result = await bunJiraFetch(
-      url,
-      (options.method as string) || "GET",
-      headers,
-      options.body as string | undefined,
-    );
-    if (!result) throw new Error("Jira RPC unavailable");
-    if (result.status >= 400) throw new Error(`Jira API ${result.status}: ${result.body}`);
-    // Some HTTP statuses MUST NOT have a body (204, 205, 304). If Bun returned
-    // a body for such a status or returned null, avoid passing a body to the
-    // Response constructor which would throw: "Response with null body status cannot have body".
-    const nullBodyStatuses = [204, 205, 304];
-    const hasBody = result.body != null && !nullBodyStatuses.includes(result.status);
-    return hasBody
-      ? new Response(result.body, {
-        status: result.status,
-        headers: { "Content-Type": "application/json" },
-      })
-      : new Response(null, {
-        status: result.status,
-        headers: { "Content-Type": "application/json" },
-      });
-  }
-
-  // Fallback: direct browser fetch (dev without Electrobun)
   const res = await fetch(url, {
     ...options,
     credentials: "omit",

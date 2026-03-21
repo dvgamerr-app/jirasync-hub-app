@@ -4,7 +4,7 @@ import { Task, TaskType, Severity } from "@/types/jira";
 import { StatusBadge } from "@/components/StatusBadge";
 import { cn } from "@/lib/utils";
 import { CloudOff, ExternalLink, Bug, BookOpen, ClipboardList, Info } from "lucide-react";
-import { openExternal } from "@/lib/window-rpc";
+import { openExternal } from "@/lib/desktop";
 import {
   Table,
   TableBody,
@@ -199,7 +199,7 @@ function TaskRow({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                openExternal(task.refUrl!);
+                if (task.refUrl) void openExternal(task.refUrl);
               }}
             >
               <ExternalLink className="h-3 w-3 text-muted-foreground hover:text-primary" />
