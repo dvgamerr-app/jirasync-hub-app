@@ -12,6 +12,7 @@ import { X, Clock, CalendarIcon, CloudOff, Cloud, CloudUpload, ExternalLink, Bug
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
+import { openExternal } from "@/lib/window-rpc";
 
 const TASK_TYPES: TaskType[] = ["Story", "Bug", "Task"];
 const SEVERITIES: Severity[] = ["Critical", "High", "Medium", "Low", "NA"];
@@ -296,16 +297,14 @@ function EditableField({
         >
           {value ? (
             isLink ? (
-              <a
-                href={value}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                type="button"
                 className="flex items-center gap-1 text-primary hover:underline truncate"
-                onClick={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); openExternal(value); }}
               >
                 <ExternalLink className="h-3 w-3 shrink-0" />
                 <span className="truncate">{value}</span>
-              </a>
+              </button>
             ) : (
               <span className="text-foreground truncate">{value}</span>
             )

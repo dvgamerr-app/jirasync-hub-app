@@ -4,7 +4,7 @@
     "noImplicitAny": false,
     "paths": {
       "@/*": [
-        "./src/*"
+        "./src/mainview/*"
       ]
     },
     "strictNullChecks": false,

@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "@/hooks/use-toast";
 import { startBackgroundSync, syncNow, onSyncStatus } from "@/lib/sync-service";
-import { getJiraSettings } from "@/lib/jira-db";
+import { getJiraAccounts } from "@/lib/jira-db";
 
 const Index = () => {
   const { selectedTaskId, selectedProjectId, getFilteredTasks, projects, syncAllDirtyTasks, getDirtyTaskCount, loadFromDB, reloadFromDB, isLoaded } = useTaskStore();
@@ -29,8 +29,7 @@ const Index = () => {
   // Start background sync if Jira configured
   useEffect(() => {
     if (!isLoaded) return;
-    const settings = getJiraSettings();
-    if (settings) {
+    if (getJiraAccounts().length > 0) {
       startBackgroundSync();
     }
 
@@ -58,7 +57,7 @@ const Index = () => {
   };
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background">
+    <div className="flex h-full w-full overflow-hidden bg-background">
       <div className="hidden md:block">
         <AppSidebar />
       </div>

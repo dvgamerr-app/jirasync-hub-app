@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { Organization, Project, Task, WorkLog, StoryLevel, TaskType, Severity } from "@/types/jira";
-import { db, getJiraSettings } from "@/lib/jira-db";
+import { db, getJiraAccounts, type JiraAccount } from "@/lib/jira-db";
 import { mockOrganizations, mockProjects, mockTasks, mockWorkLogs } from "@/data/mock-data";
 
 interface TaskStore {
@@ -62,19 +62,22 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   setSelectedTask: (taskId) => set({ selectedTaskId: taskId }),
 
   loadFromDB: async () => {
-    const settings = getJiraSettings();
+    const accounts = getJiraAccounts();
+    const hasAccounts = accounts.length > 0;
     const taskCount = await db.tasks.count();
 
-    if (settings && taskCount > 0) {
-      // Load from IndexedDB
-      const [organizations, projects, tasks, workLogs] = await Promise.all([
+    if (hasAccounts && taskCount > 0) {
+      // Load from IndexedDB — filter to only tasks/projects belonging to current accounts
+      const accountIds: string[] = accounts.map((a: JiraAccount) => a.id);
+      const [organizations, projects, allTasks, workLogs] = await Promise.all([
         db.organizations.toArray(),
         db.projects.toArray(),
         db.tasks.toArray(),
         db.workLogs.toArray(),
       ]);
+      const tasks = allTasks.filter((t: Task) => accountIds.some((id: string) => t.id.startsWith(`task-${id}-`)));
       set({ organizations, projects, tasks, workLogs, isLoaded: true });
-    } else if (!settings) {
+    } else if (!hasAccounts) {
       // No Jira configured — use mock data
       set({
         organizations: mockOrganizations,
@@ -90,12 +93,14 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   },
 
   reloadFromDB: async () => {
-    const [organizations, projects, tasks, workLogs] = await Promise.all([
+    const accountIds: string[] = getJiraAccounts().map((a: JiraAccount) => a.id);
+    const [organizations, projects, allTasks, workLogs] = await Promise.all([
       db.organizations.toArray(),
       db.projects.toArray(),
       db.tasks.toArray(),
       db.workLogs.toArray(),
     ]);
+    const tasks = allTasks.filter((t: Task) => accountIds.some((id: string) => t.id.startsWith(`task-${id}-`)));
     set({ organizations, projects, tasks, workLogs });
   },
 

@@ -1,6 +1,5 @@
-import { db, getJiraSettings } from "./jira-db";
+import { db, getJiraAccounts } from "./jira-db";
 import { fetchJiraOrganization, fetchJiraProjects, fetchJiraIssues } from "./jira-api";
-import type { Task } from "@/types/jira";
 
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let isSyncing = false;
@@ -21,44 +20,50 @@ function notify(status: SyncStatus, message?: string) {
 
 export async function syncNow(): Promise<void> {
   if (isSyncing) return;
-  const settings = getJiraSettings();
-  if (!settings) return;
+  const accounts = getJiraAccounts();
+  if (accounts.length === 0) return;
 
   isSyncing = true;
   notify("syncing");
 
+  let totalProjects = 0;
+
   try {
-    // 1. Fetch org
-    const org = await fetchJiraOrganization();
-    await db.organizations.put(org);
+    for (const account of accounts) {
+      // 1. Fetch org info
+      const org = await fetchJiraOrganization(account);
+      await db.organizations.put(org);
 
-    // 2. Fetch projects
-    const projects = await fetchJiraProjects();
+      // 2. Fetch projects
+      const projects = await fetchJiraProjects(account);
 
-    // 3. For each project, fetch all issues
-    for (const project of projects) {
-      const { tasks, statuses } = await fetchJiraIssues(project.jiraProjectKey);
-      project.availableStatuses = statuses;
-      await db.projects.put(project);
+      // 3. For each project, fetch issues assigned to current user — skip projects with none
+      for (const project of projects) {
+        const { tasks, statuses } = await fetchJiraIssues(account, project.jiraProjectKey);
+        if (tasks.length === 0) continue;
 
-      // Merge: preserve local dirty changes
-      for (const task of tasks) {
-        const existing = await db.tasks.get(task.id);
-        if (existing && existing.isDirty) {
-          // Keep local edits, update non-edited fields
-          await db.tasks.put({
-            ...task,
-            type: existing.type,
-            severity: existing.severity,
-            storyLevel: existing.storyLevel,
-            mandays: existing.mandays,
-            note: existing.note,
-            refUrl: existing.refUrl,
-            isDirty: true,
-            status: existing.status ?? task.status,
-          });
-        } else {
-          await db.tasks.put(task);
+        totalProjects++;
+        project.availableStatuses = statuses;
+        await db.projects.put(project);
+
+        // Merge: preserve local dirty changes
+        for (const task of tasks) {
+          const existing = await db.tasks.get(task.id);
+          if (existing && existing.isDirty) {
+            await db.tasks.put({
+              ...task,
+              type: existing.type,
+              severity: existing.severity,
+              storyLevel: existing.storyLevel,
+              mandays: existing.mandays,
+              note: existing.note,
+              refUrl: existing.refUrl,
+              isDirty: true,
+              status: existing.status ?? task.status,
+            });
+          } else {
+            await db.tasks.put(task);
+          }
         }
       }
     }
@@ -70,7 +75,7 @@ export async function syncNow(): Promise<void> {
       nextSyncAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     });
 
-    notify("success", `Synced ${projects.length} projects`);
+    notify("success", `Synced ${totalProjects} project${totalProjects !== 1 ? "s" : ""} across ${accounts.length} account${accounts.length !== 1 ? "s" : ""}`);
   } catch (err: any) {
     console.error("Sync failed:", err);
     notify("error", err.message ?? "Sync failed");
@@ -82,8 +87,8 @@ export async function syncNow(): Promise<void> {
 
 export function startBackgroundSync() {
   stopBackgroundSync();
-  const settings = getJiraSettings();
-  if (!settings) return;
+  const accounts = getJiraAccounts();
+  if (accounts.length === 0) return;
 
   // Sync immediately, then every hour
   syncNow().catch(() => {});
@@ -103,3 +108,4 @@ export async function getLastSyncTime(): Promise<string | null> {
   const meta = await db.syncMeta.get("last-sync");
   return meta?.lastSyncedAt ?? null;
 }
+

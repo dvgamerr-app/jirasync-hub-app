@@ -28,37 +28,94 @@ class JiraDatabase extends Dexie {
 
 export const db = new JiraDatabase();
 
-// Jira settings stored in localStorage
-export interface JiraSettings {
-  instanceUrl: string; // e.g. "https://acme.atlassian.net" or "acme" (subdomain only)
+// ── Jira Accounts (multiple instances) ────────────────────────────────────────
+export interface JiraAccount {
+  id: string;
+  name: string;        // display name
+  instanceUrl: string; // e.g. "https://acme.atlassian.net" or "acme"
   email: string;
   apiToken: string;
 }
 
-const JIRA_SETTINGS_KEY = "jira-settings";
+/** Backward-compat alias used by older code */
+export type JiraSettings = JiraAccount;
 
-export function getJiraSettings(): JiraSettings | null {
+const JIRA_ACCOUNTS_KEY = "jira-accounts";
+const JIRA_SETTINGS_KEY_LEGACY = "jira-settings";
+
+export function getJiraAccounts(): JiraAccount[] {
   try {
-    const raw = localStorage.getItem(JIRA_SETTINGS_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (parsed.instanceUrl && parsed.email && parsed.apiToken) return parsed;
-    return null;
+    const raw = localStorage.getItem(JIRA_ACCOUNTS_KEY);
+    if (raw) return (JSON.parse(raw) as JiraAccount[]) ?? [];
+
+    // Migrate from legacy single-settings key
+    const legacy = localStorage.getItem(JIRA_SETTINGS_KEY_LEGACY);
+    if (legacy) {
+      const old = JSON.parse(legacy);
+      if (old?.instanceUrl && old?.email && old?.apiToken) {
+        const account: JiraAccount = {
+          id: crypto.randomUUID(),
+          name: getJiraBaseUrl(old).replace("https://", "").replace(".atlassian.net", ""),
+          instanceUrl: old.instanceUrl,
+          email: old.email,
+          apiToken: old.apiToken,
+        };
+        saveJiraAccounts([account]);
+        localStorage.removeItem(JIRA_SETTINGS_KEY_LEGACY);
+        return [account];
+      }
+    }
+    return [];
   } catch {
-    return null;
+    return [];
   }
 }
 
-export function saveJiraSettings(settings: JiraSettings): void {
-  localStorage.setItem(JIRA_SETTINGS_KEY, JSON.stringify(settings));
+export function saveJiraAccounts(accounts: JiraAccount[]): void {
+  localStorage.setItem(JIRA_ACCOUNTS_KEY, JSON.stringify(accounts));
+}
+
+export function addJiraAccount(account: Omit<JiraAccount, "id">): JiraAccount {
+  const newAccount: JiraAccount = { ...account, id: crypto.randomUUID() };
+  saveJiraAccounts([...getJiraAccounts(), newAccount]);
+  return newAccount;
+}
+
+export function updateJiraAccount(account: JiraAccount): void {
+  saveJiraAccounts(getJiraAccounts().map((a) => (a.id === account.id ? account : a)));
+}
+
+export function removeJiraAccount(id: string): void {
+  saveJiraAccounts(getJiraAccounts().filter((a) => a.id !== id));
+  // Clean up DB data for this account
+  const orgId = `org-${id}`;
+  db.organizations.delete(orgId).catch(() => {});
+  db.projects.where("orgId").equals(orgId).delete().catch(() => {});
+}
+
+// Backward-compat helpers
+export function getJiraSettings(): JiraAccount | null {
+  return getJiraAccounts()[0] ?? null;
+}
+
+export function saveJiraSettings(s: Omit<JiraAccount, "id" | "name">): void {
+  const existing = getJiraAccounts();
+  const account: JiraAccount = {
+    id: existing[0]?.id ?? crypto.randomUUID(),
+    name: existing[0]?.name ?? getJiraBaseUrl(s as JiraAccount).replace("https://", "").replace(".atlassian.net", ""),
+    ...s,
+  };
+  saveJiraAccounts([account, ...existing.slice(1)]);
 }
 
 export function clearJiraSettings(): void {
-  localStorage.removeItem(JIRA_SETTINGS_KEY);
+  localStorage.removeItem(JIRA_ACCOUNTS_KEY);
+  localStorage.removeItem(JIRA_SETTINGS_KEY_LEGACY);
 }
 
-export function getJiraBaseUrl(settings: JiraSettings): string {
-  const url = settings.instanceUrl.trim();
+export function getJiraBaseUrl(account: Pick<JiraAccount, "instanceUrl">): string {
+  const url = account.instanceUrl.trim();
   if (url.startsWith("http")) return url.replace(/\/$/, "");
   return `https://${url}.atlassian.net`;
 }
+
