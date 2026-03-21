@@ -4,7 +4,7 @@ import { Task, TaskType, Severity } from "@/types/jira";
 import { StatusBadge } from "@/components/StatusBadge";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow, format } from "date-fns";
-import { CloudOff, Plus, CloudUpload, ExternalLink, Bug, BookOpen, ClipboardList } from "lucide-react";
+import { CloudOff, Plus, ExternalLink, Bug, BookOpen, ClipboardList } from "lucide-react";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -69,13 +69,13 @@ export function TaskTable() {
             <TableHead className="w-[80px] text-center text-[11px] font-semibold uppercase tracking-wider">Mandays</TableHead>
             <TableHead className="w-[120px] text-[11px] font-semibold uppercase tracking-wider">Time</TableHead>
             <TableHead className="w-[140px] text-[11px] font-semibold uppercase tracking-wider">Note</TableHead>
-            <TableHead className="w-[40px] text-center text-[11px] font-semibold uppercase tracking-wider">Sync</TableHead>
+            
           </TableRow>
         </TableHeader>
         <TableBody>
           {tasks.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
+              <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">
                 No tasks found
               </TableCell>
             </TableRow>
@@ -106,7 +106,7 @@ function TaskRow({
 }) {
   const {
     updateTaskStatus, getStatusesForProject, getTotalTimeForTask, addWorkLog,
-    updateTaskType, updateTaskSeverity, updateTaskNote, syncTaskToJira,
+    updateTaskType, updateTaskSeverity, updateTaskNote,
   } = useTaskStore();
   const statuses = getStatusesForProject(task.projectId);
   const totalMinutes = getTotalTimeForTask(task.id);
@@ -216,27 +216,6 @@ function TaskRow({
       {/* Note */}
       <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
         <InlineNote taskId={task.id} note={task.note} onUpdate={updateTaskNote} />
-      </TableCell>
-      {/* Sync */}
-      <TableCell className="py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
-        {task.isDirty && (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  className="inline-flex h-6 w-6 items-center justify-center rounded text-warning hover:bg-accent hover:text-accent-foreground transition-colors"
-                  onClick={() => {
-                    syncTaskToJira(task.id);
-                    toast({ title: "Synced to Jira", description: `${task.jiraTaskId} synced successfully` });
-                  }}
-                >
-                  <CloudUpload className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="left"><p className="text-[12px]">Sync to Jira</p></TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        )}
       </TableCell>
     </TableRow>
   );

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { Organization, Project, Task, WorkLog, StoryLevel, TaskType, Severity } from "@/types/jira";
+import { db, getJiraSettings } from "@/lib/jira-db";
 import { mockOrganizations, mockProjects, mockTasks, mockWorkLogs } from "@/data/mock-data";
 
 interface TaskStore {
@@ -7,12 +8,16 @@ interface TaskStore {
   projects: Project[];
   tasks: Task[];
   workLogs: WorkLog[];
+  isLoaded: boolean;
 
   selectedProjectId: string | null;
   selectedTaskId: string | null;
 
   setSelectedProject: (projectId: string | null) => void;
   setSelectedTask: (taskId: string | null) => void;
+
+  loadFromDB: () => Promise<void>;
+  reloadFromDB: () => Promise<void>;
 
   updateTaskStatus: (taskId: string, status: string) => void;
   updateTaskStoryLevel: (taskId: string, level: StoryLevel | null) => void;
@@ -37,20 +42,62 @@ interface TaskStore {
 }
 
 function markDirty(task: Task, updates: Partial<Task>): Task {
-  return { ...task, ...updates, isDirty: true, updatedAt: new Date().toISOString() };
+  const updated = { ...task, ...updates, isDirty: true, updatedAt: new Date().toISOString() };
+  // Persist to IndexedDB
+  db.tasks.put(updated).catch(console.error);
+  return updated;
 }
 
 export const useTaskStore = create<TaskStore>((set, get) => ({
-  organizations: mockOrganizations,
-  projects: mockProjects,
-  tasks: mockTasks,
-  workLogs: mockWorkLogs,
+  organizations: [],
+  projects: [],
+  tasks: [],
+  workLogs: [],
+  isLoaded: false,
 
   selectedProjectId: null,
   selectedTaskId: null,
 
   setSelectedProject: (projectId) => set({ selectedProjectId: projectId, selectedTaskId: null }),
   setSelectedTask: (taskId) => set({ selectedTaskId: taskId }),
+
+  loadFromDB: async () => {
+    const settings = getJiraSettings();
+    const taskCount = await db.tasks.count();
+
+    if (settings && taskCount > 0) {
+      // Load from IndexedDB
+      const [organizations, projects, tasks, workLogs] = await Promise.all([
+        db.organizations.toArray(),
+        db.projects.toArray(),
+        db.tasks.toArray(),
+        db.workLogs.toArray(),
+      ]);
+      set({ organizations, projects, tasks, workLogs, isLoaded: true });
+    } else if (!settings) {
+      // No Jira configured — use mock data
+      set({
+        organizations: mockOrganizations,
+        projects: mockProjects,
+        tasks: mockTasks,
+        workLogs: mockWorkLogs,
+        isLoaded: true,
+      });
+    } else {
+      // Jira configured but no data yet — empty state, sync will populate
+      set({ organizations: [], projects: [], tasks: [], workLogs: [], isLoaded: true });
+    }
+  },
+
+  reloadFromDB: async () => {
+    const [organizations, projects, tasks, workLogs] = await Promise.all([
+      db.organizations.toArray(),
+      db.projects.toArray(),
+      db.tasks.toArray(),
+      db.workLogs.toArray(),
+    ]);
+    set({ organizations, projects, tasks, workLogs });
+  },
 
   updateTaskStatus: (taskId, status) =>
     set((state) => ({
@@ -87,35 +134,43 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       tasks: state.tasks.map((t) => t.id === taskId ? markDirty(t, { note }) : t),
     })),
 
-  addWorkLog: (log) =>
-    set((state) => ({
-      workLogs: [
-        ...state.workLogs,
-        { ...log, id: `wl-${Date.now()}`, createdAt: new Date().toISOString() },
-      ],
-    })),
+  addWorkLog: (log) => {
+    const newLog = { ...log, id: `wl-${Date.now()}`, createdAt: new Date().toISOString() };
+    db.workLogs.put(newLog).catch(console.error);
+    set((state) => ({ workLogs: [...state.workLogs, newLog] }));
+  },
 
   syncTaskToJira: (taskId) =>
-    set((state) => ({
-      tasks: state.tasks.map((t) =>
-        t.id === taskId ? { ...t, isDirty: false, isSynced: true } : t
-      ),
-    })),
+    set((state) => {
+      const updated = state.tasks.map((t) => {
+        if (t.id === taskId) {
+          const synced = { ...t, isDirty: false, isSynced: true };
+          db.tasks.put(synced).catch(console.error);
+          return synced;
+        }
+        return t;
+      });
+      return { tasks: updated };
+    }),
 
   syncAllDirtyTasks: () =>
-    set((state) => ({
-      tasks: state.tasks.map((t) =>
-        t.isDirty ? { ...t, isDirty: false, isSynced: true } : t
-      ),
-    })),
+    set((state) => {
+      const updated = state.tasks.map((t) => {
+        if (t.isDirty) {
+          const synced = { ...t, isDirty: false, isSynced: true };
+          db.tasks.put(synced).catch(console.error);
+          return synced;
+        }
+        return t;
+      });
+      return { tasks: updated };
+    }),
 
   getDirtyTaskCount: () => get().tasks.filter((t) => t.isDirty).length,
 
   getFilteredTasks: () => {
     const { tasks, selectedProjectId } = get();
-    if (selectedProjectId) {
-      return tasks.filter((t) => t.projectId === selectedProjectId);
-    }
+    if (selectedProjectId) return tasks.filter((t) => t.projectId === selectedProjectId);
     return tasks;
   },
 
