@@ -1,5 +1,4 @@
 {
-  "$schema": "https://schema.tauri.app/config/2",
   "productName": "wedo-jirasync-hub-app",
   "version": "0.1.0",
   "identifier": "com.scg.wedo.jirasync-hub",
