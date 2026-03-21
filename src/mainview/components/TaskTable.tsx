@@ -3,7 +3,8 @@ import { useTaskStore } from "@/store/task-store";
 import { Task, TaskType, Severity } from "@/types/jira";
 import { StatusBadge } from "@/components/StatusBadge";
 import { cn } from "@/lib/utils";
-import { CloudOff, ExternalLink, Bug, BookOpen, ClipboardList } from "lucide-react";
+import { CloudOff, ExternalLink, Bug, BookOpen, ClipboardList, Info } from "lucide-react";
+import { openExternal } from "@/lib/window-rpc";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -11,7 +12,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { LogWorkModal, formatMinutes } from "@/components/LogWorkModal";
+import { LogWorkModal, formatMinutes, parseTimeInput } from "@/components/LogWorkModal";
+import {
+  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 const TASK_TYPES: TaskType[] = ["Story", "Bug", "Task"];
 const SEVERITIES: Severity[] = ["Critical", "High", "Medium", "Low", "NA"];
@@ -45,6 +49,7 @@ export function TaskTable() {
   const tasks = getFilteredTasks();
 
   return (
+    <TooltipProvider delayDuration={200}>
     <div className="flex-1 overflow-auto">
       <Table>
         <TableHeader>
@@ -54,7 +59,25 @@ export function TaskTable() {
             <TableHead className="w-[60px] text-center text-[11px] font-semibold uppercase tracking-wider">Type</TableHead>
             <TableHead className="w-[140px] text-[11px] font-semibold uppercase tracking-wider">Status</TableHead>
             <TableHead className="w-[90px] text-center text-[11px] font-semibold uppercase tracking-wider">Severity</TableHead>
-            <TableHead className="w-[70px] text-center text-[11px] font-semibold uppercase tracking-wider">Story</TableHead>
+            <TableHead className="w-[70px] text-center text-[11px] font-semibold uppercase tracking-wider">
+              <div className="flex items-center justify-center gap-1">
+                Story
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="h-3 w-3 text-muted-foreground/60 cursor-help shrink-0" />
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="max-w-[240px] text-[12px] leading-relaxed p-3">
+                    <p className="font-semibold mb-1.5">Estimation Rule</p>
+                    <ul className="space-y-1 text-muted-foreground">
+                      <li>• Story Point ให้ estimate เฉพาะ <span className="text-foreground font-medium">Story</span> เท่านั้น</li>
+                      <li>• <span className="text-foreground font-medium">Task / Sub-task</span> — ไม่ใส่ Story Point</li>
+                      <li>• Track effort รายคน ให้ใช้ <span className="text-foreground font-medium">Time (Log Work)</span> ใน Task แทน</li>
+                      <li>• ห้าม Story Point ซ้ำหลายระดับ — velocity จะเปรียบเทียบกันไม่ได้</li>
+                    </ul>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            </TableHead>
             <TableHead className="w-[80px] text-center text-[11px] font-semibold uppercase tracking-wider">Mandays</TableHead>
             <TableHead className="w-[120px] text-[11px] font-semibold uppercase tracking-wider">Time</TableHead>
             <TableHead className="w-[140px] text-[11px] font-semibold uppercase tracking-wider">Note</TableHead>
@@ -81,6 +104,7 @@ export function TaskTable() {
         </TableBody>
       </Table>
     </div>
+    </TooltipProvider>
   );
 }
 
@@ -95,7 +119,7 @@ function TaskRow({
 }) {
   const {
     updateTaskStatus, getStatusesForProject, getTotalTimeForTask, addWorkLog,
-    updateTaskType, updateTaskSeverity, updateTaskNote,
+    updateTaskType, updateTaskSeverity, updateTaskNote, updateTaskMandays,
   } = useTaskStore();
   const statuses = getStatusesForProject(task.projectId);
   const totalMinutes = getTotalTimeForTask(task.id);
@@ -120,9 +144,12 @@ function TaskRow({
         <div className="flex items-center gap-1.5">
           <span className="text-[13px] font-medium leading-tight line-clamp-1">{task.title}</span>
           {task.refUrl && (
-            <a href={task.refUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); openExternal(task.refUrl!); }}
+            >
               <ExternalLink className="h-3 w-3 text-muted-foreground hover:text-primary" />
-            </a>
+            </button>
           )}
         </div>
       </TableCell>
@@ -192,8 +219,8 @@ function TaskRow({
       <TableCell className="py-1.5 text-center" onClick={onSelect}>
         <span className="text-[13px] tabular-nums">{task.storyLevel ?? "—"}</span>
       </TableCell>
-      <TableCell className="py-1.5 text-center" onClick={onSelect}>
-        <span className="text-[13px] tabular-nums">{task.mandays ?? "—"}</span>
+      <TableCell className="py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
+        <InlineManday taskId={task.id} value={task.mandays} onUpdate={updateTaskMandays} />
       </TableCell>
       <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-1">
@@ -208,6 +235,53 @@ function TaskRow({
         <InlineNote taskId={task.id} note={task.note} onUpdate={updateTaskNote} />
       </TableCell>
     </TableRow>
+  );
+}
+
+function InlineManday({
+  taskId,
+  value,
+  onUpdate,
+}: {
+  taskId: string;
+  value: number | null;
+  onUpdate: (taskId: string, v: number | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [raw, setRaw] = useState("");
+  const display = value != null ? formatMinutes(Math.round(value * 480)) : "";
+
+  const commit = (inputRaw: string) => {
+    setEditing(false);
+    if (!inputRaw.trim()) { onUpdate(taskId, null); return; }
+    const mins = parseTimeInput(inputRaw);
+    if (mins != null) onUpdate(taskId, mins / 480);
+  };
+
+  if (editing) {
+    return (
+      <Input
+        autoFocus
+        className="h-6 w-full text-[12px] px-1 text-center"
+        placeholder="1d 4h"
+        value={raw}
+        onChange={(e) => setRaw(e.target.value)}
+        onBlur={() => commit(raw)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit(raw);
+          if (e.key === "Escape") setEditing(false);
+        }}
+      />
+    );
+  }
+
+  return (
+    <span
+      className="text-[13px] tabular-nums cursor-text hover:text-foreground"
+      onClick={() => { setRaw(display); setEditing(true); }}
+    >
+      {display || "—"}
+    </span>
   );
 }
 

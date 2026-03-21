@@ -9,7 +9,7 @@ import { X, Clock, CloudOff, Cloud, CloudUpload, ExternalLink, Bug, BookOpen, Cl
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "@/hooks/use-toast";
 import { openExternal } from "@/lib/window-rpc";
-import { LogWorkModal, formatMinutes } from "@/components/LogWorkModal";
+import { LogWorkModal, formatMinutes, parseTimeInput } from "@/components/LogWorkModal";
 
 const TASK_TYPES: TaskType[] = ["Story", "Bug", "Task"];
 const SEVERITIES: Severity[] = ["Critical", "High", "Medium", "Low", "NA"];
@@ -167,14 +167,7 @@ export function TaskDetailPanel() {
           {/* Mandays */}
           <div className="space-y-1.5">
             <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Mandays</label>
-            <Input
-              type="number"
-              min={0}
-              step={0.5}
-              className="h-8 text-[13px]"
-              value={task.mandays ?? ""}
-              onChange={(e) => updateTaskMandays(task.id, e.target.value ? Number(e.target.value) : null)}
-            />
+            <MandayInput value={task.mandays} onSave={(v) => updateTaskMandays(task.id, v)} />
           </div>
 
           {/* Assignee */}
@@ -262,6 +255,34 @@ export function TaskDetailPanel() {
         </div>
       </div>
     </div>
+  );
+}
+
+function MandayInput({ value, onSave }: { value: number | null; onSave: (v: number | null) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [raw, setRaw] = useState("");
+  const display = value != null ? formatMinutes(Math.round(value * 480)) : "";
+
+  const commit = (inputRaw: string) => {
+    setEditing(false);
+    if (!inputRaw.trim()) { onSave(null); return; }
+    const mins = parseTimeInput(inputRaw);
+    if (mins != null) onSave(mins / 480);
+  };
+
+  return (
+    <Input
+      className="h-8 text-[13px]"
+      placeholder="e.g. 1d 4h 30m"
+      value={editing ? raw : display}
+      onFocus={() => { setRaw(display); setEditing(true); }}
+      onChange={(e) => setRaw(e.target.value)}
+      onBlur={() => commit(raw)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") { (e.target as HTMLElement).blur(); }
+        if (e.key === "Escape") setEditing(false);
+      }}
+    />
   );
 }
 

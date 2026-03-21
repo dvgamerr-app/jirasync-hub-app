@@ -8,6 +8,7 @@ import {
 } from "@/lib/jira-db";
 import { testJiraConnection } from "@/lib/jira-api";
 import { startBackgroundSync } from "@/lib/sync-service";
+import { openExternal } from "@/lib/window-rpc";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -229,14 +230,13 @@ export function JiraSettingsDialog({ open, onOpenChange }: Props) {
               </div>
               <p className="text-[11px] text-muted-foreground">
                 Generate at{" "}
-                <a
-                  href="https://id.atlassian.net/manage-profile/security/api-tokens"
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  type="button"
                   className="text-primary underline"
+                  onClick={() => openExternal("https://id.atlassian.net/manage-profile/security/api-tokens")}
                 >
                   Atlassian API tokens
-                </a>
+                </button>
               </p>
             </div>
 

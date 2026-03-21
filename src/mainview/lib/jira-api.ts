@@ -32,7 +32,14 @@ async function jiraFetch(path: string, account: JiraAccount, options: RequestIni
     const result = await bunJiraFetch(url, (options.method as string) || "GET", headers, options.body as string | undefined);
     if (!result) throw new Error("Jira RPC unavailable");
     if (result.status >= 400) throw new Error(`Jira API ${result.status}: ${result.body}`);
-    return new Response(result.body, { status: result.status, headers: { "Content-Type": "application/json" } });
+    // Some HTTP statuses MUST NOT have a body (204, 205, 304). If Bun returned
+    // a body for such a status or returned null, avoid passing a body to the
+    // Response constructor which would throw: "Response with null body status cannot have body".
+    const nullBodyStatuses = [204, 205, 304];
+    const hasBody = result.body != null && !nullBodyStatuses.includes(result.status);
+    return hasBody
+      ? new Response(result.body, { status: result.status, headers: { "Content-Type": "application/json" } })
+      : new Response(null, { status: result.status, headers: { "Content-Type": "application/json" } });
   }
 
   // Fallback: direct browser fetch (dev without Electrobun)
@@ -136,7 +143,9 @@ function mapIssueToTask(issue: any, account: JiraAccount, projectKey: string): T
     type,
     severity: mapPriorityToSeverity(issue.fields.priority?.name),
     storyLevel: issue.fields.customfield_10016 ?? null,
-    mandays: null,
+    mandays: issue.fields.timetracking?.originalEstimateSeconds != null
+      ? Math.round((issue.fields.timetracking.originalEstimateSeconds / 28800) * 1000) / 1000
+      : null,
     assignee: issue.fields.assignee?.displayName ?? null,
     refUrl: `${getJiraBaseUrl(account)}/browse/${issue.key}`,
     note: null,
@@ -153,7 +162,7 @@ export async function fetchJiraIssues(
   projectKey: string,
 ): Promise<{ tasks: Task[]; statuses: string[]; worklogsByTaskId: Record<string, WorkLog[]> }> {
   const jql = `project = "${projectKey}" AND (assignee = currentUser() OR assignee was currentUser()) ORDER BY updated DESC`;
-  const fields = ["summary", "status", "issuetype", "priority", "assignee", "description", "created", "updated", "customfield_10016", "parent", "worklog"];
+  const fields = ["summary", "status", "issuetype", "priority", "assignee", "description", "created", "updated", "customfield_10016", "parent", "worklog", "timetracking"];
 
   const allTasks: Task[] = [];
   const statusSet = new Set<string>();

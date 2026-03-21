@@ -139,11 +139,6 @@ const initialBounds = loadWindowBoundsSync();
 // Declare before RPC so handlers can reference it via closure
 let mainWindow: BrowserWindow | null = null;
 
-function setClampedWindowFrame(bounds: WindowBounds): void {
-	const { width, height } = clampWindowSize(bounds);
-	mainWindow?.setFrame(bounds.x, bounds.y, width, height);
-}
-
 function setClampedWindowSize(size: WindowSize): void {
 	const { width, height } = clampWindowSize(size);
 	mainWindow?.setSize(width, height);
@@ -184,7 +179,6 @@ const windowRPC = defineElectrobunRPC<AppRPCSchema, "bun">("bun", {
 				else mainWindow?.maximize();
 			},
 			windowClose: () => { mainWindow?.close(); },
-			windowSetFrame: setClampedWindowFrame,
 			windowSetSize: setClampedWindowSize,
 			windowGetFrame: () => mainWindow?.getFrame() ?? FALLBACK_BOUNDS,
 			jiraFetch: handleJiraFetch,

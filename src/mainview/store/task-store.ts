@@ -52,7 +52,6 @@ const SEVERITY_TO_PRIORITY: Record<string, string> = {
 
 /** Extract accountId from task id `task-{accountId}-{issueKey}` */
 function getAccountForTask(task: Task, accounts: JiraAccount[]): JiraAccount | undefined {
-  const prefix = task.id.replace(`task-`, "").replace(`-${task.jiraTaskId}`, "");
   // task id format: task-{accountId}-{issueKey}
   // issueKey can contain hyphens e.g. PROJ-123, so extract by removing known parts
   const accountId = task.id.slice("task-".length, task.id.length - task.jiraTaskId.length - 1);
@@ -62,7 +61,6 @@ function getAccountForTask(task: Task, accounts: JiraAccount[]): JiraAccount | u
 async function pushTaskToJira(task: Task, accounts: JiraAccount[]): Promise<void> {
   const account = getAccountForTask(task, accounts);
   if (!account) return;
-
   const fields: Record<string, any> = {};
   if (task.storyLevel !== null) fields.customfield_10016 = task.storyLevel;
   if (task.severity && task.severity !== "NA" && SEVERITY_TO_PRIORITY[task.severity]) {
@@ -76,8 +74,35 @@ async function pushTaskToJira(task: Task, accounts: JiraAccount[]): Promise<void
     };
   }
 
+  // If mandays set, convert to Jira timetracking originalEstimate
+  // Internal store: mandays is a decimal where 1 = 1 manday = 8 hours
+  if (typeof task.mandays === "number" && !isNaN(task.mandays)) {
+    const totalMinutes = Math.round(task.mandays * 8 * 60);
+    const seconds = totalMinutes * 60;
+
+    // Build human-readable string like "1d 4h 30m" (1d = 8h)
+    const days = Math.floor(totalMinutes / 480);
+    const hours = Math.floor((totalMinutes % 480) / 60);
+    const mins = totalMinutes % 60;
+    const parts: string[] = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0) parts.push(`${hours}h`);
+    if (mins > 0) parts.push(`${mins}m`);
+    const estimateStr = parts.join(" ") || "0m";
+
+    fields.timetracking = {
+      originalEstimate: estimateStr,
+      originalEstimateSeconds: seconds,
+    };
+  }
+
   if (Object.keys(fields).length > 0) {
-    await updateJiraIssue(account, task.jiraTaskId, fields);
+    try {
+      await updateJiraIssue(account, task.jiraTaskId, fields);
+    } catch (err: any) {
+      console.error(`Failed updating issue ${task.jiraTaskId}:`, err);
+      throw new Error(`Failed updating ${task.jiraTaskId}: ${err?.message ?? String(err)}`);
+    }
   }
   if (task.status) {
     await transitionJiraIssue(account, task.jiraTaskId, task.status).catch(() => {
@@ -189,9 +214,12 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     db.workLogs.put(newLog).catch(console.error);
     set((state) => ({ workLogs: [...state.workLogs, newLog] }));
 
-    // Push to Jira in background, then store the returned Jira worklog ID
+    // Mark parent task dirty so row turns yellow and sync button activates
     const task = get().tasks.find((t) => t.id === log.taskId);
     if (task) {
+      const dirtyTask = markDirty(task, {});
+      set((state) => ({ tasks: state.tasks.map((t) => t.id === task.id ? dirtyTask : t) }));
+
       const account = getAccountForTask(task, getJiraAccounts());
       if (account) {
         addJiraWorkLog(account, task.jiraTaskId, log.timeSpentMinutes, log.logDate, log.comment)
@@ -202,6 +230,13 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
               set((state) => ({
                 workLogs: state.workLogs.map((wl) => wl.id === newLog.id ? updated : wl),
               }));
+            }
+            // Clear dirty now that Jira confirmed
+            const current = get().tasks.find((t) => t.id === log.taskId);
+            if (current && current.isDirty) {
+              const synced = { ...current, isDirty: false, isSynced: true };
+              await db.tasks.put(synced);
+              set((state) => ({ tasks: state.tasks.map((t) => t.id === synced.id ? synced : t) }));
             }
           })
           .catch(console.error);
@@ -214,14 +249,39 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     db.workLogs.delete(logId).catch(console.error);
     set((state) => ({ workLogs: state.workLogs.filter((wl) => wl.id !== logId) }));
 
+    // Mark parent task dirty while Jira delete is in flight
+    const task = log ? get().tasks.find((t) => t.id === log.taskId) : undefined;
+    if (task) {
+      const dirtyTask = markDirty(task, {});
+      set((state) => ({ tasks: state.tasks.map((t) => t.id === task.id ? dirtyTask : t) }));
+    }
+
     // Delete from Jira in background if we have the Jira worklog ID
     if (log?.jiraWorklogId) {
-      const task = get().tasks.find((t) => t.id === log.taskId);
-      if (task) {
-        const account = getAccountForTask(task, getJiraAccounts());
+      const jiraTask = get().tasks.find((t) => t.id === log.taskId);
+      if (jiraTask) {
+        const account = getAccountForTask(jiraTask, getJiraAccounts());
         if (account) {
-          deleteJiraWorkLog(account, task.jiraTaskId, log.jiraWorklogId).catch(console.error);
+          deleteJiraWorkLog(account, jiraTask.jiraTaskId, log.jiraWorklogId)
+            .then(async () => {
+              // Clear dirty once Jira confirms the delete
+              const current = get().tasks.find((t) => t.id === log.taskId);
+              if (current && current.isDirty) {
+                const synced = { ...current, isDirty: false, isSynced: true };
+                await db.tasks.put(synced);
+                set((state) => ({ tasks: state.tasks.map((t) => t.id === synced.id ? synced : t) }));
+              }
+            })
+            .catch(console.error);
         }
+      }
+    } else if (task) {
+      // No Jira worklog id means it was local-only — clear dirty immediately
+      const current = get().tasks.find((t) => t.id === task.id);
+      if (current) {
+        const synced = { ...current, isDirty: false };
+        db.tasks.put(synced).catch(console.error);
+        set((state) => ({ tasks: state.tasks.map((t) => t.id === synced.id ? synced : t) }));
       }
     }
   },
@@ -244,6 +304,16 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     const syncedIds = new Set(
       dirtyTasks.filter((_, i) => settled[i].status === "fulfilled").map((t) => t.id),
     );
+
+    // Collect failures for reporting
+    const failures: { id: string; jiraId: string; reason: any }[] = [];
+    settled.forEach((res, i) => {
+      if (res.status === "rejected") {
+        failures.push({ id: dirtyTasks[i].id, jiraId: dirtyTasks[i].jiraTaskId, reason: res.reason });
+        console.error(`Sync failed for ${dirtyTasks[i].jiraTaskId}:`, res.reason);
+      }
+    });
+
     const updatedTasks = get().tasks.map((t) => {
       if (!syncedIds.has(t.id)) return t;
       const synced = { ...t, isDirty: false, isSynced: true };
@@ -251,6 +321,12 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       return synced;
     });
     set({ tasks: updatedTasks });
+
+    if (failures.length > 0) {
+      const failedList = failures.map((f) => f.jiraId).join(", ");
+      console.warn(`Some tasks failed to sync: ${failedList}`);
+      throw new Error(`Some tasks failed to sync: ${failedList}`);
+    }
   },
 
   getDirtyTaskCount: () => get().tasks.filter((t) => t.isDirty).length,

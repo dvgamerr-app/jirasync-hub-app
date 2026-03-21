@@ -6,20 +6,60 @@ import { CommandMenu } from "@/components/CommandMenu";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { MobileSidebar } from "@/components/MobileSidebar";
 import { useTaskStore } from "@/store/task-store";
-import { Search, CloudUpload, RefreshCw } from "lucide-react";
+import { Search, CloudUpload, RefreshCw, Download, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "@/hooks/use-toast";
 import { startBackgroundSync, syncNow, onSyncStatus } from "@/lib/sync-service";
 import { getJiraAccounts } from "@/lib/jira-db";
+import type { Task, WorkLog, Project } from "@/types/jira";
+
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+function exportToCSV(tasks: Task[], workLogs: WorkLog[], projects: Project[]) {
+  const header = ["FullName","Project","Month","Year","Type","Story Point","Serverity","Usage Time (min)","Ref URL","Note"];
+  const rowsData = workLogs
+    .map((log) => {
+      const task = tasks.find((t) => t.id === log.taskId);
+      if (!task) return null;
+      const project = projects.find((p) => p.id === task.projectId);
+      const date = new Date(log.logDate);
+      return [
+        task.assignee ?? "",
+        project?.name ?? "",
+        MONTHS[date.getMonth()],
+        date.getFullYear().toString(),
+        task.type ?? "",
+        task.storyLevel?.toString() ?? "",
+        task.severity ?? "NA",
+        log.timeSpentMinutes.toString(),
+        task.refUrl ?? "",
+        task.note ?? "",
+      ];
+    })
+    .filter((r): r is string[] => r !== null);
+
+  const escape = (v: string) =>
+    v.includes(",") || v.includes('"') || v.includes("\n") ? `"${v.replace(/"/g, '""')}"` : v;
+
+  const csv = [header, ...rowsData].map((row) => row.map(escape).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `jirasync-export-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 const Index = () => {
-  const { selectedTaskId, selectedProjectId, getFilteredTasks, projects, syncAllDirtyTasks, getDirtyTaskCount, loadFromDB, reloadFromDB, isLoaded } = useTaskStore();
+  const { selectedTaskId, selectedProjectId, getFilteredTasks, projects, workLogs, syncAllDirtyTasks, getDirtyTaskCount, loadFromDB, reloadFromDB, isLoaded } = useTaskStore();
   const tasks = getFilteredTasks();
   const currentProject = projects.find((p) => p.id === selectedProjectId);
   const isMobile = useIsMobile();
   const dirtyCount = getDirtyTaskCount();
   const [syncing, setSyncing] = useState(false);
+  const [exportDone, setExportDone] = useState(false);
 
   // Load data from IndexedDB on mount
   useEffect(() => {
@@ -29,10 +69,10 @@ const Index = () => {
   // Start background sync if Jira configured
   useEffect(() => {
     if (!isLoaded) return;
-    if (getJiraAccounts().length > 0) {
-      startBackgroundSync();
-    }
 
+    // Register listener BEFORE startBackgroundSync so we don't miss the
+    // synchronous notify("syncing") that fires inside syncNow() before its
+    // first await.
     const unsub = onSyncStatus((status, message) => {
       if (status === "syncing") setSyncing(true);
       else setSyncing(false);
@@ -44,6 +84,10 @@ const Index = () => {
         toast({ title: "Sync Failed", description: message, variant: "destructive" });
       }
     });
+
+    if (getJiraAccounts().length > 0) {
+      startBackgroundSync();
+    }
 
     return unsub;
   }, [isLoaded]);
@@ -87,11 +131,11 @@ const Index = () => {
             <Button
               variant="outline"
               size="sm"
-              className="h-7 gap-1.5 text-[12px]"
+              className={`h-7 gap-1.5 text-[12px] transition-all duration-300 ${syncing ? "border-primary ring-2 ring-primary/30 animate-pulse" : ""}`}
               onClick={handleManualSync}
               disabled={syncing}
             >
-              <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
+              <RefreshCw className={`h-3.5 w-3.5 transition-transform ${syncing ? "animate-spin" : ""}`} />
               <span className="hidden sm:inline">Sync</span>
             </Button>
 
@@ -115,6 +159,21 @@ const Index = () => {
                 </span>
               </Button>
             )}
+            <Button
+              variant="outline"
+              size="sm"
+              className={`h-7 gap-1.5 text-[12px] transition-all duration-300 ${exportDone ? "border-green-500 text-green-600 dark:text-green-400" : ""}`}
+              onClick={() => {
+                exportToCSV(tasks, workLogs, projects);
+                setExportDone(true);
+                setTimeout(() => setExportDone(false), 1500);
+              }}
+            >
+              {exportDone
+                ? <Check className="h-3.5 w-3.5" />
+                : <Download className="h-3.5 w-3.5" />}
+              <span className="hidden sm:inline">{exportDone ? "Done" : "Export"}</span>
+            </Button>
             <ThemeToggle />
             <MobileSidebar />
           </div>

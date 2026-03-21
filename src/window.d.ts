@@ -29,7 +29,6 @@ type AppRPCSchema = {
 			windowMinimize: { params: undefined; response: void };
 			windowMaximize: { params: undefined; response: void };
 			windowClose: { params: undefined; response: void };
-			windowSetFrame: { params: WindowBounds; response: void };
 			windowSetSize: { params: WindowSize; response: void };
 			windowGetFrame: { params: undefined; response: WindowBounds };
 			jiraFetch: { params: JiraFetchRequest; response: JiraFetchResponse };
