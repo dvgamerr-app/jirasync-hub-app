@@ -5,6 +5,7 @@ import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { CommandMenu } from "@/components/CommandMenu";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { MobileSidebar } from "@/components/MobileSidebar";
+import { ExportDialog } from "@/components/ExportDialog";
 import { JiraSettingsDialog } from "@/components/JiraSettings";
 import { useTaskStore } from "@/store/task-store";
 import {
@@ -12,7 +13,6 @@ import {
   CloudUpload,
   RefreshCw,
   Download,
-  Check,
   CheckCircle2,
   Server,
   Settings,
@@ -22,56 +22,6 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "@/hooks/use-toast";
 import { startBackgroundSync, syncNow, onSyncStatus } from "@/lib/sync-service";
 import { getJiraAccounts } from "@/lib/jira-db";
-import type { Task, WorkLog, Project } from "@/types/jira";
-
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-function exportToCSV(tasks: Task[], workLogs: WorkLog[], projects: Project[]) {
-  const header = [
-    "FullName",
-    "Project",
-    "Month",
-    "Year",
-    "Type",
-    "Story Point",
-    "Serverity",
-    "Usage Time (min)",
-    "Ref URL",
-    "Note",
-  ];
-  const rowsData = workLogs
-    .map((log) => {
-      const task = tasks.find((t) => t.id === log.taskId);
-      if (!task) return null;
-      const project = projects.find((p) => p.id === task.projectId);
-      const date = new Date(log.logDate);
-      return [
-        task.assignee ?? "",
-        project?.name ?? "",
-        MONTHS[date.getMonth()],
-        date.getFullYear().toString(),
-        task.type ?? "",
-        task.storyLevel?.toString() ?? "",
-        task.severity ?? "NA",
-        log.timeSpentMinutes.toString(),
-        task.refUrl ?? "",
-        task.note ?? "",
-      ];
-    })
-    .filter((r): r is string[] => r !== null);
-
-  const escape = (v: string) =>
-    v.includes(",") || v.includes('"') || v.includes("\n") ? `"${v.replace(/"/g, '""')}"` : v;
-
-  const csv = [header, ...rowsData].map((row) => row.map(escape).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `jirasync-export-${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 function EmptyTasksState({
   hasJiraAccounts,
@@ -139,7 +89,7 @@ const Index = () => {
   const isMobile = useIsMobile();
   const dirtyCount = getDirtyTaskCount();
   const [syncing, setSyncing] = useState(false);
-  const [exportDone, setExportDone] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [pushDone, setPushDone] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -275,20 +225,14 @@ const Index = () => {
             <Button
               variant="outline"
               size="sm"
-              className={`h-7 gap-1.5 text-[12px] transition-all duration-300 ${exportDone ? "border-green-500 text-green-600 dark:text-green-400" : ""}`}
+              className="h-7 gap-1.5 text-[12px] transition-all duration-300"
               disabled={tasks.length === 0}
               onClick={() => {
-                exportToCSV(tasks, workLogs, projects);
-                setExportDone(true);
-                setTimeout(() => setExportDone(false), 1500);
+                setExportDialogOpen(true);
               }}
             >
-              {exportDone ? (
-                <Check className="h-3.5 w-3.5" />
-              ) : (
-                <Download className="h-3.5 w-3.5" />
-              )}
-              <span className="hidden sm:inline">{exportDone ? "Done" : "Export"}</span>
+              <Download className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Export</span>
             </Button>
             <ThemeToggle />
             <MobileSidebar onOpenSettings={() => setSettingsOpen(true)} />
@@ -319,6 +263,13 @@ const Index = () => {
       </div>
 
       <CommandMenu />
+      <ExportDialog
+        open={exportDialogOpen}
+        onOpenChange={setExportDialogOpen}
+        tasks={tasks}
+        workLogs={workLogs}
+        projects={projects}
+      />
       <JiraSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   );

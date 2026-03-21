@@ -53,6 +53,12 @@ export async function testJiraConnection(account: JiraAccount): Promise<boolean>
   }
 }
 
+export async function fetchJiraMyselfDisplayName(account: JiraAccount): Promise<string> {
+  const res = await jiraFetch("myself", account);
+  const data = await res.json();
+  return data.displayName ?? account.name ?? account.email;
+}
+
 // Fetch all projects (paginated)
 export async function fetchJiraProjects(account: JiraAccount): Promise<Project[]> {
   const orgId = `org-${account.id}`;
