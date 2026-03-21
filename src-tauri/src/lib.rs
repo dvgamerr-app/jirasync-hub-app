@@ -1,4 +1,5 @@
-use tauri::{WebviewUrl, WebviewWindowBuilder};
+use tauri::{webview::PageLoadEvent, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_window_state::{Builder as WindowStateBuilder, StateFlags, WindowExt};
 
 #[cfg(target_os = "macos")]
 use tauri::TitleBarStyle;
@@ -12,12 +13,19 @@ const MIN_WINDOW_HEIGHT: f64 = 800.0;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(WindowStateBuilder::default().build())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let window_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title(WINDOW_TITLE)
                 .inner_size(WINDOW_WIDTH, WINDOW_HEIGHT)
-                .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT);
+                .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
+                .visible(false)
+                .on_page_load(|webview, payload| {
+                    if payload.event() == PageLoadEvent::Finished {
+                        let _ = webview.show();
+                    }
+                });
 
             #[cfg(target_os = "macos")]
             let window_builder = window_builder
@@ -27,11 +35,10 @@ pub fn run() {
             #[cfg(not(target_os = "macos"))]
             let window_builder = window_builder.decorations(false);
 
-            #[cfg(target_os = "macos")]
             let window = window_builder.build()?;
 
-            #[cfg(not(target_os = "macos"))]
-            let _window = window_builder.build()?;
+            // Restore saved window size + position (falls back to defaults on first launch)
+            window.restore_state(StateFlags::all())?;
 
             #[cfg(target_os = "macos")]
             {

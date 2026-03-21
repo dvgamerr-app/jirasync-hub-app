@@ -14,6 +14,14 @@
 
 ---
 
+## Platform Support Scope
+
+- ระบุการรองรับ/รับรองเฉพาะ **desktop**: `linux`, `macos`, `windows`
+- ไม่ต้องเขียนหรืออ้างว่าโปรเจกต์นี้รับรอง `android` หรือ `ios`
+- หากพบ asset หรือ dependency ของ mobile platform ใน lockfile / generated files ให้ถือว่าเป็น artifact ของ ecosystem ไม่ใช่ platform เป้าหมายของแอป
+
+---
+
 ## Project Structure
 
 ```text
@@ -70,7 +78,26 @@ wedo-jirasync-hub-app/
   - `.title_bar_style(TitleBarStyle::Transparent)`
 - Window background color is set from Rust via `cocoa`
 
-### Capability permissions
+### Tauri Plugins
+
+| Plugin | Crate | Purpose |
+|--------|-------|---------|
+| **opener** | `tauri-plugin-opener` | Opens external URLs via OS default handler. Used by `openExternal()` in `desktop.ts`. |
+| **window-state** | `tauri-plugin-window-state` | Persists window size, position, and maximized state to disk. State is restored automatically on next launch. Hooked via `WindowExt::restore_state(StateFlags::all())` inside `setup`. |
+
+---
+
+## Window State Persistence
+
+- Saved automatically when the window closes (plugin hooks into the close event).
+- Restored on startup inside `setup` via `window.restore_state(StateFlags::all())`.
+- `StateFlags::all()` covers: **size**, **position**, **maximized** — all three are preserved.
+- State file is written to the app's data directory by the plugin; no manual I/O needed.
+- Default size (`1280×800`) is used only on first launch when no saved state exists.
+
+---
+
+## Capability permissions
 
 `src-tauri/capabilities/default.json` grants:
 
@@ -80,6 +107,7 @@ wedo-jirasync-hub-app/
 - `core:window:allow-start-dragging`
 - `core:window:allow-start-resize-dragging`
 - `opener:default`
+- `window-state:default`
 
 ---
 

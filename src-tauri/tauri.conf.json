@@ -1,5 +1,5 @@
 {
-  "productName": "wedo-jirasync-hub-app",
+  "productName": "JiraSync Hub",
   "version": "0.1.0",
   "identifier": "com.scg.wedo.jirasync-hub",
   "build": {

@@ -11,15 +11,48 @@
     <script>
       (function () {
         var t = localStorage.getItem("theme");
-        if (t === "dark" || (!t && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+        var isDark = t === "dark" || (!t && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        if (isDark) {
           document.documentElement.classList.add("dark");
+          document.documentElement.style.background = "hsl(222, 25%, 8%)";
+        } else {
+          document.documentElement.style.background = "hsl(220, 20%, 97%)";
         }
       })();
     </script>
+
+    <style>
+      #app-loading {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        transition: opacity 0.3s ease;
+      }
+      #root:not(:empty) ~ #app-loading {
+        opacity: 0;
+      }
+      .app-loading-ring {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        border: 3px solid hsl(220 85% 55% / 0.2);
+        border-top-color: hsl(220 85% 55%);
+        animation: app-spin 0.7s linear infinite;
+      }
+      @keyframes app-spin {
+        to { transform: rotate(360deg); }
+      }
+    </style>
   </head>
 
   <body>
     <div id="root"></div>
+    <div id="app-loading">
+      <div class="app-loading-ring"></div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
