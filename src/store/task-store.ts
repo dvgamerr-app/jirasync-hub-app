@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { Organization, Project, Task, WorkLog, StoryLevel } from "@/types/jira";
+import { Organization, Project, Task, WorkLog, StoryLevel, TaskType, Severity } from "@/types/jira";
 import { mockOrganizations, mockProjects, mockTasks, mockWorkLogs } from "@/data/mock-data";
 
 interface TaskStore {
@@ -17,8 +17,16 @@ interface TaskStore {
   updateTaskStatus: (taskId: string, status: string) => void;
   updateTaskStoryLevel: (taskId: string, level: StoryLevel | null) => void;
   updateTaskMandays: (taskId: string, mandays: number | null) => void;
+  updateTaskType: (taskId: string, type: TaskType | null) => void;
+  updateTaskSeverity: (taskId: string, severity: Severity | null) => void;
+  updateTaskRefUrl: (taskId: string, refUrl: string | null) => void;
+  updateTaskNote: (taskId: string, note: string | null) => void;
 
   addWorkLog: (log: Omit<WorkLog, "id" | "createdAt">) => void;
+
+  syncTaskToJira: (taskId: string) => void;
+  syncAllDirtyTasks: () => void;
+  getDirtyTaskCount: () => number;
 
   getFilteredTasks: () => Task[];
   getStatusesForProject: (projectId: string) => string[];
@@ -26,6 +34,10 @@ interface TaskStore {
   getTaskById: (taskId: string) => Task | undefined;
   getProjectById: (projectId: string) => Project | undefined;
   getTotalTimeForTask: (taskId: string) => number;
+}
+
+function markDirty(task: Task, updates: Partial<Task>): Task {
+  return { ...task, ...updates, isDirty: true, updatedAt: new Date().toISOString() };
 }
 
 export const useTaskStore = create<TaskStore>((set, get) => ({
@@ -42,23 +54,37 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
 
   updateTaskStatus: (taskId, status) =>
     set((state) => ({
-      tasks: state.tasks.map((t) =>
-        t.id === taskId ? { ...t, status, updatedAt: new Date().toISOString() } : t
-      ),
+      tasks: state.tasks.map((t) => t.id === taskId ? markDirty(t, { status }) : t),
     })),
 
   updateTaskStoryLevel: (taskId, level) =>
     set((state) => ({
-      tasks: state.tasks.map((t) =>
-        t.id === taskId ? { ...t, storyLevel: level, updatedAt: new Date().toISOString() } : t
-      ),
+      tasks: state.tasks.map((t) => t.id === taskId ? markDirty(t, { storyLevel: level }) : t),
     })),
 
   updateTaskMandays: (taskId, mandays) =>
     set((state) => ({
-      tasks: state.tasks.map((t) =>
-        t.id === taskId ? { ...t, mandays, updatedAt: new Date().toISOString() } : t
-      ),
+      tasks: state.tasks.map((t) => t.id === taskId ? markDirty(t, { mandays }) : t),
+    })),
+
+  updateTaskType: (taskId, type) =>
+    set((state) => ({
+      tasks: state.tasks.map((t) => t.id === taskId ? markDirty(t, { type }) : t),
+    })),
+
+  updateTaskSeverity: (taskId, severity) =>
+    set((state) => ({
+      tasks: state.tasks.map((t) => t.id === taskId ? markDirty(t, { severity }) : t),
+    })),
+
+  updateTaskRefUrl: (taskId, refUrl) =>
+    set((state) => ({
+      tasks: state.tasks.map((t) => t.id === taskId ? markDirty(t, { refUrl }) : t),
+    })),
+
+  updateTaskNote: (taskId, note) =>
+    set((state) => ({
+      tasks: state.tasks.map((t) => t.id === taskId ? markDirty(t, { note }) : t),
     })),
 
   addWorkLog: (log) =>
@@ -68,6 +94,22 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         { ...log, id: `wl-${Date.now()}`, createdAt: new Date().toISOString() },
       ],
     })),
+
+  syncTaskToJira: (taskId) =>
+    set((state) => ({
+      tasks: state.tasks.map((t) =>
+        t.id === taskId ? { ...t, isDirty: false, isSynced: true } : t
+      ),
+    })),
+
+  syncAllDirtyTasks: () =>
+    set((state) => ({
+      tasks: state.tasks.map((t) =>
+        t.isDirty ? { ...t, isDirty: false, isSynced: true } : t
+      ),
+    })),
+
+  getDirtyTaskCount: () => get().tasks.filter((t) => t.isDirty).length,
 
   getFilteredTasks: () => {
     const { tasks, selectedProjectId } = get();

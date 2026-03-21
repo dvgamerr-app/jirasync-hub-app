@@ -13,6 +13,9 @@ export interface Project {
   availableStatuses: string[];
 }
 
+export type TaskType = 'Story' | 'Bug' | 'Task';
+export type Severity = 'Critical' | 'High' | 'Medium' | 'Low' | 'NA';
+
 export interface Task {
   id: string;
   projectId: string;
@@ -20,10 +23,15 @@ export interface Task {
   title: string;
   description: string | null;
   status: string | null;
-  storyLevel: 1 | 2 | 3 | 5 | null;
+  type: TaskType | null;
+  severity: Severity | null;
+  storyLevel: StoryLevel | null;
   mandays: number | null;
   assignee: string | null;
+  refUrl: string | null;
+  note: string | null;
   isSynced: boolean;
+  isDirty: boolean;
   createdAt: string;
   updatedAt: string;
 }

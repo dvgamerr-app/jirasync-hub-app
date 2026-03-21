@@ -5,15 +5,17 @@ import { CommandMenu } from "@/components/CommandMenu";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { MobileSidebar } from "@/components/MobileSidebar";
 import { useTaskStore } from "@/store/task-store";
-import { Search } from "lucide-react";
+import { Search, CloudUpload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { toast } from "@/hooks/use-toast";
 
 const Index = () => {
-  const { selectedTaskId, selectedProjectId, getFilteredTasks, projects } = useTaskStore();
+  const { selectedTaskId, selectedProjectId, getFilteredTasks, projects, syncAllDirtyTasks, getDirtyTaskCount } = useTaskStore();
   const tasks = getFilteredTasks();
   const currentProject = projects.find((p) => p.id === selectedProjectId);
   const isMobile = useIsMobile();
+  const dirtyCount = getDirtyTaskCount();
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
@@ -44,13 +46,29 @@ const Index = () => {
             </Button>
           </div>
           <div className="flex items-center gap-1">
+            {dirtyCount > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 text-[12px]"
+                onClick={() => {
+                  syncAllDirtyTasks();
+                  toast({ title: "Synced to Jira", description: `${dirtyCount} task(s) synced successfully` });
+                }}
+              >
+                <CloudUpload className="h-3.5 w-3.5" />
+                <span>Sync</span>
+                <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-warning text-[10px] font-semibold text-warning-foreground px-1">
+                  {dirtyCount}
+                </span>
+              </Button>
+            )}
             <ThemeToggle />
             <MobileSidebar />
           </div>
         </header>
 
         <div className="flex flex-1 overflow-hidden">
-          {/* On mobile, if task selected show detail full screen, else show table */}
           {isMobile ? (
             selectedTaskId ? (
               <TaskDetailPanel />
