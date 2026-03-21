@@ -17,9 +17,11 @@ interface TaskStore {
 
   selectedProjectId: string | null;
   selectedTaskId: string | null;
+  taskDetailViewMode: "details" | "description";
 
   setSelectedProject: (projectId: string | null) => void;
   setSelectedTask: (taskId: string | null) => void;
+  setTaskDetailViewMode: (mode: "details" | "description") => void;
 
   loadFromDB: () => Promise<void>;
   reloadFromDB: () => Promise<void>;
@@ -145,9 +147,11 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
 
   selectedProjectId: null,
   selectedTaskId: null,
+  taskDetailViewMode: "details",
 
   setSelectedProject: (projectId) => set({ selectedProjectId: projectId, selectedTaskId: null }),
   setSelectedTask: (taskId) => set({ selectedTaskId: taskId }),
+  setTaskDetailViewMode: (mode) => set({ taskDetailViewMode: mode }),
 
   loadFromDB: async () => {
     const accounts = getJiraAccounts();

@@ -5,7 +5,6 @@ import { StoryLevel, TaskType, Severity } from "@/types/jira";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -29,7 +28,7 @@ import { formatDistanceToNow } from "date-fns";
 import { toast } from "@/hooks/use-toast";
 import { openExternal } from "@/lib/desktop";
 import { LogWorkModal, formatMinutes, parseTimeInput } from "@/components/LogWorkModal";
-import { AdfRenderer, countAdfLines } from "@/components/AdfRenderer";
+import { AdfRenderer, hasAdfContent } from "@/components/AdfRenderer";
 
 const TASK_TYPES: TaskType[] = ["Story", "Bug", "Task"];
 const SEVERITIES: Severity[] = ["Critical", "High", "Medium", "Low", "NA"];
@@ -51,6 +50,8 @@ export function TaskDetailPanel() {
     addWorkLog,
     removeWorkLog,
     syncTaskToJira,
+    taskDetailViewMode,
+    setTaskDetailViewMode,
   } = useTaskStore();
 
   if (!selectedTaskId) return null;
@@ -62,17 +63,10 @@ export function TaskDetailPanel() {
   const statuses = getStatusesForProject(task.projectId);
   const workLogs = getWorkLogsForTask(task.id);
 
-  const descLines = task.description ? countAdfLines(task.description) : 0;
-  const longDescription = descLines > 5;
+  const activeView = taskDetailViewMode === "description" ? "description" : "details";
 
   const detailContent = (
     <>
-      <h2 className="text-base font-semibold leading-snug">{task.title}</h2>
-
-      {task.description && !longDescription && (
-        <AdfRenderer content={task.description} className="text-muted-foreground" />
-      )}
-
       {/* Fields Grid */}
       <div className="grid grid-cols-2 gap-3">
         {/* Type */}
@@ -256,6 +250,8 @@ export function TaskDetailPanel() {
     </>
   );
 
+  const descriptionContent = <AdfRenderer content={task.description ?? ""} className="text-muted-foreground" />;
+
   return (
     <div className="animate-slide-in-right flex h-full w-full flex-col border-l border-border bg-card md:w-[45vw] md:min-w-[360px] md:max-w-[600px]">
       {/* Header — sticky by flex-col layout */}
@@ -315,29 +311,26 @@ export function TaskDetailPanel() {
         </Button>
       </div>
 
-      {/* Content — tabs when description is long, plain scroll otherwise */}
-      {longDescription ? (
-        <Tabs defaultValue="details" className="flex flex-1 flex-col overflow-hidden">
-          <div className="shrink-0 px-4 pt-3">
-            <TabsList className="h-8">
-              <TabsTrigger value="details" className="h-7 px-3 text-[12px]">
-                Details
-              </TabsTrigger>
-              <TabsTrigger value="description" className="h-7 px-3 text-[12px]">
-                Description
-              </TabsTrigger>
-            </TabsList>
-          </div>
-          <TabsContent value="details" className="mt-0 flex-1 space-y-5 overflow-y-auto p-4 pt-3">
-            {detailContent}
-          </TabsContent>
-          <TabsContent value="description" className="mt-0 flex-1 overflow-y-auto p-4 pt-3">
-            <AdfRenderer content={task.description ?? ""} className="text-muted-foreground" />
-          </TabsContent>
-        </Tabs>
-      ) : (
-        <div className="flex-1 space-y-5 overflow-y-auto p-4">{detailContent}</div>
-      )}
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-4 py-3">
+        <h2 className="min-w-0 flex-1 text-base font-semibold leading-snug">{task.title}</h2>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-6 px-2 text-[11px]"
+            onClick={() =>
+              setTaskDetailViewMode(activeView === "description" ? "details" : "description")
+            }
+          >
+            {activeView === "description" ? "Hide Description" : "Show Description"}
+          </Button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4">
+        <div className="space-y-5">
+          {activeView === "description" && descriptionContent ? descriptionContent : detailContent}
+        </div>
+      </div>
     </div>
   );
 }
