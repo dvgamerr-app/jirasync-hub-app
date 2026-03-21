@@ -21,8 +21,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { LogWorkModal, formatMinutes, parseTimeInput } from "@/components/LogWorkModal";
+import { LogWorkModal } from "@/components/LogWorkModal";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { formatMinutes, parseTimeInput } from "@/lib/worklog-time";
 
 const TASK_TYPES: TaskType[] = ["Story", "Bug", "Task"];
 const SEVERITIES: Severity[] = ["Critical", "High", "Medium", "Low", "NA"];

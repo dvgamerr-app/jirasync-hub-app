@@ -35,29 +35,6 @@ function parseAdfDocument(content: string): AdfNode | null {
   return null;
 }
 
-function nodeHasVisibleContent(node: AdfNode): boolean {
-  switch (node.type) {
-    case "text":
-      return Boolean(node.text?.trim());
-    case "emoji":
-    case "mention":
-    case "status":
-    case "inlineCard":
-    case "blockCard":
-    case "media":
-    case "rule":
-      return true;
-    case "expand":
-    case "nestedExpand":
-      return (
-        Boolean((node.attrs?.title as string | undefined)?.trim()) ||
-        Boolean(node.content?.some(nodeHasVisibleContent))
-      );
-    default:
-      return Boolean(node.content?.some(nodeHasVisibleContent));
-  }
-}
-
 // ── Mark rendering ─────────────────────────────────────────────────────────────
 
 function applyMarks(text: string, marks?: AdfMark[]): React.ReactNode {
@@ -441,17 +418,6 @@ interface AdfRendererProps {
   className?: string;
 }
 
-export function hasAdfContent(content: string | null | undefined): boolean {
-  if (!content?.trim()) return false;
-
-  const adf = parseAdfDocument(content);
-  if (adf) {
-    return Boolean(adf.content?.some(nodeHasVisibleContent));
-  }
-
-  return true;
-}
-
 export function AdfRenderer({ content, className }: AdfRendererProps) {
   const adf = parseAdfDocument(content);
 
@@ -479,14 +445,4 @@ export function AdfRenderer({ content, className }: AdfRendererProps) {
       ))}
     </div>
   );
-}
-
-// ── Utility: count top-level "lines" for determining long/short layout ────────
-
-export function countAdfLines(text: string): number {
-  const adf = parseAdfDocument(text);
-  if (adf && Array.isArray(adf.content)) {
-    return adf.content.length;
-  }
-  return text.split("\n").filter((l) => l.trim() !== "").length;
 }

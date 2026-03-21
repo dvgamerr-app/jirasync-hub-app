@@ -27,8 +27,9 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "@/hooks/use-toast";
 import { openExternal } from "@/lib/desktop";
-import { LogWorkModal, formatMinutes, parseTimeInput } from "@/components/LogWorkModal";
+import { LogWorkModal } from "@/components/LogWorkModal";
 import { AdfRenderer } from "@/components/AdfRenderer";
+import { formatMinutes, parseTimeInput } from "@/lib/worklog-time";
 
 const TASK_TYPES: TaskType[] = ["Story", "Bug", "Task"];
 const SEVERITIES: Severity[] = ["Critical", "High", "Medium", "Low", "NA"];

@@ -19,6 +19,10 @@ function notify(status: SyncStatus, message?: string) {
   listeners.forEach((l) => l(status, message));
 }
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Sync failed";
+}
+
 export async function syncNow(): Promise<void> {
   if (isSyncing) {
     syncPending = true;
@@ -74,10 +78,10 @@ export async function syncNow(): Promise<void> {
 
           // Sync work logs: replace Jira-sourced logs, keep locally-created ones
           const freshLogs = worklogsByTaskId[task.id] ?? [];
-          const existing_wls = await db.workLogs.where("taskId").equals(task.id).toArray();
-          const jiraSourcedIds = existing_wls
-            .filter((wl: any) => !!wl.jiraWorklogId)
-            .map((wl: any) => wl.id);
+          const existingWorkLogs = await db.workLogs.where("taskId").equals(task.id).toArray();
+          const jiraSourcedIds = existingWorkLogs
+            .filter((wl) => Boolean(wl.jiraWorklogId))
+            .map((wl) => wl.id);
           if (jiraSourcedIds.length > 0) await db.workLogs.bulkDelete(jiraSourcedIds);
           if (freshLogs.length > 0) await db.workLogs.bulkPut(freshLogs);
         }
@@ -95,9 +99,9 @@ export async function syncNow(): Promise<void> {
       "success",
       `Synced ${totalProjects} project${totalProjects !== 1 ? "s" : ""} across ${accounts.length} account${accounts.length !== 1 ? "s" : ""}`,
     );
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Sync failed:", err);
-    notify("error", err.message ?? "Sync failed");
+    notify("error", getErrorMessage(err));
     throw err;
   } finally {
     isSyncing = false;
