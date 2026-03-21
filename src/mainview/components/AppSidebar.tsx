@@ -1,17 +1,17 @@
 import { useState, useEffect } from "react";
 import { useTaskStore } from "@/store/task-store";
 import { ChevronDown, FolderKanban, ListTodo, Settings, RefreshCw } from "lucide-react";
-import {
-  Collapsible, CollapsibleContent, CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { JiraSettingsDialog } from "@/components/JiraSettings";
 import { getLastSyncTime } from "@/lib/sync-service";
 import { formatDistanceToNow } from "date-fns";
 
-export function AppSidebar() {
+interface AppSidebarProps {
+  onOpenSettings: () => void;
+}
+
+export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
   const { organizations, projects, selectedProjectId, setSelectedProject } = useTaskStore();
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
 
   useEffect(() => {
@@ -36,7 +36,7 @@ export function AppSidebar() {
               "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] transition-colors duration-150",
               !selectedProjectId
                 ? "bg-primary/10 font-medium text-primary"
-                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
             )}
           >
             <ListTodo className="h-3.5 w-3.5" />
@@ -61,7 +61,7 @@ export function AppSidebar() {
                         "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] transition-colors duration-150",
                         selectedProjectId === project.id
                           ? "bg-primary/10 font-medium text-primary"
-                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                       )}
                     >
                       <FolderKanban className="h-3.5 w-3.5" />
@@ -78,7 +78,7 @@ export function AppSidebar() {
         </div>
 
         {/* Footer */}
-        <div className="border-t border-border px-3 py-2 space-y-1">
+        <div className="space-y-1 border-t border-border px-3 py-2">
           {lastSync && (
             <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
               <RefreshCw className="h-3 w-3" />
@@ -86,16 +86,14 @@ export function AppSidebar() {
             </div>
           )}
           <button
-            onClick={() => setSettingsOpen(true)}
-            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+            onClick={onOpenSettings}
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
           >
             <Settings className="h-3.5 w-3.5" />
             Jira Settings
           </button>
         </div>
       </aside>
-
-      <JiraSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </>
   );
 }

@@ -1,7 +1,7 @@
 # JiraSync Hub — Agent Knowledge Base
 
 > สรุปความรู้ทางเทคนิค สถาปัตยกรรม และ patterns ที่ verified แล้ว
-> อัปเดตล่าสุด: 2026-03-19
+> อัปเดตล่าสุด: 2026-03-20
 
 ---
 
@@ -30,7 +30,7 @@ jirasync-hub/
 │       └── types/jira.ts
 ├── package.json
 ├── vite.config.ts
-├── tailwind.config.js          ← Full shadcn theme (root)
+├── tailwind.config.ts          ← Tailwind config (root, shared by build + shadcn)
 ├── tsconfig.json               ← include src/bun, exclude src/mainview
 └── electrobun.config.ts
 ```
@@ -59,16 +59,19 @@ plugin: @vitejs/plugin-react-swc
 ## Electrobun Architecture
 
 ### Runtime separation
+
 - **Bun process** (`src/bun/index.ts`) — Node-like, has filesystem, crypto, network, full OS access
 - **WebView** (`src/mainview/`) — Browser sandbox, WebView2 on Windows
 
 ### Package imports
-| Context | Import |
-|---------|--------|
-| Bun process | `from "electrobun/bun"` |
+
+| Context           | Import                                                                    |
+| ----------------- | ------------------------------------------------------------------------- |
+| Bun process       | `from "electrobun/bun"`                                                   |
 | WebView (browser) | `from "electrobun/view"` ← only types; runtime impl is bundled separately |
 
 ### Critical: DO NOT `import("electrobun/view")` dynamically at runtime
+
 Vite cannot resolve `../shared/rpc.js → rpc.ts` inside node_modules at build time.
 The dynamic import will **fail silently** — `_rpc` stays `null`, all window controls break.
 
@@ -81,26 +84,33 @@ The dynamic import will **fail silently** — `_rpc` stays `null`, all window co
 Electrobun uses **AES-256-GCM encrypted JSON over WebSocket**.
 
 ### Connection
+
 ```
 ws://localhost:${window.__electrobunRpcSocketPort}/socket?webviewId=${window.__electrobunWebviewId}
 ```
 
 ### Message format (request from webview → bun)
+
 ```json
 { "type": "request", "id": 42, "method": "methodName", "params": { ... } }
 ```
+
 Encrypted before sending via `window.__electrobun_encrypt(json)`.
 
 ### Message format (response from bun → webview)
+
 ```json
 { "type": "response", "id": 42, "success": true, "payload": { ... } }
 ```
+
 Decrypted via `window.__electrobun_decrypt(encryptedData, iv, tag)`.
 
 ### Fallback path (when WS not yet open)
+
 `window.__electrobunBunBridge?.postMessage(rawJsonString)`
 
 ### Receiving responses from Bun (fallback via evaluateJS)
+
 `window.__electrobun.receiveMessageFromBun(msgObject)` — override this to intercept.
 
 ---
@@ -109,29 +119,35 @@ Decrypted via `window.__electrobun_decrypt(encryptedData, iv, tag)`.
 
 All handled in `defineElectrobunRPC<AppRPCSchema, "bun">`:
 
-| Method | Params | Response | Notes |
-|--------|--------|----------|-------|
-| `windowMinimize` | — | void | |
-| `windowMaximize` | — | void | also handles unmaximize |
-| `windowClose` | — | void | |
-| `windowSetFrame` | `{x,y,width,height}` | void | enforces MIN 1200×800 |
-| `windowGetFrame` | — | `{x,y,width,height}` | reads current native frame |
-| `jiraFetch` | `{url,method,headers,body?}` | `{status,body}` | proxies HTTP from Bun — no cookies |
+| Method           | Params                       | Response             | Notes                              |
+| ---------------- | ---------------------------- | -------------------- | ---------------------------------- |
+| `windowMinimize` | —                            | void                 |                                    |
+| `windowMaximize` | —                            | void                 | also handles unmaximize            |
+| `windowClose`    | —                            | void                 |                                    |
+| `windowSetFrame` | `{x,y,width,height}`         | void                 | enforces MIN 1200×800              |
+| `windowGetFrame` | —                            | `{x,y,width,height}` | reads current native frame         |
+| `jiraFetch`      | `{url,method,headers,body?}` | `{status,body}`      | proxies HTTP from Bun — no cookies |
 
 ### BrowserWindow events (bun side)
+
 ```typescript
-mainWindow.on("resize", (event: any) => { const { x,y,width,height } = event.data; });
-mainWindow.on("move",   (event: any) => { const { x, y } = event.data; });
+mainWindow.on("resize", (event: any) => {
+  const { x, y, width, height } = event.data;
+});
+mainWindow.on("move", (event: any) => {
+  const { x, y } = event.data;
+});
 ```
 
 ### BrowserWindow useful methods
+
 ```typescript
-mainWindow.getFrame()           // { x, y, width, height }
-mainWindow.setFrame(x,y,w,h)
-mainWindow.setSize(w, h)
-mainWindow.setPosition(x, y)
-mainWindow.minimize() / maximize() / unmaximize() / close()
-mainWindow.isMaximized() / isMinimized()
+mainWindow.getFrame(); // { x, y, width, height }
+mainWindow.setFrame(x, y, w, h);
+mainWindow.setSize(w, h);
+mainWindow.setPosition(x, y);
+mainWindow.minimize() / maximize() / unmaximize() / close();
+mainWindow.isMaximized() / isMinimized();
 ```
 
 ---
@@ -139,6 +155,7 @@ mainWindow.isMaximized() / isMinimized()
 ## Window State Persistence
 
 Saved to `%APPDATA%\JiraSyncHub\window-state.json` (Windows).
+
 - Load on startup with `Bun.file(stateFile).toString()` (sync-like async)
 - Save with 500ms debounce on resize/move events
 - Min size: 1200×800 enforced on resize callback
@@ -162,13 +179,15 @@ style={{ cursor: "e-resize" /* or s-resize, se-resize */ }}
 ## Jira API — Current Endpoints (March 2026)
 
 ### DEPRECATED / REMOVED (DO NOT USE)
-| Endpoint | Status | Replacement |
-|----------|--------|-------------|
-| `GET /rest/api/3/search?jql=...` | **410 REMOVED** | `POST /rest/api/3/search/jql` |
-| `POST /rest/api/3/search` | **410 REMOVED** | `POST /rest/api/3/search/jql` |
-| `GET /rest/api/3/project` | **DEPRECATED** | `GET /rest/api/3/project/search` |
+
+| Endpoint                         | Status          | Replacement                      |
+| -------------------------------- | --------------- | -------------------------------- |
+| `GET /rest/api/3/search?jql=...` | **410 REMOVED** | `POST /rest/api/3/search/jql`    |
+| `POST /rest/api/3/search`        | **410 REMOVED** | `POST /rest/api/3/search/jql`    |
+| `GET /rest/api/3/project`        | **DEPRECATED**  | `GET /rest/api/3/project/search` |
 
 ### Current endpoints used
+
 ```
 GET  /rest/api/3/myself                    — test connection / current user
 GET  /rest/api/3/serverInfo                — instance info
@@ -181,21 +200,37 @@ POST /rest/api/3/issue/{key}/worklog       — add worklog entry
 ```
 
 ### search/jql request body
+
 ```json
 {
   "jql": "project = HSP ORDER BY updated DESC",
   "maxResults": 100,
-  "fields": ["summary", "status", "issuetype", "priority", "assignee", "description", "created", "updated", "customfield_10016", "parent"],
+  "fields": [
+    "summary",
+    "status",
+    "issuetype",
+    "priority",
+    "assignee",
+    "description",
+    "created",
+    "updated",
+    "customfield_10016",
+    "parent"
+  ],
   "nextPageToken": "<cursor from previous response>"
 }
 ```
 
 ### search/jql pagination
+
 Response: `{ issues[], isLast: boolean, nextPageToken?: string }`
+
 - Loop until `isLast === true` OR `nextPageToken` is absent
 
 ### project/search pagination
+
 Response: `{ values[], isLast: boolean, startAt, maxResults, total }`
+
 - Loop with `startAt += maxResults` until `isLast === true`
 
 ---
@@ -207,6 +242,7 @@ Response: `{ values[], isLast: boolean, startAt, maxResults, total }`
 **`credentials: "omit"` is NOT sufficient** in WebView2 — Edge may still inject cookies.
 
 **Only reliable fix:** Route all Jira API calls through the Bun process via RPC.
+
 ```typescript
 // Bun has no cookie store — clean HTTP requests, no XSRF
 const result = await bunJiraFetch(url, method, headers, body);
@@ -252,14 +288,15 @@ interface JiraAccount {
 ## Dexie (IndexedDB) Schema
 
 ```typescript
-db.organizations  // { id, name, jiraInstanceUrl, lastSyncedAt }
-db.projects       // { id, orgId, name, jiraProjectKey, availableStatuses[] }
-db.tasks          // { id, projectId, jiraTaskId, title, ... isDirty, isSynced }
-db.workLogs
-db.syncMeta       // { id: "last-sync", lastSyncedAt, nextSyncAt }
+db.organizations; // { id, name, jiraInstanceUrl, lastSyncedAt }
+db.projects; // { id, orgId, name, jiraProjectKey, availableStatuses[] }
+db.tasks; // { id, projectId, jiraTaskId, title, ... isDirty, isSynced }
+db.workLogs;
+db.syncMeta; // { id: "last-sync", lastSyncedAt, nextSyncAt }
 ```
 
 ID namespacing (per account to avoid collisions):
+
 - Project: `proj-${account.id}-${projectKey}`
 - Task: `task-${account.id}-${issueKey}`
 - Org: `org-${account.id}`
@@ -306,6 +343,7 @@ bun run lint          # eslint src/mainview
 ```
 
 ### HMR Setup
+
 Electrobun checks if `http://localhost:5173` is accessible on startup.
 If yes → loads Vite dev server (live reload). If no → loads `views://mainview/index.html`.
 
@@ -326,16 +364,16 @@ That's why `"dev"` script is `vite build && electrobun dev --watch`.
 
 ---
 
-## tailwind.config.js (Root)
+## tailwind.config.ts (Root)
 
 - `darkMode: "class"` — toggled via `.dark` on `<html>`
-- `content: ["./src/mainview/**/*.{html,js,ts,jsx,tsx}"]`
+- `content: ["./src/**/*.{html,js,ts,jsx,tsx}"]`
 - Full shadcn CSS vars: `background`, `foreground`, `border`, `sidebar-*`, etc.
 - Uses `tailwindcss-animate` plugin
 
-**There are TWO tailwind configs:**
-- `tailwind.config.js` (root) — used by Vite build
-- `src/mainview/tailwind.config.ts` — used by local tooling (shadcn CLI, etc.)
+**There is ONE Tailwind config:**
+
+- `tailwind.config.ts` (root) — used by Vite build and local tooling (including shadcn CLI)
 
 ---
 

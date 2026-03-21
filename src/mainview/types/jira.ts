@@ -13,8 +13,8 @@ export interface Project {
   availableStatuses: string[];
 }
 
-export type TaskType = 'Story' | 'Bug' | 'Task';
-export type Severity = 'Critical' | 'High' | 'Medium' | 'Low' | 'NA';
+export type TaskType = "Story" | "Bug" | "Task";
+export type Severity = "Critical" | "High" | "Medium" | "Low" | "NA";
 
 export interface Task {
   id: string;

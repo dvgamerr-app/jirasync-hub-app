@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
 import { useTaskStore } from "@/store/task-store";
 import {
-  CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
 } from "@/components/ui/command";
 
 export function CommandMenu() {
@@ -41,7 +46,9 @@ export function CommandMenu() {
               onSelect={() => handleSelectTask(task.id)}
               className="text-[13px]"
             >
-              <span className="mr-2 font-mono text-[11px] text-muted-foreground">{task.jiraTaskId}</span>
+              <span className="mr-2 font-mono text-[11px] text-muted-foreground">
+                {task.jiraTaskId}
+              </span>
               {task.title}
             </CommandItem>
           ))}
@@ -58,7 +65,9 @@ export function CommandMenu() {
               }}
               className="text-[13px]"
             >
-              <span className="mr-2 font-mono text-[11px] text-muted-foreground">{project.jiraProjectKey}</span>
+              <span className="mr-2 font-mono text-[11px] text-muted-foreground">
+                {project.jiraProjectKey}
+              </span>
               {project.name}
             </CommandItem>
           ))}

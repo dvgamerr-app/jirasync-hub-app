@@ -14,13 +14,28 @@ const queryClient = new QueryClient();
 type ResizeDir = "e" | "s" | "se";
 
 function ResizeHandles() {
-  const startRef = useRef<{ mouseX: number; mouseY: number; startW: number; startH: number; dir: ResizeDir } | null>(null);
+  const startRef = useRef<{
+    mouseX: number;
+    mouseY: number;
+    startW: number;
+    startH: number;
+    dir: ResizeDir;
+  } | null>(null);
   const rafRef = useRef<number | null>(null);
 
-  const onMouseDown = useCallback((dir: ResizeDir) => (e: React.MouseEvent) => {
-    e.preventDefault();
-    startRef.current = { mouseX: e.screenX, mouseY: e.screenY, startW: lastKnownFrame.width, startH: lastKnownFrame.height, dir };
-  }, []);
+  const onMouseDown = useCallback(
+    (dir: ResizeDir) => (e: React.MouseEvent) => {
+      e.preventDefault();
+      startRef.current = {
+        mouseX: e.screenX,
+        mouseY: e.screenY,
+        startW: lastKnownFrame.width,
+        startH: lastKnownFrame.height,
+        dir,
+      };
+    },
+    [],
+  );
 
   useEffect(() => {
     function onMove(e: MouseEvent) {
@@ -33,23 +48,42 @@ function ResizeHandles() {
       if (s.dir === "e" || s.dir === "se") w = Math.max(1200, s.startW + dx);
       if (s.dir === "s" || s.dir === "se") h = Math.max(800, s.startH + dy);
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-      rafRef.current = requestAnimationFrame(() => { setWindowSize(w, h); });
+      rafRef.current = requestAnimationFrame(() => {
+        setWindowSize(w, h);
+      });
     }
-    function onUp() { startRef.current = null; }
+    function onUp() {
+      startRef.current = null;
+    }
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
-    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
   }, []);
 
   const edge = "fixed z-[9999] select-none";
   return (
     <>
       {/* Right edge */}
-      <div className={edge} style={{ top: 0, right: 0, width: 6, bottom: 6, cursor: "e-resize" }} onMouseDown={onMouseDown("e")} />
+      <div
+        className={edge}
+        style={{ top: 0, right: 0, width: 6, bottom: 6, cursor: "e-resize" }}
+        onMouseDown={onMouseDown("e")}
+      />
       {/* Bottom edge */}
-      <div className={edge} style={{ bottom: 0, left: 0, right: 6, height: 6, cursor: "s-resize" }} onMouseDown={onMouseDown("s")} />
+      <div
+        className={edge}
+        style={{ bottom: 0, left: 0, right: 6, height: 6, cursor: "s-resize" }}
+        onMouseDown={onMouseDown("s")}
+      />
       {/* Bottom-right corner */}
-      <div className={edge} style={{ bottom: 0, right: 0, width: 12, height: 12, cursor: "se-resize" }} onMouseDown={onMouseDown("se")} />
+      <div
+        className={edge}
+        style={{ bottom: 0, right: 0, width: 12, height: 12, cursor: "se-resize" }}
+        onMouseDown={onMouseDown("se")}
+      />
     </>
   );
 }

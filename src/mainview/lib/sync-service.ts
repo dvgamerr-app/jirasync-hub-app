@@ -3,6 +3,7 @@ import { fetchJiraOrganization, fetchJiraProjects, fetchJiraIssues } from "./jir
 
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let isSyncing = false;
+let syncPending = false;
 
 export type SyncStatus = "idle" | "syncing" | "success" | "error";
 type SyncListener = (status: SyncStatus, message?: string) => void;
@@ -19,7 +20,10 @@ function notify(status: SyncStatus, message?: string) {
 }
 
 export async function syncNow(): Promise<void> {
-  if (isSyncing) return;
+  if (isSyncing) {
+    syncPending = true;
+    return;
+  }
   const accounts = getJiraAccounts();
   if (accounts.length === 0) return;
 
@@ -39,7 +43,10 @@ export async function syncNow(): Promise<void> {
 
       // 3. For each project, fetch issues assigned to current user — skip projects with none
       for (const project of projects) {
-        const { tasks, statuses, worklogsByTaskId } = await fetchJiraIssues(account, project.jiraProjectKey);
+        const { tasks, statuses, worklogsByTaskId } = await fetchJiraIssues(
+          account,
+          project.jiraProjectKey,
+        );
         if (tasks.length === 0) continue;
 
         totalProjects++;
@@ -84,13 +91,20 @@ export async function syncNow(): Promise<void> {
       nextSyncAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     });
 
-    notify("success", `Synced ${totalProjects} project${totalProjects !== 1 ? "s" : ""} across ${accounts.length} account${accounts.length !== 1 ? "s" : ""}`);
+    notify(
+      "success",
+      `Synced ${totalProjects} project${totalProjects !== 1 ? "s" : ""} across ${accounts.length} account${accounts.length !== 1 ? "s" : ""}`,
+    );
   } catch (err: any) {
     console.error("Sync failed:", err);
     notify("error", err.message ?? "Sync failed");
     throw err;
   } finally {
     isSyncing = false;
+    if (syncPending) {
+      syncPending = false;
+      syncNow().catch(() => { });
+    }
   }
 }
 
@@ -100,10 +114,13 @@ export function startBackgroundSync() {
   if (accounts.length === 0) return;
 
   // Sync immediately, then every hour
-  syncNow().catch(() => {});
-  syncInterval = setInterval(() => {
-    syncNow().catch(() => {});
-  }, 60 * 60 * 1000);
+  syncNow().catch(() => { });
+  syncInterval = setInterval(
+    () => {
+      syncNow().catch(() => { });
+    },
+    60 * 60 * 1000,
+  );
 }
 
 export function stopBackgroundSync() {
@@ -117,4 +134,3 @@ export async function getLastSyncTime(): Promise<string | null> {
   const meta = await db.syncMeta.get("last-sync");
   return meta?.lastSyncedAt ?? null;
 }
-

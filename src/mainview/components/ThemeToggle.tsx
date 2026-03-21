@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 export function ThemeToggle() {
   // index.html inline script already applied the class before first paint —
   // just read the current DOM state as the initial value.
-  const [dark, setDark] = useState(() =>
-    typeof window !== "undefined" && document.documentElement.classList.contains("dark")
+  const [dark, setDark] = useState(
+    () => typeof window !== "undefined" && document.documentElement.classList.contains("dark"),
   );
 
   useEffect(() => {
@@ -21,12 +21,7 @@ export function ThemeToggle() {
   }, [dark]);
 
   return (
-    <Button
-      variant="ghost"
-      size="icon"
-      className="h-7 w-7"
-      onClick={() => setDark((d) => !d)}
-    >
+    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDark((d) => !d)}>
       {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
     </Button>
   );

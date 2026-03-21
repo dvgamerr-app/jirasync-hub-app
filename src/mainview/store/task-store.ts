@@ -1,8 +1,12 @@
 import { create } from "zustand";
 import { Organization, Project, Task, WorkLog, StoryLevel, TaskType, Severity } from "@/types/jira";
 import { db, getJiraAccounts, type JiraAccount } from "@/lib/jira-db";
-import { mockOrganizations, mockProjects, mockTasks, mockWorkLogs } from "@/data/mock-data";
-import { updateJiraIssue, transitionJiraIssue, addJiraWorkLog, deleteJiraWorkLog } from "@/lib/jira-api";
+import {
+  updateJiraIssue,
+  transitionJiraIssue,
+  addJiraWorkLog,
+  deleteJiraWorkLog,
+} from "@/lib/jira-api";
 
 interface TaskStore {
   organizations: Organization[];
@@ -61,8 +65,9 @@ function getAccountForTask(task: Task, accounts: JiraAccount[]): JiraAccount | u
 async function pushTaskToJira(task: Task, accounts: JiraAccount[]): Promise<void> {
   const account = getAccountForTask(task, accounts);
   if (!account) return;
-  const fields: Record<string, any> = {};
-  if (task.storyLevel !== null) fields.customfield_10016 = task.storyLevel;
+  const fields: Record<string, unknown> = {};
+  // Always send customfield_10016 — null clears story points in Jira
+  fields.customfield_10016 = task.storyLevel ?? null;
   if (task.severity && task.severity !== "NA" && SEVERITY_TO_PRIORITY[task.severity]) {
     fields.priority = { name: SEVERITY_TO_PRIORITY[task.severity] };
   }
@@ -99,9 +104,10 @@ async function pushTaskToJira(task: Task, accounts: JiraAccount[]): Promise<void
   if (Object.keys(fields).length > 0) {
     try {
       await updateJiraIssue(account, task.jiraTaskId, fields);
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       console.error(`Failed updating issue ${task.jiraTaskId}:`, err);
-      throw new Error(`Failed updating ${task.jiraTaskId}: ${err?.message ?? String(err)}`);
+      throw new Error(`Failed updating ${task.jiraTaskId}: ${message}`);
     }
   }
   if (task.status) {
@@ -116,6 +122,18 @@ function markDirty(task: Task, updates: Partial<Task>): Task {
   // Persist to IndexedDB
   db.tasks.put(updated).catch(console.error);
   return updated;
+}
+
+function isOrganizationForAccounts(orgId: string, accountIds: string[]): boolean {
+  return accountIds.some((id) => orgId === `org-${id}`);
+}
+
+function isProjectForAccounts(projectId: string, accountIds: string[]): boolean {
+  return accountIds.some((id) => projectId.startsWith(`proj-${id}-`));
+}
+
+function isTaskForAccounts(taskId: string, accountIds: string[]): boolean {
+  return accountIds.some((id) => taskId.startsWith(`task-${id}-`));
 }
 
 export const useTaskStore = create<TaskStore>((set, get) => ({
@@ -133,84 +151,105 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
 
   loadFromDB: async () => {
     const accounts = getJiraAccounts();
-    const hasAccounts = accounts.length > 0;
-    const taskCount = await db.tasks.count();
+    const accountIds: string[] = accounts.map((a: JiraAccount) => a.id);
 
-    if (hasAccounts && taskCount > 0) {
-      // Load from IndexedDB — filter to only tasks/projects belonging to current accounts
-      const accountIds: string[] = accounts.map((a: JiraAccount) => a.id);
-      const [organizations, projects, allTasks, workLogs] = await Promise.all([
-        db.organizations.toArray(),
-        db.projects.toArray(),
-        db.tasks.toArray(),
-        db.workLogs.toArray(),
-      ]);
-      const tasks = allTasks.filter((t: Task) => accountIds.some((id: string) => t.id.startsWith(`task-${id}-`)));
-      set({ organizations, projects, tasks, workLogs, isLoaded: true });
-    } else if (!hasAccounts) {
-      // No Jira configured — use mock data
+    if (accountIds.length === 0) {
       set({
-        organizations: mockOrganizations,
-        projects: mockProjects,
-        tasks: mockTasks,
-        workLogs: mockWorkLogs,
+        organizations: [],
+        projects: [],
+        tasks: [],
+        workLogs: [],
         isLoaded: true,
       });
-    } else {
-      // Jira configured but no data yet — empty state, sync will populate
-      set({ organizations: [], projects: [], tasks: [], workLogs: [], isLoaded: true });
+      return;
     }
-  },
 
-  reloadFromDB: async () => {
-    const accountIds: string[] = getJiraAccounts().map((a: JiraAccount) => a.id);
-    const [organizations, projects, allTasks, workLogs] = await Promise.all([
+    const [allOrganizations, allProjects, allTasks, allWorkLogs] = await Promise.all([
       db.organizations.toArray(),
       db.projects.toArray(),
       db.tasks.toArray(),
       db.workLogs.toArray(),
     ]);
-    const tasks = allTasks.filter((t: Task) => accountIds.some((id: string) => t.id.startsWith(`task-${id}-`)));
+
+    const organizations = allOrganizations.filter((org: Organization) =>
+      isOrganizationForAccounts(org.id, accountIds),
+    );
+    const projects = allProjects.filter((project: Project) =>
+      isProjectForAccounts(project.id, accountIds),
+    );
+    const tasks = allTasks.filter((task: Task) => isTaskForAccounts(task.id, accountIds));
+    const workLogs = allWorkLogs.filter((workLog: WorkLog) =>
+      isTaskForAccounts(workLog.taskId, accountIds),
+    );
+
+    set({ organizations, projects, tasks, workLogs, isLoaded: true });
+  },
+
+  reloadFromDB: async () => {
+    const accountIds: string[] = getJiraAccounts().map((a: JiraAccount) => a.id);
+    const [allOrganizations, allProjects, allTasks, allWorkLogs] = await Promise.all([
+      db.organizations.toArray(),
+      db.projects.toArray(),
+      db.tasks.toArray(),
+      db.workLogs.toArray(),
+    ]);
+
+    const organizations = allOrganizations.filter((org: Organization) =>
+      isOrganizationForAccounts(org.id, accountIds),
+    );
+    const projects = allProjects.filter((project: Project) =>
+      isProjectForAccounts(project.id, accountIds),
+    );
+    const tasks = allTasks.filter((task: Task) => isTaskForAccounts(task.id, accountIds));
+    const workLogs = allWorkLogs.filter((workLog: WorkLog) =>
+      isTaskForAccounts(workLog.taskId, accountIds),
+    );
+
     set({ organizations, projects, tasks, workLogs });
   },
 
   updateTaskStatus: (taskId, status) =>
     set((state) => ({
-      tasks: state.tasks.map((t) => t.id === taskId ? markDirty(t, { status }) : t),
+      tasks: state.tasks.map((t) => (t.id === taskId ? markDirty(t, { status }) : t)),
     })),
 
   updateTaskStoryLevel: (taskId, level) =>
     set((state) => ({
-      tasks: state.tasks.map((t) => t.id === taskId ? markDirty(t, { storyLevel: level }) : t),
+      tasks: state.tasks.map((t) => (t.id === taskId ? markDirty(t, { storyLevel: level }) : t)),
     })),
 
   updateTaskMandays: (taskId, mandays) =>
     set((state) => ({
-      tasks: state.tasks.map((t) => t.id === taskId ? markDirty(t, { mandays }) : t),
+      tasks: state.tasks.map((t) => (t.id === taskId ? markDirty(t, { mandays }) : t)),
     })),
 
   updateTaskType: (taskId, type) =>
     set((state) => ({
-      tasks: state.tasks.map((t) => t.id === taskId ? markDirty(t, { type }) : t),
+      tasks: state.tasks.map((t) => (t.id === taskId ? markDirty(t, { type }) : t)),
     })),
 
   updateTaskSeverity: (taskId, severity) =>
     set((state) => ({
-      tasks: state.tasks.map((t) => t.id === taskId ? markDirty(t, { severity }) : t),
+      tasks: state.tasks.map((t) => (t.id === taskId ? markDirty(t, { severity }) : t)),
     })),
 
   updateTaskRefUrl: (taskId, refUrl) =>
     set((state) => ({
-      tasks: state.tasks.map((t) => t.id === taskId ? markDirty(t, { refUrl }) : t),
+      tasks: state.tasks.map((t) => (t.id === taskId ? markDirty(t, { refUrl }) : t)),
     })),
 
   updateTaskNote: (taskId, note) =>
     set((state) => ({
-      tasks: state.tasks.map((t) => t.id === taskId ? markDirty(t, { note }) : t),
+      tasks: state.tasks.map((t) => (t.id === taskId ? markDirty(t, { note }) : t)),
     })),
 
   addWorkLog: (log) => {
-    const newLog: WorkLog = { ...log, id: `wl-${Date.now()}`, createdAt: new Date().toISOString(), jiraWorklogId: null };
+    const newLog: WorkLog = {
+      ...log,
+      id: `wl-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      jiraWorklogId: null,
+    };
     db.workLogs.put(newLog).catch(console.error);
     set((state) => ({ workLogs: [...state.workLogs, newLog] }));
 
@@ -218,7 +257,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     const task = get().tasks.find((t) => t.id === log.taskId);
     if (task) {
       const dirtyTask = markDirty(task, {});
-      set((state) => ({ tasks: state.tasks.map((t) => t.id === task.id ? dirtyTask : t) }));
+      set((state) => ({ tasks: state.tasks.map((t) => (t.id === task.id ? dirtyTask : t)) }));
 
       const account = getAccountForTask(task, getJiraAccounts());
       if (account) {
@@ -228,7 +267,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
               const updated = { ...newLog, jiraWorklogId: jiraId };
               await db.workLogs.put(updated);
               set((state) => ({
-                workLogs: state.workLogs.map((wl) => wl.id === newLog.id ? updated : wl),
+                workLogs: state.workLogs.map((wl) => (wl.id === newLog.id ? updated : wl)),
               }));
             }
             // Clear dirty now that Jira confirmed
@@ -236,7 +275,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
             if (current && current.isDirty) {
               const synced = { ...current, isDirty: false, isSynced: true };
               await db.tasks.put(synced);
-              set((state) => ({ tasks: state.tasks.map((t) => t.id === synced.id ? synced : t) }));
+              set((state) => ({
+                tasks: state.tasks.map((t) => (t.id === synced.id ? synced : t)),
+              }));
             }
           })
           .catch(console.error);
@@ -253,7 +294,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     const task = log ? get().tasks.find((t) => t.id === log.taskId) : undefined;
     if (task) {
       const dirtyTask = markDirty(task, {});
-      set((state) => ({ tasks: state.tasks.map((t) => t.id === task.id ? dirtyTask : t) }));
+      set((state) => ({ tasks: state.tasks.map((t) => (t.id === task.id ? dirtyTask : t)) }));
     }
 
     // Delete from Jira in background if we have the Jira worklog ID
@@ -269,7 +310,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
               if (current && current.isDirty) {
                 const synced = { ...current, isDirty: false, isSynced: true };
                 await db.tasks.put(synced);
-                set((state) => ({ tasks: state.tasks.map((t) => t.id === synced.id ? synced : t) }));
+                set((state) => ({
+                  tasks: state.tasks.map((t) => (t.id === synced.id ? synced : t)),
+                }));
               }
             })
             .catch(console.error);
@@ -281,7 +324,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       if (current) {
         const synced = { ...current, isDirty: false };
         db.tasks.put(synced).catch(console.error);
-        set((state) => ({ tasks: state.tasks.map((t) => t.id === synced.id ? synced : t) }));
+        set((state) => ({ tasks: state.tasks.map((t) => (t.id === synced.id ? synced : t)) }));
       }
     }
   },
@@ -293,7 +336,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     await pushTaskToJira(task, accounts);
     const synced = { ...task, isDirty: false, isSynced: true };
     await db.tasks.put(synced);
-    set((state) => ({ tasks: state.tasks.map((t) => t.id === taskId ? synced : t) }));
+    set((state) => ({ tasks: state.tasks.map((t) => (t.id === taskId ? synced : t)) }));
   },
 
   syncAllDirtyTasks: async () => {
@@ -306,10 +349,14 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     );
 
     // Collect failures for reporting
-    const failures: { id: string; jiraId: string; reason: any }[] = [];
+    const failures: { id: string; jiraId: string; reason: unknown }[] = [];
     settled.forEach((res, i) => {
       if (res.status === "rejected") {
-        failures.push({ id: dirtyTasks[i].id, jiraId: dirtyTasks[i].jiraTaskId, reason: res.reason });
+        failures.push({
+          id: dirtyTasks[i].id,
+          jiraId: dirtyTasks[i].jiraTaskId,
+          reason: res.reason,
+        });
         console.error(`Sync failed for ${dirtyTasks[i].jiraTaskId}:`, res.reason);
       }
     });
@@ -342,9 +389,13 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     return project?.availableStatuses ?? [];
   },
   getWorkLogsForTask: (taskId) =>
-    get().workLogs.filter((wl) => wl.taskId === taskId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    get()
+      .workLogs.filter((wl) => wl.taskId === taskId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
   getTaskById: (taskId) => get().tasks.find((t) => t.id === taskId),
   getProjectById: (projectId) => get().projects.find((p) => p.id === projectId),
   getTotalTimeForTask: (taskId) =>
-    get().workLogs.filter((wl) => wl.taskId === taskId).reduce((sum, wl) => sum + wl.timeSpentMinutes, 0),
+    get()
+      .workLogs.filter((wl) => wl.taskId === taskId)
+      .reduce((sum, wl) => sum + wl.timeSpentMinutes, 0),
 }));

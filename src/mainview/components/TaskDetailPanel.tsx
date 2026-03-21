@@ -1,11 +1,28 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTaskStore } from "@/store/task-store";
 import { StatusBadge } from "@/components/StatusBadge";
 import { StoryLevel, TaskType, Severity } from "@/types/jira";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { X, Clock, CloudOff, Cloud, CloudUpload, ExternalLink, Bug, BookOpen, ClipboardList, Trash2 } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  X,
+  Clock,
+  CloudOff,
+  Cloud,
+  CloudUpload,
+  ExternalLink,
+  Bug,
+  BookOpen,
+  ClipboardList,
+  Trash2,
+} from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "@/hooks/use-toast";
 import { openExternal } from "@/lib/window-rpc";
@@ -44,7 +61,7 @@ export function TaskDetailPanel() {
   const workLogs = getWorkLogsForTask(task.id);
 
   return (
-    <div className="flex h-full w-full md:w-[45vw] md:min-w-[360px] md:max-w-[600px] flex-col border-l border-border bg-card animate-slide-in-right">
+    <div className="animate-slide-in-right flex h-full w-full flex-col border-l border-border bg-card md:w-[45vw] md:min-w-[360px] md:max-w-[600px]">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
@@ -52,21 +69,25 @@ export function TaskDetailPanel() {
             {task.jiraTaskId}
           </span>
           {task.isSynced ? (
-            <Cloud className="h-3.5 w-3.5 text-success" />
+            <Cloud className="text-success h-3.5 w-3.5" />
           ) : (
-            <CloudOff className="h-3.5 w-3.5 text-warning" />
+            <CloudOff className="text-warning h-3.5 w-3.5" />
           )}
           {task.isDirty && (
             <Button
               variant="outline"
               size="sm"
-              className="h-6 gap-1 text-[11px] px-2"
+              className="h-6 gap-1 px-2 text-[11px]"
               onClick={async () => {
                 try {
                   await syncTaskToJira(task.id);
                   toast({ title: "Synced to Jira", description: `${task.jiraTaskId} synced` });
                 } catch {
-                  toast({ title: "Sync failed", description: `Could not sync ${task.jiraTaskId}`, variant: "destructive" });
+                  toast({
+                    title: "Sync failed",
+                    description: `Could not sync ${task.jiraTaskId}`,
+                    variant: "destructive",
+                  });
                 }
               }}
             >
@@ -75,13 +96,18 @@ export function TaskDetailPanel() {
             </Button>
           )}
         </div>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setSelectedTask(null)}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={() => setSelectedTask(null)}
+        >
           <X className="h-4 w-4" />
         </Button>
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-5">
+      <div className="flex-1 space-y-5 overflow-y-auto p-4">
         <h2 className="text-base font-semibold leading-snug">{task.title}</h2>
 
         {task.description && (
@@ -92,21 +118,30 @@ export function TaskDetailPanel() {
         <div className="grid grid-cols-2 gap-3">
           {/* Type */}
           <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Type</label>
-            <Select value={task.type ?? ""} onValueChange={(v) => updateTaskType(task.id, v as TaskType)}>
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Type
+            </label>
+            <Select
+              value={task.type ?? ""}
+              onValueChange={(v) => updateTaskType(task.id, v as TaskType)}
+            >
               <SelectTrigger className="h-8 text-[13px]">
                 <SelectValue placeholder="—">
                   <div className="flex items-center gap-1.5">
                     {task.type === "Bug" && <Bug className="h-3.5 w-3.5 text-destructive" />}
                     {task.type === "Story" && <BookOpen className="h-3.5 w-3.5 text-primary" />}
-                    {task.type === "Task" && <ClipboardList className="h-3.5 w-3.5 text-muted-foreground" />}
+                    {task.type === "Task" && (
+                      <ClipboardList className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
                     {task.type}
                   </div>
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {TASK_TYPES.map((t) => (
-                  <SelectItem key={t} value={t} className="text-[13px]">{t}</SelectItem>
+                  <SelectItem key={t} value={t} className="text-[13px]">
+                    {t}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -114,14 +149,21 @@ export function TaskDetailPanel() {
 
           {/* Severity */}
           <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Severity</label>
-            <Select value={task.severity ?? ""} onValueChange={(v) => updateTaskSeverity(task.id, v as Severity)}>
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Severity
+            </label>
+            <Select
+              value={task.severity ?? ""}
+              onValueChange={(v) => updateTaskSeverity(task.id, v as Severity)}
+            >
               <SelectTrigger className="h-8 text-[13px]">
                 <SelectValue placeholder="—" />
               </SelectTrigger>
               <SelectContent>
                 {SEVERITIES.map((s) => (
-                  <SelectItem key={s} value={s} className="text-[13px]">{s}</SelectItem>
+                  <SelectItem key={s} value={s} className="text-[13px]">
+                    {s}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -129,7 +171,9 @@ export function TaskDetailPanel() {
 
           {/* Status */}
           <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Status</label>
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Status
+            </label>
             <Select value={task.status ?? ""} onValueChange={(v) => updateTaskStatus(task.id, v)}>
               <SelectTrigger className="h-8 text-[13px]">
                 <SelectValue>
@@ -148,17 +192,29 @@ export function TaskDetailPanel() {
 
           {/* Story Level */}
           <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Story Level</label>
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Story Level
+            </label>
             <Select
-              value={task.storyLevel?.toString() ?? ""}
-              onValueChange={(v) => updateTaskStoryLevel(task.id, (v ? Number(v) : null) as StoryLevel | null)}
+              value={task.storyLevel?.toString() ?? "__none__"}
+              onValueChange={(v) =>
+                updateTaskStoryLevel(
+                  task.id,
+                  (v === "__none__" ? null : Number(v)) as StoryLevel | null,
+                )
+              }
             >
               <SelectTrigger className="h-8 text-[13px]">
                 <SelectValue placeholder="—" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="__none__" className="text-[13px] text-muted-foreground">
+                  —
+                </SelectItem>
                 {[1, 2, 3, 5].map((l) => (
-                  <SelectItem key={l} value={l.toString()} className="text-[13px]">{l}</SelectItem>
+                  <SelectItem key={l} value={l.toString()} className="text-[13px]">
+                    {l}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -166,13 +222,17 @@ export function TaskDetailPanel() {
 
           {/* Mandays */}
           <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Mandays</label>
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Mandays
+            </label>
             <MandayInput value={task.mandays} onSave={(v) => updateTaskMandays(task.id, v)} />
           </div>
 
           {/* Assignee */}
           <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Assignee</label>
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Assignee
+            </label>
             <div className="flex h-8 items-center rounded-md border border-input bg-background px-3 text-[13px] text-muted-foreground">
               {task.assignee ?? "—"}
             </div>
@@ -212,7 +272,7 @@ export function TaskDetailPanel() {
         {/* Time Tracking */}
         <div className="space-y-3 border-t border-border pt-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-[13px] font-semibold flex items-center gap-1.5">
+            <h3 className="flex items-center gap-1.5 text-[13px] font-semibold">
               <Clock className="h-3.5 w-3.5 text-muted-foreground" />
               Time Tracking
             </h3>
@@ -232,12 +292,14 @@ export function TaskDetailPanel() {
               workLogs.map((wl) => (
                 <div key={wl.id} className="rounded-md border border-border bg-muted/20 px-3 py-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-[12px] font-medium tabular-nums">{formatMinutes(wl.timeSpentMinutes)}</span>
+                    <span className="text-[12px] font-medium tabular-nums">
+                      {formatMinutes(wl.timeSpentMinutes)}
+                    </span>
                     <div className="flex items-center gap-2">
                       <span className="text-[11px] text-muted-foreground">{wl.logDate}</span>
                       <button
                         type="button"
-                        className="text-muted-foreground hover:text-destructive transition-colors"
+                        className="text-muted-foreground transition-colors hover:text-destructive"
                         onClick={() => removeWorkLog(wl.id)}
                         title="Delete work log"
                       >
@@ -258,28 +320,57 @@ export function TaskDetailPanel() {
   );
 }
 
-function MandayInput({ value, onSave }: { value: number | null; onSave: (v: number | null) => void }) {
+function MandayInput({
+  value,
+  onSave,
+}: {
+  value: number | null;
+  onSave: (v: number | null) => void;
+}) {
   const [editing, setEditing] = useState(false);
   const [raw, setRaw] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const initialValueRef = useRef(value);
   const display = value != null ? formatMinutes(Math.round(value * 480)) : "";
+
+  // Reset dirty when the prop value changes (e.g. after sync reloads from DB)
+  useEffect(() => {
+    if (value !== initialValueRef.current) {
+      initialValueRef.current = value;
+      setDirty(false);
+    }
+  }, [value]);
 
   const commit = (inputRaw: string) => {
     setEditing(false);
-    if (!inputRaw.trim()) { onSave(null); return; }
+    if (!inputRaw.trim()) {
+      if (initialValueRef.current !== null) setDirty(true);
+      onSave(null);
+      return;
+    }
     const mins = parseTimeInput(inputRaw);
-    if (mins != null) onSave(mins / 480);
+    if (mins != null) {
+      const newVal = mins / 480;
+      if (newVal !== initialValueRef.current) setDirty(true);
+      onSave(newVal);
+    }
   };
 
   return (
     <Input
-      className="h-8 text-[13px]"
+      className={`h-8 text-[13px] transition-colors ${dirty ? "border-warning ring-warning/50 ring-1" : ""}`}
       placeholder="e.g. 1d 4h 30m"
       value={editing ? raw : display}
-      onFocus={() => { setRaw(display); setEditing(true); }}
+      onFocus={() => {
+        setRaw(display);
+        setEditing(true);
+      }}
       onChange={(e) => setRaw(e.target.value)}
       onBlur={() => commit(raw)}
       onKeyDown={(e) => {
-        if (e.key === "Enter") { (e.target as HTMLElement).blur(); }
+        if (e.key === "Enter") {
+          (e.target as HTMLElement).blur();
+        }
         if (e.key === "Escape") setEditing(false);
       }}
     />
@@ -309,7 +400,9 @@ function EditableField({
 
   return (
     <div className="space-y-1.5">
-      <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</label>
+      <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </label>
       {editing ? (
         <Input
           autoFocus
@@ -325,21 +418,27 @@ function EditableField({
         />
       ) : (
         <div
-          className="flex h-8 items-center rounded-md border border-input bg-background px-3 text-[13px] cursor-text hover:bg-accent/50 transition-colors"
-          onClick={() => { setInputValue(value ?? ""); setEditing(true); }}
+          className="flex h-8 cursor-text items-center rounded-md border border-input bg-background px-3 text-[13px] transition-colors hover:bg-accent/50"
+          onClick={() => {
+            setInputValue(value ?? "");
+            setEditing(true);
+          }}
         >
           {value ? (
             isLink ? (
               <button
                 type="button"
-                className="flex items-center gap-1 text-primary hover:underline truncate"
-                onClick={(e) => { e.stopPropagation(); openExternal(value); }}
+                className="flex items-center gap-1 truncate text-primary hover:underline"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openExternal(value);
+                }}
               >
                 <ExternalLink className="h-3 w-3 shrink-0" />
                 <span className="truncate">{value}</span>
               </button>
             ) : (
-              <span className="text-foreground truncate">{value}</span>
+              <span className="truncate text-foreground">{value}</span>
             )
           ) : (
             <span className="text-muted-foreground">{placeholder ?? "—"}</span>

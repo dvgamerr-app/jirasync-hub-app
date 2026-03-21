@@ -1,16 +1,16 @@
 import { useTaskStore } from "@/store/task-store";
-import { ChevronDown, FolderKanban, ListTodo, Menu } from "lucide-react";
-import {
-  Sheet, SheetContent, SheetTrigger, SheetTitle,
-} from "@/components/ui/sheet";
-import {
-  Collapsible, CollapsibleContent, CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { ChevronDown, FolderKanban, ListTodo, Menu, Settings } from "lucide-react";
+import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 
-export function MobileSidebar() {
+interface MobileSidebarProps {
+  onOpenSettings: () => void;
+}
+
+export function MobileSidebar({ onOpenSettings }: MobileSidebarProps) {
   const [open, setOpen] = useState(false);
   const { organizations, projects, selectedProjectId, setSelectedProject } = useTaskStore();
 
@@ -26,7 +26,7 @@ export function MobileSidebar() {
           <Menu className="h-4 w-4" />
         </Button>
       </SheetTrigger>
-      <SheetContent side="right" className="w-[280px] p-0">
+      <SheetContent side="right" className="flex w-[280px] flex-col p-0">
         <SheetTitle className="border-b border-border px-3 py-3 text-[13px] font-semibold">
           Task Manager
         </SheetTitle>
@@ -37,7 +37,7 @@ export function MobileSidebar() {
               "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] transition-colors duration-150",
               !selectedProjectId
                 ? "bg-primary/10 font-medium text-primary"
-                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
             )}
           >
             <ListTodo className="h-3.5 w-3.5" />
@@ -62,7 +62,7 @@ export function MobileSidebar() {
                         "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] transition-colors duration-150",
                         selectedProjectId === project.id
                           ? "bg-primary/10 font-medium text-primary"
-                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                       )}
                     >
                       <FolderKanban className="h-3.5 w-3.5" />
@@ -76,6 +76,19 @@ export function MobileSidebar() {
               </Collapsible>
             );
           })}
+        </div>
+        <div className="border-t border-border p-2">
+          <Button
+            variant="ghost"
+            className="h-9 w-full justify-start gap-2 text-[13px] text-muted-foreground"
+            onClick={() => {
+              setOpen(false);
+              onOpenSettings();
+            }}
+          >
+            <Settings className="h-3.5 w-3.5" />
+            Jira Settings
+          </Button>
         </div>
       </SheetContent>
     </Sheet>

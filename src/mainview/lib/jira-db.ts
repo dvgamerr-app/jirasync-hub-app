@@ -31,7 +31,7 @@ export const db = new JiraDatabase();
 // ── Jira Accounts (multiple instances) ────────────────────────────────────────
 export interface JiraAccount {
   id: string;
-  name: string;        // display name
+  name: string; // display name
   instanceUrl: string; // e.g. "https://acme.atlassian.net" or "acme"
   email: string;
   apiToken: string;
@@ -90,7 +90,11 @@ export function removeJiraAccount(id: string): void {
   // Clean up DB data for this account
   const orgId = `org-${id}`;
   db.organizations.delete(orgId).catch(() => {});
-  db.projects.where("orgId").equals(orgId).delete().catch(() => {});
+  db.projects
+    .where("orgId")
+    .equals(orgId)
+    .delete()
+    .catch(() => {});
 }
 
 // Backward-compat helpers
@@ -102,7 +106,11 @@ export function saveJiraSettings(s: Omit<JiraAccount, "id" | "name">): void {
   const existing = getJiraAccounts();
   const account: JiraAccount = {
     id: existing[0]?.id ?? crypto.randomUUID(),
-    name: existing[0]?.name ?? getJiraBaseUrl(s as JiraAccount).replace("https://", "").replace(".atlassian.net", ""),
+    name:
+      existing[0]?.name ??
+      getJiraBaseUrl(s as JiraAccount)
+        .replace("https://", "")
+        .replace(".atlassian.net", ""),
     ...s,
   };
   saveJiraAccounts([account, ...existing.slice(1)]);
@@ -118,4 +126,3 @@ export function getJiraBaseUrl(account: Pick<JiraAccount, "instanceUrl">): strin
   if (url.startsWith("http")) return url.replace(/\/$/, "");
   return `https://${url}.atlassian.net`;
 }
-

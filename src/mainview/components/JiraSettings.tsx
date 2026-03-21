@@ -9,12 +9,28 @@ import {
 import { testJiraConnection } from "@/lib/jira-api";
 import { startBackgroundSync } from "@/lib/sync-service";
 import { openExternal } from "@/lib/window-rpc";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
-import { Loader2, CheckCircle2, XCircle, Eye, EyeOff, Plus, Pencil, Trash2, Server } from "lucide-react";
+import {
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  Eye,
+  EyeOff,
+  Plus,
+  Pencil,
+  Trash2,
+  Server,
+} from "lucide-react";
 
 interface Props {
   open: boolean;
@@ -55,7 +71,12 @@ export function JiraSettingsDialog({ open, onOpenChange }: Props) {
 
   const startEdit = (account: JiraAccount) => {
     setEditing(account);
-    setForm({ name: account.name, instanceUrl: account.instanceUrl, email: account.email, apiToken: account.apiToken });
+    setForm({
+      name: account.name,
+      instanceUrl: account.instanceUrl,
+      email: account.email,
+      apiToken: account.apiToken,
+    });
     setStatus("idle");
     setMode("edit");
   };
@@ -63,11 +84,15 @@ export function JiraSettingsDialog({ open, onOpenChange }: Props) {
   const handleDelete = (id: string) => {
     removeJiraAccount(id);
     refresh();
-    toast({ title: "Account removed" });
   };
 
   const accountFromForm = (): Omit<JiraAccount, "id"> => ({
-    name: form.name.trim() || form.instanceUrl.trim().replace(/^https?:\/\//, "").replace(/\.atlassian\.net\/?$/, ""),
+    name:
+      form.name.trim() ||
+      form.instanceUrl
+        .trim()
+        .replace(/^https?:\/\//, "")
+        .replace(/\.atlassian\.net\/?$/, ""),
     instanceUrl: form.instanceUrl.trim(),
     email: form.email.trim(),
     apiToken: form.apiToken.trim(),
@@ -77,19 +102,26 @@ export function JiraSettingsDialog({ open, onOpenChange }: Props) {
     setTesting(true);
     setStatus("idle");
     const ok = await testJiraConnection(
-      editing
-        ? { ...editing, ...accountFromForm() }
-        : { id: "test", ...accountFromForm() },
+      editing ? { ...editing, ...accountFromForm() } : { id: "test", ...accountFromForm() },
     );
     setStatus(ok ? "ok" : "fail");
     setTesting(false);
-    if (!ok) toast({ title: "Connection failed", description: "Check credentials and Jira URL", variant: "destructive" });
+    if (!ok)
+      toast({
+        title: "Connection failed",
+        description: "Check credentials and Jira URL",
+        variant: "destructive",
+      });
   };
 
   const handleSave = async () => {
     const { instanceUrl, email, apiToken } = form;
     if (!instanceUrl || !email || !apiToken) {
-      toast({ title: "Missing fields", description: "Fill in all required fields", variant: "destructive" });
+      toast({
+        title: "Missing fields",
+        description: "Fill in all required fields",
+        variant: "destructive",
+      });
       return;
     }
     const partial = accountFromForm();
@@ -101,7 +133,11 @@ export function JiraSettingsDialog({ open, onOpenChange }: Props) {
 
     if (!ok) {
       setStatus("fail");
-      toast({ title: "Connection failed", description: "Check credentials and Jira URL", variant: "destructive" });
+      toast({
+        title: "Connection failed",
+        description: "Check credentials and Jira URL",
+        variant: "destructive",
+      });
       return;
     }
 
@@ -114,7 +150,6 @@ export function JiraSettingsDialog({ open, onOpenChange }: Props) {
     setStatus("ok");
     refresh();
     startBackgroundSync();
-    toast({ title: mode === "edit" ? "Account updated" : "Account connected", description: "Starting background sync…" });
     setMode("list");
   };
 
@@ -135,7 +170,9 @@ export function JiraSettingsDialog({ open, onOpenChange }: Props) {
             {accounts.length === 0 ? (
               <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border py-8 text-center">
                 <Server className="h-8 w-8 text-muted-foreground" />
-                <p className="text-[13px] text-muted-foreground">No Jira accounts configured yet.</p>
+                <p className="text-[13px] text-muted-foreground">
+                  No Jira accounts configured yet.
+                </p>
                 <Button size="sm" className="h-8 text-[13px]" onClick={startAdd}>
                   <Plus className="mr-1.5 h-3.5 w-3.5" />
                   Add Account
@@ -149,27 +186,34 @@ export function JiraSettingsDialog({ open, onOpenChange }: Props) {
                       key={acc.id}
                       className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2"
                     >
-                      <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[13px] font-medium truncate">{acc.name || acc.instanceUrl}</p>
-                        <p className="text-[11px] text-muted-foreground truncate">{acc.email}</p>
+                      <CheckCircle2 className="text-success h-3.5 w-3.5 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[13px] font-medium">
+                          {acc.name || acc.instanceUrl}
+                        </p>
+                        <p className="truncate text-[11px] text-muted-foreground">{acc.email}</p>
                       </div>
                       <button
                         onClick={() => startEdit(acc)}
-                        className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+                        className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
                       >
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
                       <button
                         onClick={() => handleDelete(acc.id)}
-                        className="shrink-0 rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                        className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   ))}
                 </div>
-                <Button variant="outline" size="sm" className="w-full h-8 text-[13px]" onClick={startAdd}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-full text-[13px]"
+                  onClick={startAdd}
+                >
                   <Plus className="mr-1.5 h-3.5 w-3.5" />
                   Add Another Account
                 </Button>
@@ -179,7 +223,9 @@ export function JiraSettingsDialog({ open, onOpenChange }: Props) {
         ) : (
           <div className="space-y-4 pt-1">
             <div className="space-y-1.5">
-              <Label className="text-[12px]">Display Name <span className="text-muted-foreground">(optional)</span></Label>
+              <Label className="text-[12px]">
+                Display Name <span className="text-muted-foreground">(optional)</span>
+              </Label>
               <Input
                 className="h-9 text-[13px]"
                 placeholder="e.g. My Company"
@@ -189,36 +235,51 @@ export function JiraSettingsDialog({ open, onOpenChange }: Props) {
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-[12px]">Jira Instance URL <span className="text-destructive">*</span></Label>
+              <Label className="text-[12px]">
+                Jira Instance URL <span className="text-destructive">*</span>
+              </Label>
               <Input
                 className="h-9 text-[13px]"
                 placeholder="acme or https://acme.atlassian.net"
                 value={form.instanceUrl}
-                onChange={(e) => { setForm((f) => ({ ...f, instanceUrl: e.target.value })); setStatus("idle"); }}
+                onChange={(e) => {
+                  setForm((f) => ({ ...f, instanceUrl: e.target.value }));
+                  setStatus("idle");
+                }}
               />
               <p className="text-[11px] text-muted-foreground">Subdomain or full URL</p>
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-[12px]">Email <span className="text-destructive">*</span></Label>
+              <Label className="text-[12px]">
+                Email <span className="text-destructive">*</span>
+              </Label>
               <Input
                 className="h-9 text-[13px]"
                 type="email"
                 placeholder="you@company.com"
                 value={form.email}
-                onChange={(e) => { setForm((f) => ({ ...f, email: e.target.value })); setStatus("idle"); }}
+                onChange={(e) => {
+                  setForm((f) => ({ ...f, email: e.target.value }));
+                  setStatus("idle");
+                }}
               />
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-[12px]">API Token <span className="text-destructive">*</span></Label>
+              <Label className="text-[12px]">
+                API Token <span className="text-destructive">*</span>
+              </Label>
               <div className="relative">
                 <Input
                   className="h-9 pr-9 text-[13px]"
                   type={showToken ? "text" : "password"}
                   placeholder="Jira API token"
                   value={form.apiToken}
-                  onChange={(e) => { setForm((f) => ({ ...f, apiToken: e.target.value })); setStatus("idle"); }}
+                  onChange={(e) => {
+                    setForm((f) => ({ ...f, apiToken: e.target.value }));
+                    setStatus("idle");
+                  }}
                 />
                 <button
                   type="button"
@@ -233,7 +294,9 @@ export function JiraSettingsDialog({ open, onOpenChange }: Props) {
                 <button
                   type="button"
                   className="text-primary underline"
-                  onClick={() => openExternal("https://id.atlassian.net/manage-profile/security/api-tokens")}
+                  onClick={() =>
+                    openExternal("https://id.atlassian.net/manage-profile/security/api-tokens")
+                  }
                 >
                   Atlassian API tokens
                 </button>
@@ -248,8 +311,14 @@ export function JiraSettingsDialog({ open, onOpenChange }: Props) {
                     : "border-destructive/30 bg-destructive/10 text-destructive"
                 }`}
               >
-                {status === "ok" ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
-                {status === "ok" ? "Connected successfully" : "Connection failed — check credentials"}
+                {status === "ok" ? (
+                  <CheckCircle2 className="h-4 w-4" />
+                ) : (
+                  <XCircle className="h-4 w-4" />
+                )}
+                {status === "ok"
+                  ? "Connected successfully"
+                  : "Connection failed — check credentials"}
               </div>
             )}
 
@@ -264,7 +333,7 @@ export function JiraSettingsDialog({ open, onOpenChange }: Props) {
               </Button>
               <Button
                 variant="outline"
-                className="flex-1 h-9 text-[13px]"
+                className="h-9 flex-1 text-[13px]"
                 onClick={handleTest}
                 disabled={testing || !isFormValid}
               >
@@ -272,7 +341,7 @@ export function JiraSettingsDialog({ open, onOpenChange }: Props) {
                 Test
               </Button>
               <Button
-                className="flex-1 h-9 text-[13px]"
+                className="h-9 flex-1 text-[13px]"
                 onClick={handleSave}
                 disabled={testing || !isFormValid}
               >

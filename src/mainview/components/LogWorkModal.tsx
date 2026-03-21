@@ -78,7 +78,6 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
     setTimeInput("");
     setComment("");
     setOpen(false);
-    toast({ title: "Time logged", description: `${formatMinutes(minutes)} logged successfully` });
   };
 
   const trigger =
@@ -98,7 +97,10 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-      <PopoverContent className={cn("space-y-3", variant === "inline" ? "w-64" : "w-72")} align="end">
+      <PopoverContent
+        className={cn("space-y-3", variant === "inline" ? "w-64" : "w-72")}
+        align="end"
+      >
         <h4 className="text-[13px] font-semibold">Log Work</h4>
 
         <div className="space-y-1.5">
@@ -109,7 +111,9 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
             className="h-8 text-[13px]"
             value={timeInput}
             onChange={(e) => setTimeInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleSubmit();
+            }}
           />
         </div>
 
@@ -117,7 +121,10 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
           <label className="text-[11px] font-medium text-muted-foreground">Date</label>
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="outline" className="h-8 w-full justify-start text-[13px] font-normal">
+              <Button
+                variant="outline"
+                className="h-8 w-full justify-start text-[13px] font-normal"
+              >
                 <CalendarIcon className="mr-2 h-3.5 w-3.5" />
                 {format(date, "PPP")}
               </Button>
@@ -128,7 +135,7 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
                 selected={date}
                 onSelect={(d) => d && setDate(d)}
                 initialFocus
-                className="p-3 pointer-events-auto"
+                className="pointer-events-auto p-3"
               />
             </PopoverContent>
           </Popover>

@@ -27,21 +27,14 @@ type ElectrobunRuntimeWindow = Window & {
   __electrobunWebviewId?: number;
   __electrobun?: ElectrobunBridge;
   __electrobun_encrypt?: (message: string) => Promise<EncryptedPacket>;
-  __electrobun_decrypt?: (
-    encryptedData: string,
-    iv: string,
-    tag: string,
-  ) => Promise<string>;
+  __electrobun_decrypt?: (encryptedData: string, iv: string, tag: string) => Promise<string>;
   __electrobunBunBridge?: ElectrobunMessageBridge;
 };
 
 const electrobunWindow =
-  typeof window === "undefined"
-    ? undefined
-    : (window as ElectrobunRuntimeWindow);
+  typeof window === "undefined" ? undefined : (window as ElectrobunRuntimeWindow);
 
-const isElectrobun =
-  Number.isFinite(electrobunWindow?.__electrobunRpcSocketPort);
+const isElectrobun = Number.isFinite(electrobunWindow?.__electrobunRpcSocketPort);
 
 type PendingRequest = {
   resolve: (value: unknown) => void;
@@ -76,7 +69,9 @@ if (isElectrobun && electrobunWindow) {
     for (const raw of queued) _sendEncrypted(raw).catch(() => {});
     // Seed the known frame
     _request("windowGetFrame")
-      .then((f) => { if (f) lastKnownFrame = f; })
+      .then((f) => {
+        if (f) lastKnownFrame = f;
+      })
       .catch(() => {});
   });
 
@@ -99,12 +94,13 @@ if (isElectrobun && electrobunWindow) {
       );
       if (typeof decrypted !== "string") return;
       _handleResponse(JSON.parse(decrypted));
-    } catch { /* ignore parse / decrypt errors */ }
+    } catch {
+      /* ignore parse / decrypt errors */
+    }
   });
 
   // Also handle responses delivered via evaluateJS (Bun→webview fallback path)
-  const originalReceiveMessageFromBun =
-    electrobunWindow.__electrobun?.receiveMessageFromBun;
+  const originalReceiveMessageFromBun = electrobunWindow.__electrobun?.receiveMessageFromBun;
   if (electrobunWindow.__electrobun) {
     electrobunWindow.__electrobun.receiveMessageFromBun = (msg: unknown) => {
       _handleResponse(msg);
@@ -144,15 +140,23 @@ async function _sendEncrypted(raw: string): Promise<void> {
   if (!ws || !electrobunWindow) return;
   try {
     const enc = await electrobunWindow.__electrobun_encrypt?.(raw);
-    if (enc) { ws.send(JSON.stringify(enc)); return; }
-  } catch { /* fall through */ }
+    if (enc) {
+      ws.send(JSON.stringify(enc));
+      return;
+    }
+  } catch {
+    /* fall through */
+  }
   // Fallback to native postMessage bridge (unencrypted)
   electrobunWindow.__electrobunBunBridge?.postMessage(raw);
 }
 
 function _enqueue(raw: string): void {
-  if (wsReady) { _sendEncrypted(raw).catch(() => {}); }
-  else { msgQueue.push(raw); }
+  if (wsReady) {
+    _sendEncrypted(raw).catch(() => {});
+  } else {
+    msgQueue.push(raw);
+  }
 }
 
 async function _request<M extends BunRequestName>(
@@ -170,7 +174,10 @@ async function _request<M extends BunRequestName>(
     });
     _enqueue(raw);
     setTimeout(() => {
-      if (pending.has(id)) { pending.delete(id); resolve(undefined); }
+      if (pending.has(id)) {
+        pending.delete(id);
+        resolve(undefined);
+      }
     }, 10_000);
   });
 }
@@ -187,7 +194,7 @@ function _send<M extends BunRequestName>(method: M, ...args: RequestArgs<M>): vo
 export const windowControls = {
   minimize: () => _send("windowMinimize"),
   maximize: () => _send("windowMaximize"),
-  close:    () => _send("windowClose"),
+  close: () => _send("windowClose"),
 };
 
 export function setWindowSize(w: number, h: number): void {
