@@ -1,73 +1,61 @@
-# Welcome to your Lovable project
+# React + Tailwind + Vite Electrobun Template
 
-## Project info
+A fast Electrobun desktop app template with React, Tailwind CSS, and Vite for hot module replacement (HMR).
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## Getting Started
 
-## How can I edit this code?
+```bash
+# Install dependencies
+bun install
 
-There are several ways of editing your application.
+# Development without HMR (uses bundled assets)
+bun run dev
 
-**Use Lovable**
+# Development with HMR (recommended)
+bun run dev:hmr
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+# Build for production
+bun run build
 
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+# Build for production release
+bun run build:prod
 ```
 
-**Edit a file directly in GitHub**
+## How HMR Works
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+When you run `bun run dev:hmr`:
 
-**Use GitHub Codespaces**
+1. **Vite dev server** starts on `http://localhost:5173` with HMR enabled
+2. **Electrobun** starts and detects the running Vite server
+3. The app loads from the Vite dev server instead of bundled assets
+4. Changes to React components update instantly without full page reload
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+When you run `bun run dev` (without HMR):
 
-## What technologies are used for this project?
+1. Electrobun starts and loads from `views://mainview/index.html`
+2. You need to rebuild (`bun run build`) to see changes
 
-This project is built with:
+## Project Structure
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+```
+├── src/
+│   ├── bun/
+│   │   └── index.ts        # Main process (Electrobun/Bun)
+│   └── mainview/
+│       ├── App.tsx         # React app component
+│       ├── main.tsx        # React entry point
+│       ├── index.html      # HTML template
+│       └── index.css       # Tailwind CSS
+├── electrobun.config.ts    # Electrobun configuration
+├── vite.config.ts          # Vite configuration
+├── tailwind.config.js      # Tailwind configuration
+└── package.json
+```
 
-## How can I deploy this project?
+## Customizing
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+- **React components**: Edit files in `src/mainview/`
+- **Tailwind theme**: Edit `tailwind.config.js`
+- **Vite settings**: Edit `vite.config.ts`
+- **Window settings**: Edit `src/bun/index.ts`
+- **App metadata**: Edit `electrobun.config.ts`
