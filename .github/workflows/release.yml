@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  # ─── Step 1: Generate changelog from git history ─────────────────────────
+  changelog:
+    runs-on: ubuntu-latest
+    outputs:
+      body: ${{ steps.cliff.outputs.content }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need full history for changelog
+
+      - name: Generate changelog
+        id: cliff
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: CHANGES.md
+
+  # ─── Step 2: Build for each platform and publish release ─────────────────
+  build:
+    needs: changelog
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS universal binary (Apple Silicon + Intel in one file)
+          - platform: macos-latest
+            args: --target universal-apple-darwin
+
+          # Linux (AppImage + deb)
+          - platform: ubuntu-22.04
+            args: ""
+
+          # Windows (NSIS installer + MSI)
+          - platform: windows-latest
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Node.js runtime via Bun ──────────────────────────────────────────
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      # ── Rust toolchain ───────────────────────────────────────────────────
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # universal-apple-darwin needs both macOS targets
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      # Cache Rust artifacts to speed up subsequent builds
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # ── Linux system libs ────────────────────────────────────────────────
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      # ── Frontend ─────────────────────────────────────────────────────────
+      - name: Install frontend dependencies
+        run: bun install
+
+      # ── Build + create/update GitHub Release ─────────────────────────────
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          # ── macOS code signing (optional, set in repo secrets) ──────────
+          # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+          # ── Tauri updater signing (optional) ────────────────────────────
+          # TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "JiraSync Hub ${{ github.ref_name }}"
+          releaseBody: ${{ needs.changelog.outputs.body }}
+          releaseDraft: true   # set false if you want immediate publish
+          prerelease: ${{ contains(github.ref_name, '-') }} # e.g. v1.0.0-beta → prerelease
+          args: ${{ matrix.args }}
