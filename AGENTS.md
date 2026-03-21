@@ -11,23 +11,20 @@
 jirasync-hub/
 ├── src/
 │   ├── index.html              ← Vite entry point (root = "src/")
-│   ├── bun/
-│   │   └── index.ts            ← Electrobun main process (Bun runtime)
-│   └── mainview/               ← React app
-│       ├── main.tsx
-│       ├── App.tsx
-│       ├── components/
-│       │   ├── TitleBar.tsx    ← Custom draggable titlebar
-│       │   └── ui/             ← shadcn/ui components
-│       ├── lib/
-│       │   ├── window-rpc.ts   ← Direct WebSocket RPC client (no Vite import)
-│       │   ├── jira-api.ts     ← Jira REST API calls (proxied through Bun)
-│       │   ├── jira-db.ts      ← localStorage multi-account + Dexie IndexedDB
-│       │   ├── sync-service.ts ← Background sync orchestration
-│       │   └── utils.ts
-│       ├── store/task-store.ts ← Zustand state
-│       ├── pages/Index.tsx
-│       └── types/jira.ts
+│   ├── main.tsx
+│   ├── App.tsx
+│   ├── components/
+│   │   ├── TitleBar.tsx    ← Custom draggable titlebar
+│   │   └── ui/             ← shadcn/ui components
+│   ├── lib/
+│   │   ├── window-rpc.ts   ← Direct WebSocket RPC client (no Vite import)
+│   │   ├── jira-api.ts     ← Jira REST API calls (proxied through Bun)
+│   │   ├── jira-db.ts      ← localStorage multi-account + Dexie IndexedDB
+│   │   ├── sync-service.ts ← Background sync orchestration
+│   │   └── utils.ts
+│   ├── store/task-store.ts ← Zustand state
+│   ├── pages/Index.tsx
+│   └── types/jira.ts
 ├── package.json
 ├── vite.config.ts
 ├── tailwind.config.ts          ← Tailwind config (root, shared by build + shadcn)
