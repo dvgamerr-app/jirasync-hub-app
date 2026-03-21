@@ -1,5 +1,6 @@
 import { getJiraBaseUrl, type JiraAccount } from "./jira-db";
 import type { Organization, Project, Task, WorkLog } from "@/types/jira";
+import { fetch } from '@tauri-apps/plugin-http';
 
 const ISSUE_TYPE_MAP: Partial<Record<string, Task["type"]>> = {
   Bug: "Bug",
