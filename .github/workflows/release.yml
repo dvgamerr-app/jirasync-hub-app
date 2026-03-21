@@ -105,6 +105,6 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "JiraSync Hub ${{ github.ref_name }}"
           releaseBody: ${{ needs.changelog.outputs.body }}
-          releaseDraft: true   # set false if you want immediate publish
+          releaseDraft: true # set false if you want immediate publish
           prerelease: ${{ contains(github.ref_name, '-') }} # e.g. v1.0.0-beta → prerelease
           args: ${{ matrix.args }}

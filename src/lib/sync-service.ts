@@ -103,7 +103,7 @@ export async function syncNow(): Promise<void> {
     isSyncing = false;
     if (syncPending) {
       syncPending = false;
-      syncNow().catch(() => { });
+      syncNow().catch(() => {});
     }
   }
 }
@@ -114,10 +114,10 @@ export function startBackgroundSync() {
   if (accounts.length === 0) return;
 
   // Sync immediately, then every hour
-  syncNow().catch(() => { });
+  syncNow().catch(() => {});
   syncInterval = setInterval(
     () => {
-      syncNow().catch(() => { });
+      syncNow().catch(() => {});
     },
     60 * 60 * 1000,
   );

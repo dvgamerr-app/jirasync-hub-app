@@ -6,13 +6,7 @@
  */
 import { Fragment } from "react";
 import { cn } from "@/lib/utils";
-import {
-  Info,
-  FileText,
-  AlertTriangle,
-  AlertCircle,
-  CheckCircle2,
-} from "lucide-react";
+import { Info, FileText, AlertTriangle, AlertCircle, CheckCircle2 } from "lucide-react";
 
 // ── ADF types ─────────────────────────────────────────────────────────────────
 
@@ -55,8 +49,10 @@ function nodeHasVisibleContent(node: AdfNode): boolean {
       return true;
     case "expand":
     case "nestedExpand":
-      return Boolean((node.attrs?.title as string | undefined)?.trim()) ||
-        Boolean(node.content?.some(nodeHasVisibleContent));
+      return (
+        Boolean((node.attrs?.title as string | undefined)?.trim()) ||
+        Boolean(node.content?.some(nodeHasVisibleContent))
+      );
     default:
       return Boolean(node.content?.some(nodeHasVisibleContent));
   }
@@ -107,8 +103,7 @@ function applyMarks(text: string, marks?: AdfMark[]): React.ReactNode {
         node = <span style={{ color: mark.attrs?.color as string }}>{node}</span>;
         break;
       case "subsup":
-        node =
-          mark.attrs?.type === "sub" ? <sub>{node}</sub> : <sup>{node}</sup>;
+        node = mark.attrs?.type === "sub" ? <sub>{node}</sub> : <sup>{node}</sup>;
         break;
     }
   }
@@ -128,10 +123,7 @@ const HEADING_CLASSES: Record<number, string> = {
 
 // ── Panel config ───────────────────────────────────────────────────────────────
 
-const PANEL_CONFIG: Record<
-  string,
-  { border: string; bg: string; icon: React.ReactNode }
-> = {
+const PANEL_CONFIG: Record<string, { border: string; bg: string; icon: React.ReactNode }> = {
   info: {
     border: "border-blue-400",
     bg: "bg-blue-50 dark:bg-blue-950/30",
@@ -180,27 +172,47 @@ function renderNode(node: AdfNode, key: number): React.ReactNode {
       const children = node.content?.map((child, i) => renderNode(child, i));
       switch (level) {
         case 1:
-          return <h1 key={key} className={cls}>{children}</h1>;
+          return (
+            <h1 key={key} className={cls}>
+              {children}
+            </h1>
+          );
         case 2:
-          return <h2 key={key} className={cls}>{children}</h2>;
+          return (
+            <h2 key={key} className={cls}>
+              {children}
+            </h2>
+          );
         case 3:
-          return <h3 key={key} className={cls}>{children}</h3>;
+          return (
+            <h3 key={key} className={cls}>
+              {children}
+            </h3>
+          );
         case 4:
-          return <h4 key={key} className={cls}>{children}</h4>;
+          return (
+            <h4 key={key} className={cls}>
+              {children}
+            </h4>
+          );
         case 5:
-          return <h5 key={key} className={cls}>{children}</h5>;
+          return (
+            <h5 key={key} className={cls}>
+              {children}
+            </h5>
+          );
         default:
-          return <h6 key={key} className={cls}>{children}</h6>;
+          return (
+            <h6 key={key} className={cls}>
+              {children}
+            </h6>
+          );
       }
     }
 
     // ── Inline: text ──────────────────────────────────────────────────────────
     case "text":
-      return (
-        <Fragment key={key}>
-          {applyMarks(node.text ?? "", node.marks)}
-        </Fragment>
-      );
+      return <Fragment key={key}>{applyMarks(node.text ?? "", node.marks)}</Fragment>;
 
     // ── Inline: hard break ────────────────────────────────────────────────────
     case "hardBreak":
@@ -250,7 +262,7 @@ function renderNode(node: AdfNode, key: number): React.ReactNode {
       return (
         <pre
           key={key}
-          className="my-2 overflow-x-auto rounded-md bg-muted p-3 text-[12px] font-mono leading-relaxed"
+          className="my-2 overflow-x-auto rounded-md bg-muted p-3 font-mono text-[12px] leading-relaxed"
         >
           {lang && (
             <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
@@ -346,9 +358,7 @@ function renderNode(node: AdfNode, key: number): React.ReactNode {
       );
 
     case "tableRow":
-      return (
-        <tr key={key}>{node.content?.map((child, i) => renderNode(child, i))}</tr>
-      );
+      return <tr key={key}>{node.content?.map((child, i) => renderNode(child, i))}</tr>;
 
     case "tableHeader":
       return (
@@ -413,9 +423,7 @@ function renderNode(node: AdfNode, key: number): React.ReactNode {
     default:
       if (node.content) {
         return (
-          <Fragment key={key}>
-            {node.content.map((child, i) => renderNode(child, i))}
-          </Fragment>
+          <Fragment key={key}>{node.content.map((child, i) => renderNode(child, i))}</Fragment>
         );
       }
       if (node.text) {
@@ -458,12 +466,7 @@ export function AdfRenderer({ content, className }: AdfRendererProps) {
   // ── Plain-text fallback ───────────────────────────────────────────────────
   const paragraphs = content.split(/\n{2,}/).filter(Boolean);
   return (
-    <div
-      className={cn(
-        "space-y-2 text-[13px] leading-relaxed text-muted-foreground",
-        className,
-      )}
-    >
+    <div className={cn("space-y-2 text-[13px] leading-relaxed text-muted-foreground", className)}>
       {paragraphs.map((para, i) => (
         <p key={i}>
           {para.split("\n").map((line, j) => (

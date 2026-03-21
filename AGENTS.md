@@ -80,9 +80,9 @@ wedo-jirasync-hub-app/
 
 ### Tauri Plugins
 
-| Plugin | Crate | Purpose |
-|--------|-------|---------|
-| **opener** | `tauri-plugin-opener` | Opens external URLs via OS default handler. Used by `openExternal()` in `desktop.ts`. |
+| Plugin           | Crate                       | Purpose                                                                                                                                                                               |
+| ---------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **opener**       | `tauri-plugin-opener`       | Opens external URLs via OS default handler. Used by `openExternal()` in `desktop.ts`.                                                                                                 |
 | **window-state** | `tauri-plugin-window-state` | Persists window size, position, and maximized state to disk. State is restored automatically on next launch. Hooked via `WindowExt::restore_state(StateFlags::all())` inside `setup`. |
 
 ---
@@ -117,11 +117,11 @@ wedo-jirasync-hub-app/
 
 ```typescript
 // vite.config.ts
-plugins: [react()]
-resolve.alias["@"] = path.resolve(__dirname, "src")
-server.port = 1420
-server.strictPort = true
-server.watch.ignored = ["**/src-tauri/**"]
+plugins: [react()];
+resolve.alias["@"] = path.resolve(__dirname, "src");
+server.port = 1420;
+server.strictPort = true;
+server.watch.ignored = ["**/src-tauri/**"];
 ```
 
 - Root HTML entry is `index.html`
@@ -211,11 +211,11 @@ interface JiraAccount {
 Database name: `jira-task-manager`
 
 ```typescript
-organizations: "id, name"
-projects: "id, orgId, jiraProjectKey"
-tasks: "id, projectId, jiraTaskId, status, isDirty"
-workLogs: "id, taskId, logDate"
-syncMeta: "id"
+organizations: "id, name";
+projects: "id, orgId, jiraProjectKey";
+tasks: "id, projectId, jiraTaskId, status, isDirty";
+workLogs: "id, taskId, logDate";
+syncMeta: "id";
 ```
 
 ### ID namespacing

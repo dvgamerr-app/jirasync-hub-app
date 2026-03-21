@@ -21,10 +21,7 @@ export function TitleBar() {
 
   return (
     <div className="flex h-10 shrink-0 select-none items-center justify-between border-b border-border bg-card/85 backdrop-blur">
-      <div
-        className="flex h-full min-w-0 flex-1 items-center px-3"
-        onMouseDown={onDragMouseDown}
-      >
+      <div className="flex h-full min-w-0 flex-1 items-center px-3" onMouseDown={onDragMouseDown}>
         <span className="truncate text-[13px] font-semibold tracking-wide text-foreground">
           JiraSync Hub
         </span>

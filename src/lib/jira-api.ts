@@ -1,6 +1,6 @@
 import { getJiraBaseUrl, type JiraAccount } from "./jira-db";
 import type { Organization, Project, Task, WorkLog } from "@/types/jira";
-import { fetch } from '@tauri-apps/plugin-http';
+import { fetch } from "@tauri-apps/plugin-http";
 
 const ISSUE_TYPE_MAP: Partial<Record<string, Task["type"]>> = {
   Bug: "Bug",
@@ -272,12 +272,12 @@ export async function addJiraWorkLog(
       started: new Date(started).toISOString().replace("Z", "+0000"),
       ...(comment
         ? {
-          comment: {
-            type: "doc",
-            version: 1,
-            content: [{ type: "paragraph", content: [{ type: "text", text: comment }] }],
-          },
-        }
+            comment: {
+              type: "doc",
+              version: 1,
+              content: [{ type: "paragraph", content: [{ type: "text", text: comment }] }],
+            },
+          }
         : {}),
     }),
   });

@@ -115,7 +115,11 @@ function getAccountIdFromTask(task: Pick<Task, "id" | "jiraTaskId">): string | n
 async function getFullNamesByAccountId(rows: ExportRow[]): Promise<Record<string, string>> {
   const accountsById = new Map(getJiraAccounts().map((account) => [account.id, account]));
   const accountIds = Array.from(
-    new Set(rows.map((row) => row.accountId).filter((accountId): accountId is string => accountId !== null)),
+    new Set(
+      rows
+        .map((row) => row.accountId)
+        .filter((accountId): accountId is string => accountId !== null),
+    ),
   );
 
   const entries = await Promise.all(
@@ -188,18 +192,12 @@ function getDisplayFileName(path: string): string {
   return segments[segments.length - 1] || path;
 }
 
-export function ExportDialog({
-  open,
-  onOpenChange,
-  projects,
-  tasks,
-  workLogs,
-}: ExportDialogProps) {
+export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: ExportDialogProps) {
   const currentPeriod = getCurrentPeriod();
   const exportRows = createExportRows(tasks, workLogs, projects);
-  const exportYears = Array.from(new Set([currentPeriod.year, ...exportRows.map((row) => row.year)])).sort(
-    (a, b) => b - a,
-  );
+  const exportYears = Array.from(
+    new Set([currentPeriod.year, ...exportRows.map((row) => row.year)]),
+  ).sort((a, b) => b - a);
   const [selectedMonth, setSelectedMonth] = useState(currentPeriod.monthIndex.toString());
   const [selectedYear, setSelectedYear] = useState(currentPeriod.year.toString());
   const [exporting, setExporting] = useState(false);
@@ -310,21 +308,25 @@ export function ExportDialog({
               {exportDone
                 ? `Saved to ${savedFileName}`
                 : matchingRows.length > 0
-                ? `${matchingRows.length} worklog(s) ready to export`
-                : "No worklogs found for this period"}
+                  ? `${matchingRows.length} worklog(s) ready to export`
+                  : "No worklogs found for this period"}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               {exportDone
                 ? "The dialog will close automatically."
                 : matchingRows.length > 0
-                ? `Total logged time: ${totalMinutes} minute(s)`
-                : "Change the month or year if you need a different export range."}
+                  ? `Total logged time: ${totalMinutes} minute(s)`
+                  : "Change the month or year if you need a different export range."}
             </p>
           </div>
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={exporting || exportDone}>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={exporting || exportDone}
+          >
             Cancel
           </Button>
           <Button

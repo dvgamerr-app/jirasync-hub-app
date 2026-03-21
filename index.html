@@ -11,7 +11,8 @@
     <script>
       (function () {
         var t = localStorage.getItem("theme");
-        var isDark = t === "dark" || (!t && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        var isDark =
+          t === "dark" || (!t && window.matchMedia("(prefers-color-scheme: dark)").matches);
         if (isDark) {
           document.documentElement.classList.add("dark");
           document.documentElement.style.background = "hsl(222, 25%, 8%)";
@@ -43,7 +44,9 @@
         animation: app-spin 0.7s linear infinite;
       }
       @keyframes app-spin {
-        to { transform: rotate(360deg); }
+        to {
+          transform: rotate(360deg);
+        }
       }
     </style>
   </head>
