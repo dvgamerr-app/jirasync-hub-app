@@ -5,6 +5,7 @@ import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { fetchJiraMyselfDisplayName } from "@/lib/jira-api";
 import { getJiraAccounts, type JiraAccount } from "@/lib/jira-db";
 import { getAccountIdFromTask } from "@/lib/jira-ids";
+import { isVisibleWorkLog } from "@/lib/worklog-sync";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -137,7 +138,7 @@ function createExportRows(tasks: Task[], workLogs: WorkLog[], projects: Project[
   const taskById = new Map(tasks.map((task) => [task.id, task]));
   const projectById = new Map(projects.map((project) => [project.id, project]));
 
-  return workLogs.flatMap((log) => {
+  return workLogs.filter(isVisibleWorkLog).flatMap((log) => {
     const task = taskById.get(log.taskId);
     if (!task) return [];
 

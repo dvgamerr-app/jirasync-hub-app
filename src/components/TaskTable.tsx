@@ -24,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { LogWorkModal } from "@/components/LogWorkModal";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatMinutes, parseTimeInput } from "@/lib/worklog-time";
+import { isVisibleWorkLog } from "@/lib/worklog-sync";
 
 const TASK_TYPES: TaskType[] = ["Story", "Bug", "Task"];
 const SEVERITIES: Severity[] = ["Critical", "High", "Medium", "Low", "NA"];
@@ -68,10 +69,12 @@ export function TaskTable() {
   const { selectedTaskId, setSelectedTask, getFilteredTasks, workLogs, projects } = useTaskStore();
   const tasks = getFilteredTasks();
   const showExtendedColumns = !selectedTaskId;
-  const totalMinutesByTaskId = workLogs.reduce<Record<string, number>>((totals, workLog) => {
-    totals[workLog.taskId] = (totals[workLog.taskId] ?? 0) + workLog.timeSpentMinutes;
-    return totals;
-  }, {});
+  const totalMinutesByTaskId = workLogs
+    .filter(isVisibleWorkLog)
+    .reduce<Record<string, number>>((totals, workLog) => {
+      totals[workLog.taskId] = (totals[workLog.taskId] ?? 0) + workLog.timeSpentMinutes;
+      return totals;
+    }, {});
   const statusesByProjectId = new Map(
     projects.map((project) => [project.id, project.availableStatuses] as const),
   );
