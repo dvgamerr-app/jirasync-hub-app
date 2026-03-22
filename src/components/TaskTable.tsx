@@ -65,6 +65,7 @@ function SeverityBadge({ severity }: { severity: Severity | null }) {
 export function TaskTable() {
   const { selectedTaskId, setSelectedTask, getFilteredTasks } = useTaskStore();
   const tasks = getFilteredTasks();
+  const isDetailOpen = !!selectedTaskId;
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -84,56 +85,69 @@ export function TaskTable() {
               <TableHead className="w-[140px] text-[11px] font-semibold uppercase tracking-wider">
                 Status
               </TableHead>
-              <TableHead className="w-[90px] text-center text-[11px] font-semibold uppercase tracking-wider">
-                Severity
-              </TableHead>
-              <TableHead className="w-[70px] text-center text-[11px] font-semibold uppercase tracking-wider">
-                <div className="flex items-center justify-center gap-1">
-                  Story
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Info className="h-3 w-3 shrink-0 cursor-help text-muted-foreground/60" />
-                    </TooltipTrigger>
-                    <TooltipContent
-                      side="bottom"
-                      className="max-w-[240px] p-3 text-[12px] leading-relaxed"
-                    >
-                      <p className="mb-1.5 font-semibold">Estimation Rule</p>
-                      <ul className="space-y-1 text-muted-foreground">
-                        <li>
-                          • Story Point ให้ estimate เฉพาะ{" "}
-                          <span className="font-medium text-foreground">Story</span> เท่านั้น
-                        </li>
-                        <li>
-                          • <span className="font-medium text-foreground">Task / Sub-task</span> —
-                          ไม่ใส่ Story Point
-                        </li>
-                        <li>
-                          • Track effort รายคน ให้ใช้{" "}
-                          <span className="font-medium text-foreground">Time (Log Work)</span> ใน
-                          Task แทน
-                        </li>
-                        <li>• ห้าม Story Point ซ้ำหลายระดับ — velocity จะเปรียบเทียบกันไม่ได้</li>
-                      </ul>
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              </TableHead>
-              <TableHead className="w-[80px] text-center text-[11px] font-semibold uppercase tracking-wider">
-                Mandays
-              </TableHead>
-              <TableHead className="w-[120px] text-[11px] font-semibold uppercase tracking-wider">
-                Time
-              </TableHead>
-              <TableHead className="w-[140px] text-[11px] font-semibold uppercase tracking-wider">
-                Note
-              </TableHead>
+              {!isDetailOpen && (
+                <TableHead className="w-[90px] text-center text-[11px] font-semibold uppercase tracking-wider">
+                  Severity
+                </TableHead>
+              )}
+              {!isDetailOpen && (
+                <TableHead className="w-[70px] text-center text-[11px] font-semibold uppercase tracking-wider">
+                  <div className="flex items-center justify-center gap-1">
+                    Story
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Info className="h-3 w-3 shrink-0 cursor-help text-muted-foreground/60" />
+                      </TooltipTrigger>
+                      <TooltipContent
+                        side="bottom"
+                        className="max-w-[240px] p-3 text-[12px] leading-relaxed"
+                      >
+                        <p className="mb-1.5 font-semibold">Estimation Rule</p>
+                        <ul className="space-y-1 text-muted-foreground">
+                          <li>
+                            • Story Point ให้ estimate เฉพาะ{" "}
+                            <span className="font-medium text-foreground">Story</span> เท่านั้น
+                          </li>
+                          <li>
+                            • <span className="font-medium text-foreground">Task / Sub-task</span> —
+                            ไม่ใส่ Story Point
+                          </li>
+                          <li>
+                            • Track effort รายคน ให้ใช้{" "}
+                            <span className="font-medium text-foreground">Time (Log Work)</span> ใน
+                            Task แทน
+                          </li>
+                          <li>• ห้าม Story Point ซ้ำหลายระดับ — velocity จะเปรียบเทียบกันไม่ได้</li>
+                        </ul>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                </TableHead>
+              )}
+              {!isDetailOpen && (
+                <TableHead className="w-[80px] text-center text-[11px] font-semibold uppercase tracking-wider">
+                  Mandays
+                </TableHead>
+              )}
+              {!isDetailOpen && (
+                <TableHead className="w-[120px] text-[11px] font-semibold uppercase tracking-wider">
+                  Time
+                </TableHead>
+              )}
+              {!isDetailOpen && (
+                <TableHead className="w-[140px] text-[11px] font-semibold uppercase tracking-wider">
+                  Note
+                </TableHead>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
             {tasks.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">
+                <TableCell
+                  colSpan={isDetailOpen ? 4 : 9}
+                  className="h-32 text-center text-muted-foreground"
+                >
                   No tasks found
                 </TableCell>
               </TableRow>
@@ -143,6 +157,7 @@ export function TaskTable() {
                   key={task.id}
                   task={task}
                   isSelected={task.id === selectedTaskId}
+                  isDetailOpen={isDetailOpen}
                   onSelect={() => setSelectedTask(task.id === selectedTaskId ? null : task.id)}
                 />
               ))
@@ -157,10 +172,12 @@ export function TaskTable() {
 function TaskRow({
   task,
   isSelected,
+  isDetailOpen,
   onSelect,
 }: {
   task: Task;
   isSelected: boolean;
+  isDetailOpen: boolean;
   onSelect: () => void;
 }) {
   const {
@@ -249,43 +266,53 @@ function TaskRow({
         </Select>
       </TableCell>
       {/* Severity */}
-      <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
-        <Select
-          value={task.severity ?? ""}
-          onValueChange={(v) => updateTaskSeverity(task.id, v as Severity)}
-        >
-          <SelectTrigger className="h-7 w-full justify-center border-none bg-transparent p-0 shadow-none focus:ring-0 [&>svg]:hidden">
-            <SelectValue>
-              <SeverityBadge severity={task.severity} />
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            {SEVERITIES.map((s) => (
-              <SelectItem key={s} value={s} className="text-[13px]">
-                <SeverityBadge severity={s} />
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </TableCell>
-      <TableCell className="py-1.5 text-center" onClick={onSelect}>
-        <span className="text-[13px] tabular-nums">{task.storyLevel ?? "—"}</span>
-      </TableCell>
-      <TableCell className="py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
-        <InlineManday taskId={task.id} value={task.mandays} onUpdate={updateTaskMandays} />
-      </TableCell>
-      <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-1">
-          <span className="text-[12px] tabular-nums text-muted-foreground">
-            {totalMinutes > 0 ? formatMinutes(totalMinutes) : "—"}
-          </span>
-          <LogWorkModal taskId={task.id} onLog={addWorkLog} variant="inline" />
-        </div>
-      </TableCell>
+      {!isDetailOpen && (
+        <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
+          <Select
+            value={task.severity ?? ""}
+            onValueChange={(v) => updateTaskSeverity(task.id, v as Severity)}
+          >
+            <SelectTrigger className="h-7 w-full justify-center border-none bg-transparent p-0 shadow-none focus:ring-0 [&>svg]:hidden">
+              <SelectValue>
+                <SeverityBadge severity={task.severity} />
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {SEVERITIES.map((s) => (
+                <SelectItem key={s} value={s} className="text-[13px]">
+                  <SeverityBadge severity={s} />
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </TableCell>
+      )}
+      {!isDetailOpen && (
+        <TableCell className="py-1.5 text-center" onClick={onSelect}>
+          <span className="text-[13px] tabular-nums">{task.storyLevel ?? "—"}</span>
+        </TableCell>
+      )}
+      {!isDetailOpen && (
+        <TableCell className="py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
+          <InlineManday taskId={task.id} value={task.mandays} onUpdate={updateTaskMandays} />
+        </TableCell>
+      )}
+      {!isDetailOpen && (
+        <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-1">
+            <span className="text-[12px] tabular-nums text-muted-foreground">
+              {totalMinutes > 0 ? formatMinutes(totalMinutes) : "—"}
+            </span>
+            <LogWorkModal taskId={task.id} onLog={addWorkLog} variant="inline" />
+          </div>
+        </TableCell>
+      )}
       {/* Note */}
-      <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
-        <InlineNote taskId={task.id} note={task.note} onUpdate={updateTaskNote} />
-      </TableCell>
+      {!isDetailOpen && (
+        <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
+          <InlineNote taskId={task.id} note={task.note} onUpdate={updateTaskNote} />
+        </TableCell>
+      )}
     </TableRow>
   );
 }
