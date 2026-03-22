@@ -4,6 +4,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { fetchJiraMyselfDisplayName } from "@/lib/jira-api";
 import { getJiraAccounts, type JiraAccount } from "@/lib/jira-db";
+import { getAccountIdFromTask } from "@/lib/jira-ids";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -46,7 +47,7 @@ const CSV_HEADER = [
   "Year",
   "Type",
   "Story Point",
-  "Serverity",
+  "Severity",
   "Usage Time (min)",
   "Ref URL",
   "Note",
@@ -98,18 +99,6 @@ function buildCsv(rows: ExportRow[], fullNamesByAccountId: Record<string, string
   ]
     .map((row) => row.map(escapeCsvValue).join(","))
     .join("\n");
-}
-
-function getAccountIdFromTask(task: Pick<Task, "id" | "jiraTaskId">): string | null {
-  const prefix = "task-";
-  const suffix = `-${task.jiraTaskId}`;
-
-  if (!task.id.startsWith(prefix) || !task.id.endsWith(suffix)) {
-    return null;
-  }
-
-  const accountId = task.id.slice(prefix.length, task.id.length - suffix.length);
-  return accountId || null;
 }
 
 async function getFullNamesByAccountId(rows: ExportRow[]): Promise<Record<string, string>> {

@@ -1,6 +1,7 @@
 import { getJiraBaseUrl, type JiraAccount } from "./jira-db";
 import type { Organization, Project, Task, WorkLog } from "@/types/jira";
 import { fetch } from "@tauri-apps/plugin-http";
+import { getOrganizationId, getProjectId, getTaskId } from "@/lib/jira-ids";
 
 const ISSUE_TYPE_MAP: Partial<Record<string, Task["type"]>> = {
   Bug: "Bug",
@@ -30,6 +31,11 @@ type JiraAssignee = {
   displayName?: string | null;
 };
 
+type JiraProjectField = {
+  key?: string | null;
+  name?: string | null;
+};
+
 type JiraWorklog = {
   id: string;
   timeSpentSeconds?: number | null;
@@ -48,6 +54,7 @@ type JiraIssueFields = {
   timetracking?: {
     originalEstimateSeconds?: number | null;
   } | null;
+  project?: JiraProjectField | null;
   created: string;
   updated: string;
   worklog?: {
@@ -97,8 +104,21 @@ type JiraCreatedWorklogResponse = {
   id?: string | null;
 };
 
+type AssignedJiraData = {
+  projects: Project[];
+  tasks: Task[];
+  worklogsByTaskId: Record<string, WorkLog[]>;
+};
+
 function getAuthHeader(account: JiraAccount): string {
   return "Basic " + btoa(`${account.email}:${account.apiToken}`);
+}
+
+function normalizeHeaders(headers?: HeadersInit): Record<string, string> {
+  if (!headers) return {};
+  if (headers instanceof Headers) return Object.fromEntries(headers.entries());
+  if (Array.isArray(headers)) return Object.fromEntries(headers);
+  return { ...headers };
 }
 
 async function jiraFetch(
@@ -110,9 +130,12 @@ async function jiraFetch(
   const url = `${baseUrl}/rest/api/3/${path}`;
   const headers: Record<string, string> = {
     Authorization: getAuthHeader(account),
-    "Content-Type": "application/json",
     Accept: "application/json",
+    ...normalizeHeaders(options.headers),
   };
+  if (options.body != null && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
 
   const res = await fetch(url, {
     ...options,
@@ -144,7 +167,7 @@ export async function fetchJiraMyselfDisplayName(account: JiraAccount): Promise<
 
 // Fetch all projects (paginated)
 export async function fetchJiraProjects(account: JiraAccount): Promise<Project[]> {
-  const orgId = `org-${account.id}`;
+  const orgId = getOrganizationId(account.id);
   const projects: Project[] = [];
   let startAt = 0;
   const maxResults = 50;
@@ -158,7 +181,7 @@ export async function fetchJiraProjects(account: JiraAccount): Promise<Project[]
 
     for (const p of data.values ?? []) {
       projects.push({
-        id: `proj-${account.id}-${p.key}`,
+        id: getProjectId(account.id, p.key),
         orgId,
         name: p.name,
         jiraProjectKey: p.key,
@@ -180,7 +203,7 @@ export async function fetchJiraOrganization(account: JiraAccount): Promise<Organ
   const data = (await res.json()) as JiraServerInfoResponse;
 
   return {
-    id: `org-${account.id}`,
+    id: getOrganizationId(account.id),
     name: account.name || data.serverTitle || data.baseUrl || baseUrl,
     jiraInstanceUrl: baseUrl,
     lastSyncedAt: new Date().toISOString(),
@@ -227,8 +250,8 @@ function mapIssueToTask(issue: JiraIssue, account: JiraAccount, projectKey: stri
   const type: Task["type"] = issueType ? ISSUE_TYPE_MAP[issueType] ?? "Task" : null;
 
   return {
-    id: `task-${account.id}-${issue.key}`,
-    projectId: `proj-${account.id}-${projectKey}`,
+    id: getTaskId(account.id, issue.key),
+    projectId: getProjectId(account.id, projectKey),
     jiraTaskId: issue.key,
     title: issue.fields.summary ?? "",
     description,
@@ -301,6 +324,88 @@ export async function fetchJiraIssues(
   }
 
   return { tasks: allTasks, statuses: Array.from(statusSet), worklogsByTaskId };
+}
+
+export async function fetchAssignedJiraData(account: JiraAccount): Promise<AssignedJiraData> {
+  const jql = `(assignee = currentUser() OR assignee was currentUser()) ORDER BY updated DESC`;
+  const fields = [
+    "summary",
+    "status",
+    "issuetype",
+    "priority",
+    "assignee",
+    "description",
+    "created",
+    "updated",
+    "customfield_10016",
+    "parent",
+    "worklog",
+    "timetracking",
+    "project",
+  ];
+
+  const projectMap = new Map<string, Project>();
+  const statusSetByProjectId = new Map<string, Set<string>>();
+  const tasks: Task[] = [];
+  const worklogsByTaskId: Record<string, WorkLog[]> = {};
+  let nextPageToken: string | undefined;
+
+  while (true) {
+    const body: Record<string, unknown> = { jql, maxResults: 100, fields };
+    if (nextPageToken) body.nextPageToken = nextPageToken;
+
+    const res = await jiraFetch("search/jql", account, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    const data = (await res.json()) as JiraSearchResponse;
+
+    for (const issue of data.issues ?? []) {
+      const projectKey = issue.fields.project?.key;
+      if (!projectKey) continue;
+
+      const projectId = getProjectId(account.id, projectKey);
+      const project =
+        projectMap.get(projectKey) ??
+        ({
+          id: projectId,
+          orgId: getOrganizationId(account.id),
+          name: issue.fields.project?.name ?? projectKey,
+          jiraProjectKey: projectKey,
+          availableStatuses: [],
+        } satisfies Project);
+
+      if (!projectMap.has(projectKey)) {
+        projectMap.set(projectKey, project);
+      }
+
+      const status = issue.fields.status?.name ?? null;
+      if (status) {
+        const projectStatuses = statusSetByProjectId.get(projectId) ?? new Set<string>();
+        projectStatuses.add(status);
+        statusSetByProjectId.set(projectId, projectStatuses);
+      }
+
+      const task = mapIssueToTask(issue, account, projectKey);
+      tasks.push(task);
+
+      const worklogs = mapWorklogsFromIssue(issue, task.id);
+      if (worklogs.length > 0) {
+        worklogsByTaskId[task.id] = worklogs;
+      }
+    }
+
+    if (data.isLast) break;
+    nextPageToken = data.nextPageToken;
+    if (!nextPageToken) break;
+  }
+
+  const projects = Array.from(projectMap.values()).map((project) => ({
+    ...project,
+    availableStatuses: Array.from(statusSetByProjectId.get(project.id) ?? []),
+  }));
+
+  return { projects, tasks, worklogsByTaskId };
 }
 
 function mapWorklogsFromIssue(issue: JiraIssue, taskId: string): WorkLog[] {

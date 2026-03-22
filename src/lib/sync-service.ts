@@ -1,5 +1,7 @@
 import { db, getJiraAccounts } from "./jira-db";
-import { fetchJiraOrganization, fetchJiraProjects, fetchJiraIssues } from "./jira-api";
+import { fetchAssignedJiraData, fetchJiraOrganization } from "./jira-api";
+import type { Task, WorkLog } from "@/types/jira";
+import { getOrganizationId } from "@/lib/jira-ids";
 
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let isSyncing = false;
@@ -23,6 +25,55 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Sync failed";
 }
 
+function mergeRemoteTaskWithLocalState(remoteTask: Task, localTask?: Task): Task {
+  if (!localTask?.isDirty) {
+    return remoteTask;
+  }
+
+  return {
+    ...remoteTask,
+    type: localTask.type,
+    severity: localTask.severity,
+    storyLevel: localTask.storyLevel,
+    mandays: localTask.mandays,
+    note: localTask.note,
+    refUrl: localTask.refUrl,
+    status: localTask.status ?? remoteTask.status,
+    isDirty: true,
+    isSynced: false,
+  };
+}
+
+async function replaceTaskWorklogs(taskId: string, freshLogs: WorkLog[]): Promise<void> {
+  const existingWorkLogs = await db.workLogs.where("taskId").equals(taskId).toArray();
+  const jiraSourcedIds = existingWorkLogs
+    .filter((workLog) => Boolean(workLog.jiraWorklogId))
+    .map((workLog) => workLog.id);
+
+  if (jiraSourcedIds.length > 0) {
+    await db.workLogs.bulkDelete(jiraSourcedIds);
+  }
+
+  if (freshLogs.length > 0) {
+    await db.workLogs.bulkPut(freshLogs);
+  }
+}
+
+async function removeStaleProjectsForAccount(
+  accountId: string,
+  visibleProjectIds: Set<string>,
+): Promise<void> {
+  const orgId = getOrganizationId(accountId);
+  const existingProjects = await db.projects.where("orgId").equals(orgId).toArray();
+  const staleProjectIds = existingProjects
+    .map((project) => project.id)
+    .filter((projectId) => !visibleProjectIds.has(projectId));
+
+  if (staleProjectIds.length > 0) {
+    await db.projects.bulkDelete(staleProjectIds);
+  }
+}
+
 export async function syncNow(): Promise<void> {
   if (isSyncing) {
     syncPending = true;
@@ -42,49 +93,25 @@ export async function syncNow(): Promise<void> {
       const org = await fetchJiraOrganization(account);
       await db.organizations.put(org);
 
-      // 2. Fetch projects
-      const projects = await fetchJiraProjects(account);
+      // 2. Fetch only projects that contain issues for the configured Jira user
+      const { projects, tasks, worklogsByTaskId } = await fetchAssignedJiraData(account);
+      const visibleProjectIds = new Set(projects.map((project) => project.id));
 
-      // 3. For each project, fetch issues assigned to current user — skip projects with none
-      for (const project of projects) {
-        const { tasks, statuses, worklogsByTaskId } = await fetchJiraIssues(
-          account,
-          project.jiraProjectKey,
-        );
-        if (tasks.length === 0) continue;
+      await removeStaleProjectsForAccount(account.id, visibleProjectIds);
 
-        totalProjects++;
-        project.availableStatuses = statuses;
-        await db.projects.put(project);
+      if (projects.length > 0) {
+        totalProjects += projects.length;
+        await db.projects.bulkPut(projects);
+      }
 
-        // Merge: preserve local dirty changes
-        for (const task of tasks) {
-          const existing = await db.tasks.get(task.id);
-          if (existing && existing.isDirty) {
-            await db.tasks.put({
-              ...task,
-              type: existing.type,
-              severity: existing.severity,
-              storyLevel: existing.storyLevel,
-              mandays: existing.mandays,
-              note: existing.note,
-              refUrl: existing.refUrl,
-              isDirty: true,
-              status: existing.status ?? task.status,
-            });
-          } else {
-            await db.tasks.put(task);
-          }
+      // 3. Merge only tasks that belong to the configured Jira user
+      for (const task of tasks) {
+        const existing = await db.tasks.get(task.id);
+        await db.tasks.put(mergeRemoteTaskWithLocalState(task, existing));
 
-          // Sync work logs: replace Jira-sourced logs, keep locally-created ones
-          const freshLogs = worklogsByTaskId[task.id] ?? [];
-          const existingWorkLogs = await db.workLogs.where("taskId").equals(task.id).toArray();
-          const jiraSourcedIds = existingWorkLogs
-            .filter((wl) => Boolean(wl.jiraWorklogId))
-            .map((wl) => wl.id);
-          if (jiraSourcedIds.length > 0) await db.workLogs.bulkDelete(jiraSourcedIds);
-          if (freshLogs.length > 0) await db.workLogs.bulkPut(freshLogs);
-        }
+        // Sync work logs: replace Jira-sourced logs, keep locally-created ones
+        const freshLogs = worklogsByTaskId[task.id] ?? [];
+        await replaceTaskWorklogs(task.id, freshLogs);
       }
     }
 

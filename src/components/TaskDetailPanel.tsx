@@ -27,6 +27,7 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "@/hooks/use-toast";
 import { openExternal } from "@/lib/desktop";
+import { hasAdfContent } from "@/lib/adf-content";
 import { LogWorkModal } from "@/components/LogWorkModal";
 import { AdfRenderer } from "@/components/AdfRenderer";
 import { formatMinutes, parseTimeInput } from "@/lib/worklog-time";
@@ -63,8 +64,9 @@ export function TaskDetailPanel() {
   const project = getProjectById(task.projectId);
   const statuses = getStatusesForProject(task.projectId);
   const workLogs = getWorkLogsForTask(task.id);
-
-  const activeView = taskDetailViewMode === "description" ? "description" : "details";
+  const hasDescription = hasAdfContent(task.description);
+  const activeView =
+    hasDescription && taskDetailViewMode === "description" ? "description" : "details";
 
   const detailContent = (
     <>
@@ -251,9 +253,9 @@ export function TaskDetailPanel() {
     </>
   );
 
-  const descriptionContent = (
+  const descriptionContent = hasDescription ? (
     <AdfRenderer content={task.description ?? ""} className="text-muted-foreground" />
-  );
+  ) : null;
 
   return (
     <div className="animate-slide-in-right flex h-full w-full flex-col border-l border-border bg-card md:w-[45vw] md:min-w-[360px] md:max-w-[600px]">
@@ -316,22 +318,24 @@ export function TaskDetailPanel() {
 
       <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-4 py-3">
         <h2 className="min-w-0 flex-1 text-base font-semibold leading-snug">{task.title}</h2>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-6 px-2 text-[11px]"
-          onClick={() =>
-            setTaskDetailViewMode(activeView === "description" ? "details" : "description")
-          }
-        >
-          {activeView === "description" ? "Hide Description" : "Show Description"}
-        </Button>
+        {hasDescription && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-6 px-2 text-[11px]"
+            onClick={() =>
+              setTaskDetailViewMode(activeView === "description" ? "details" : "description")
+            }
+          >
+            {activeView === "description" ? "Hide Description" : "Show Description"}
+          </Button>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
         <div className="space-y-5">
-          {activeView === "description" && descriptionContent ? descriptionContent : detailContent}
+          {activeView === "description" ? descriptionContent : detailContent}
         </div>
       </div>
     </div>

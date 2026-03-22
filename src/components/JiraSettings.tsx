@@ -7,7 +7,7 @@ import {
   type JiraAccount,
 } from "@/lib/jira-db";
 import { testJiraConnection } from "@/lib/jira-api";
-import { startBackgroundSync } from "@/lib/sync-service";
+import { startBackgroundSync, stopBackgroundSync } from "@/lib/sync-service";
 import { openExternal } from "@/lib/desktop";
 import {
   Dialog,
@@ -56,6 +56,8 @@ export function JiraSettingsDialog({ open, onOpenChange }: Props) {
       setMode("list");
       setEditing(null);
       setForm(emptyForm);
+      setShowToken(false);
+      setTesting(false);
       setStatus("idle");
     }
   }, [open]);
@@ -84,6 +86,9 @@ export function JiraSettingsDialog({ open, onOpenChange }: Props) {
   const handleDelete = (id: string) => {
     removeJiraAccount(id);
     refresh();
+    if (getJiraAccounts().length === 0) {
+      stopBackgroundSync();
+    }
   };
 
   const accountFromForm = (): Omit<JiraAccount, "id"> => ({
@@ -153,7 +158,7 @@ export function JiraSettingsDialog({ open, onOpenChange }: Props) {
     setMode("list");
   };
 
-  const isFormValid = form.instanceUrl && form.email && form.apiToken;
+  const isFormValid = Boolean(form.instanceUrl && form.email && form.apiToken);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

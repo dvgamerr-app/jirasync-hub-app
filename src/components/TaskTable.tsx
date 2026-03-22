@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTaskStore } from "@/store/task-store";
 import { Task, TaskType, Severity } from "@/types/jira";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -27,6 +27,8 @@ import { formatMinutes, parseTimeInput } from "@/lib/worklog-time";
 
 const TASK_TYPES: TaskType[] = ["Story", "Bug", "Task"];
 const SEVERITIES: Severity[] = ["Critical", "High", "Medium", "Low", "NA"];
+const COMPACT_COLUMN_COUNT = 4;
+const FULL_COLUMN_COUNT = 9;
 
 function TypeIcon({ type }: { type: TaskType | null }) {
   switch (type) {
@@ -63,9 +65,16 @@ function SeverityBadge({ severity }: { severity: Severity | null }) {
 }
 
 export function TaskTable() {
-  const { selectedTaskId, setSelectedTask, getFilteredTasks } = useTaskStore();
+  const { selectedTaskId, setSelectedTask, getFilteredTasks, workLogs, projects } = useTaskStore();
   const tasks = getFilteredTasks();
-  const isDetailOpen = !!selectedTaskId;
+  const showExtendedColumns = !selectedTaskId;
+  const totalMinutesByTaskId = workLogs.reduce<Record<string, number>>((totals, workLog) => {
+    totals[workLog.taskId] = (totals[workLog.taskId] ?? 0) + workLog.timeSpentMinutes;
+    return totals;
+  }, {});
+  const statusesByProjectId = new Map(
+    projects.map((project) => [project.id, project.availableStatuses] as const),
+  );
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -85,12 +94,12 @@ export function TaskTable() {
               <TableHead className="w-[140px] text-[11px] font-semibold uppercase tracking-wider">
                 Status
               </TableHead>
-              {!isDetailOpen && (
+              {showExtendedColumns && (
                 <TableHead className="w-[90px] text-center text-[11px] font-semibold uppercase tracking-wider">
                   Severity
                 </TableHead>
               )}
-              {!isDetailOpen && (
+              {showExtendedColumns && (
                 <TableHead className="w-[70px] text-center text-[11px] font-semibold uppercase tracking-wider">
                   <div className="flex items-center justify-center gap-1">
                     Story
@@ -124,17 +133,17 @@ export function TaskTable() {
                   </div>
                 </TableHead>
               )}
-              {!isDetailOpen && (
+              {showExtendedColumns && (
                 <TableHead className="w-[80px] text-center text-[11px] font-semibold uppercase tracking-wider">
                   Mandays
                 </TableHead>
               )}
-              {!isDetailOpen && (
+              {showExtendedColumns && (
                 <TableHead className="w-[120px] text-[11px] font-semibold uppercase tracking-wider">
                   Time
                 </TableHead>
               )}
-              {!isDetailOpen && (
+              {showExtendedColumns && (
                 <TableHead className="w-[140px] text-[11px] font-semibold uppercase tracking-wider">
                   Note
                 </TableHead>
@@ -145,7 +154,7 @@ export function TaskTable() {
             {tasks.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={isDetailOpen ? 4 : 9}
+                  colSpan={showExtendedColumns ? FULL_COLUMN_COUNT : COMPACT_COLUMN_COUNT}
                   className="h-32 text-center text-muted-foreground"
                 >
                   No tasks found
@@ -157,7 +166,9 @@ export function TaskTable() {
                   key={task.id}
                   task={task}
                   isSelected={task.id === selectedTaskId}
-                  isDetailOpen={isDetailOpen}
+                  showExtendedColumns={showExtendedColumns}
+                  statuses={statusesByProjectId.get(task.projectId) ?? []}
+                  totalMinutes={totalMinutesByTaskId[task.id] ?? 0}
                   onSelect={() => setSelectedTask(task.id === selectedTaskId ? null : task.id)}
                 />
               ))
@@ -172,26 +183,26 @@ export function TaskTable() {
 function TaskRow({
   task,
   isSelected,
-  isDetailOpen,
+  showExtendedColumns,
+  statuses,
+  totalMinutes,
   onSelect,
 }: {
   task: Task;
   isSelected: boolean;
-  isDetailOpen: boolean;
+  showExtendedColumns: boolean;
+  statuses: string[];
+  totalMinutes: number;
   onSelect: () => void;
 }) {
   const {
     updateTaskStatus,
-    getStatusesForProject,
-    getTotalTimeForTask,
     addWorkLog,
     updateTaskType,
     updateTaskSeverity,
     updateTaskNote,
     updateTaskMandays,
   } = useTaskStore();
-  const statuses = getStatusesForProject(task.projectId);
-  const totalMinutes = getTotalTimeForTask(task.id);
 
   return (
     <TableRow
@@ -266,7 +277,7 @@ function TaskRow({
         </Select>
       </TableCell>
       {/* Severity */}
-      {!isDetailOpen && (
+      {showExtendedColumns && (
         <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
           <Select
             value={task.severity ?? ""}
@@ -287,17 +298,17 @@ function TaskRow({
           </Select>
         </TableCell>
       )}
-      {!isDetailOpen && (
+      {showExtendedColumns && (
         <TableCell className="py-1.5 text-center" onClick={onSelect}>
           <span className="text-[13px] tabular-nums">{task.storyLevel ?? "—"}</span>
         </TableCell>
       )}
-      {!isDetailOpen && (
+      {showExtendedColumns && (
         <TableCell className="py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
           <InlineManday taskId={task.id} value={task.mandays} onUpdate={updateTaskMandays} />
         </TableCell>
       )}
-      {!isDetailOpen && (
+      {showExtendedColumns && (
         <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center gap-1">
             <span className="text-[12px] tabular-nums text-muted-foreground">
@@ -308,7 +319,7 @@ function TaskRow({
         </TableCell>
       )}
       {/* Note */}
-      {!isDetailOpen && (
+      {showExtendedColumns && (
         <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
           <InlineNote taskId={task.id} note={task.note} onUpdate={updateTaskNote} />
         </TableCell>
@@ -328,30 +339,71 @@ function InlineManday({
 }) {
   const [editing, setEditing] = useState(false);
   const [raw, setRaw] = useState("");
-  const display = value != null ? formatMinutes(Math.round(value * 480)) : "";
+  const initialValueRef = useRef(value);
+  const skipBlurCommitRef = useRef(false);
+  const display = formatMandayValue(value);
+
+  useEffect(() => {
+    initialValueRef.current = value;
+    if (!editing) {
+      setRaw(formatMandayValue(value));
+    }
+  }, [editing, value]);
 
   const commit = (inputRaw: string) => {
     setEditing(false);
-    if (!inputRaw.trim()) {
-      onUpdate(taskId, null);
+    const trimmed = inputRaw.trim();
+
+    if (!trimmed) {
+      if (initialValueRef.current !== null) {
+        onUpdate(taskId, null);
+      }
       return;
     }
-    const mins = parseTimeInput(inputRaw);
-    if (mins != null) onUpdate(taskId, mins / 480);
+
+    const mins = parseTimeInput(trimmed);
+    if (mins == null) {
+      setRaw(formatMandayValue(initialValueRef.current));
+      return;
+    }
+
+    const nextValue = mins / 480;
+    if (nextValue !== initialValueRef.current) {
+      onUpdate(taskId, nextValue);
+    }
+  };
+
+  const cancelEditing = () => {
+    skipBlurCommitRef.current = true;
+    setRaw(display);
+    setEditing(false);
   };
 
   if (editing) {
     return (
       <Input
         autoFocus
+        aria-label={`Edit mandays for ${taskId}`}
         className="h-6 w-full px-1 text-center text-[12px]"
         placeholder="1d 4h"
         value={raw}
         onChange={(e) => setRaw(e.target.value)}
-        onBlur={() => commit(raw)}
+        onBlur={() => {
+          if (skipBlurCommitRef.current) {
+            skipBlurCommitRef.current = false;
+            return;
+          }
+          commit(raw);
+        }}
         onKeyDown={(e) => {
-          if (e.key === "Enter") commit(raw);
-          if (e.key === "Escape") setEditing(false);
+          if (e.key === "Enter") {
+            e.preventDefault();
+            e.currentTarget.blur();
+          }
+          if (e.key === "Escape") {
+            e.preventDefault();
+            cancelEditing();
+          }
         }}
       />
     );
@@ -381,24 +433,55 @@ function InlineNote({
 }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(note ?? "");
+  const originalRef = useRef(note ?? "");
+  const skipBlurCommitRef = useRef(false);
+
+  useEffect(() => {
+    const normalizedNote = note ?? "";
+    setValue(normalizedNote);
+    originalRef.current = normalizedNote;
+  }, [note]);
+
+  const commit = () => {
+    const trimmed = value.trim() || null;
+    const originalTrimmed = originalRef.current.trim() || null;
+
+    setEditing(false);
+    if (trimmed !== originalTrimmed) {
+      onUpdate(taskId, trimmed);
+    }
+  };
+
+  const cancelEditing = () => {
+    skipBlurCommitRef.current = true;
+    setValue(originalRef.current);
+    setEditing(false);
+  };
 
   if (editing) {
     return (
       <Input
         autoFocus
+        aria-label={`Edit note for ${taskId}`}
         className="h-6 px-1 text-[12px]"
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onBlur={() => {
-          onUpdate(taskId, value.trim() || null);
-          setEditing(false);
+          if (skipBlurCommitRef.current) {
+            skipBlurCommitRef.current = false;
+            return;
+          }
+          commit();
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
-            onUpdate(taskId, value.trim() || null);
-            setEditing(false);
+            e.preventDefault();
+            e.currentTarget.blur();
           }
-          if (e.key === "Escape") setEditing(false);
+          if (e.key === "Escape") {
+            e.preventDefault();
+            cancelEditing();
+          }
         }}
       />
     );
@@ -415,4 +498,8 @@ function InlineNote({
       {note || "—"}
     </span>
   );
+}
+
+function formatMandayValue(value: number | null): string {
+  return value != null ? formatMinutes(Math.round(value * 480)) : "";
 }

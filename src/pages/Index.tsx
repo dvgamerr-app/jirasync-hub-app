@@ -20,7 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "@/hooks/use-toast";
-import { startBackgroundSync, syncNow, onSyncStatus } from "@/lib/sync-service";
+import { onSyncStatus, startBackgroundSync, stopBackgroundSync, syncNow } from "@/lib/sync-service";
 import { getJiraAccounts } from "@/lib/jira-db";
 
 function EmptyTasksState({
@@ -113,7 +113,7 @@ const Index = () => {
       else setSyncing(false);
 
       if (status === "success") {
-        reloadFromDB();
+        void reloadFromDB();
       } else if (status === "error") {
         toast({ title: "Sync Failed", description: message, variant: "destructive" });
       }
@@ -123,7 +123,10 @@ const Index = () => {
       startBackgroundSync();
     }
 
-    return unsub;
+    return () => {
+      unsub();
+      stopBackgroundSync();
+    };
   }, [isLoaded, reloadFromDB]);
 
   const handleManualSync = async () => {

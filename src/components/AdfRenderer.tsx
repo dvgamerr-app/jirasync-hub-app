@@ -419,7 +419,8 @@ interface AdfRendererProps {
 }
 
 export function AdfRenderer({ content, className }: AdfRendererProps) {
-  const adf = parseAdfDocument(content);
+  const normalizedContent = content.trim();
+  const adf = parseAdfDocument(normalizedContent);
 
   if (adf) {
     return (
@@ -430,7 +431,7 @@ export function AdfRenderer({ content, className }: AdfRendererProps) {
   }
 
   // ── Plain-text fallback ───────────────────────────────────────────────────
-  const paragraphs = content.split(/\n{2,}/).filter(Boolean);
+  const paragraphs = normalizedContent.split(/\n{2,}/).filter(Boolean);
   return (
     <div className={cn("space-y-2 text-[13px] leading-relaxed text-muted-foreground", className)}>
       {paragraphs.map((para, i) => (

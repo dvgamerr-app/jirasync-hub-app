@@ -1,5 +1,6 @@
 import Dexie, { type Table } from "dexie";
 import type { Organization, Project, Task, WorkLog } from "@/types/jira";
+import { getOrganizationId, getTaskIdPrefix } from "@/lib/jira-ids";
 
 export interface SyncMeta {
   id: string;
@@ -87,14 +88,7 @@ export function updateJiraAccount(account: JiraAccount): void {
 
 export function removeJiraAccount(id: string): void {
   saveJiraAccounts(getJiraAccounts().filter((a) => a.id !== id));
-  // Clean up DB data for this account
-  const orgId = `org-${id}`;
-  db.organizations.delete(orgId).catch(() => {});
-  db.projects
-    .where("orgId")
-    .equals(orgId)
-    .delete()
-    .catch(() => {});
+  void cleanupAccountData(id);
 }
 
 // Backward-compat helpers
@@ -125,4 +119,26 @@ export function getJiraBaseUrl(account: Pick<JiraAccount, "instanceUrl">): strin
   const url = account.instanceUrl.trim();
   if (url.startsWith("http")) return url.replace(/\/$/, "");
   return `https://${url}.atlassian.net`;
+}
+
+async function cleanupAccountData(accountId: string): Promise<void> {
+  const orgId = getOrganizationId(accountId);
+  const taskIdPrefix = getTaskIdPrefix(accountId);
+
+  try {
+    await db.transaction("rw", db.organizations, db.projects, db.tasks, db.workLogs, async () => {
+      await db.organizations.delete(orgId);
+      await db.projects.where("orgId").equals(orgId).delete();
+      await db.tasks
+        .toCollection()
+        .filter((task) => task.id.startsWith(taskIdPrefix))
+        .delete();
+      await db.workLogs
+        .toCollection()
+        .filter((workLog) => workLog.taskId.startsWith(taskIdPrefix))
+        .delete();
+    });
+  } catch (error) {
+    console.error(`Failed to clean local Jira data for account ${accountId}:`, error);
+  }
 }
