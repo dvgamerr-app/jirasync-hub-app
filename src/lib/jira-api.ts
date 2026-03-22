@@ -418,6 +418,7 @@ function mapWorklogsFromIssue(issue: JiraIssue, taskId: string): WorkLog[] {
     comment: wl.comment ? adfToText(wl.comment).trim() || null : null,
     createdAt: wl.started,
     jiraWorklogId: wl.id,
+    syncStatus: "synced",
   }));
 }
 

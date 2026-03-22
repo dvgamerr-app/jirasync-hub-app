@@ -13,6 +13,12 @@ import {
   addJiraWorkLog,
   deleteJiraWorkLog,
 } from "@/lib/jira-api";
+import {
+  isPendingCreateWorkLog,
+  isPendingDeleteWorkLog,
+  isVisibleWorkLog,
+  toSyncedWorkLog,
+} from "@/lib/worklog-sync";
 
 interface TaskStore {
   organizations: Organization[];
@@ -195,6 +201,10 @@ function replaceWorkLog(workLogs: WorkLog[], nextWorkLog: WorkLog): WorkLog[] {
   return workLogs.map((workLog) => (workLog.id === nextWorkLog.id ? nextWorkLog : workLog));
 }
 
+function removeWorkLog(workLogs: WorkLog[], workLogId: string): WorkLog[] {
+  return workLogs.filter((workLog) => workLog.id !== workLogId);
+}
+
 function markDirty(task: Task, updates: Partial<Task>): Task {
   const updated = {
     ...task,
@@ -215,6 +225,43 @@ async function persistSyncedTask(task: Task): Promise<Task> {
   const synced = toSyncedTask(task);
   await persistTask(synced);
   return synced;
+}
+
+async function syncTaskWorkLogsToJira(task: Task, account: JiraAccount): Promise<void> {
+  const taskWorkLogs = await db.workLogs.where("taskId").equals(task.id).toArray();
+
+  for (const workLog of taskWorkLogs.filter(isPendingCreateWorkLog)) {
+    const jiraWorklogId = await addJiraWorkLog(
+      account,
+      task.jiraTaskId,
+      workLog.timeSpentMinutes,
+      workLog.logDate,
+      workLog.comment,
+    );
+
+    if (!jiraWorklogId) {
+      throw new Error(`Failed creating worklog for ${task.jiraTaskId}`);
+    }
+
+    await db.workLogs.put(toSyncedWorkLog(workLog, jiraWorklogId));
+  }
+
+  for (const workLog of taskWorkLogs.filter(isPendingDeleteWorkLog)) {
+    if (workLog.jiraWorklogId) {
+      await deleteJiraWorkLog(account, task.jiraTaskId, workLog.jiraWorklogId);
+    }
+
+    await db.workLogs.delete(workLog.id);
+  }
+}
+
+async function syncDirtyTask(task: Task, accounts: JiraAccount[]): Promise<void> {
+  const account = getAccountForTask(task, accounts);
+  if (!account) return;
+
+  await pushTaskToJira(task, accounts);
+  await syncTaskWorkLogsToJira(task, account);
+  await persistSyncedTask(task);
 }
 
 export const useTaskStore = create<TaskStore>((set, get) => {
@@ -279,6 +326,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         id: `wl-${Date.now()}`,
         createdAt: new Date().toISOString(),
         jiraWorklogId: null,
+        syncStatus: "pending_create",
       };
       persistWorkLogInBackground(newLog);
       set((state) => ({ workLogs: [...state.workLogs, newLog] }));
@@ -289,72 +337,28 @@ export const useTaskStore = create<TaskStore>((set, get) => {
 
       const dirtyTask = markDirty(task, {});
       set((state) => ({ tasks: replaceTask(state.tasks, dirtyTask) }));
-
-      const account = getAccountForTask(task, getJiraAccounts());
-      if (!account) return;
-
-      addJiraWorkLog(account, task.jiraTaskId, log.timeSpentMinutes, log.logDate, log.comment)
-        .then(async (jiraId) => {
-          if (jiraId) {
-            const updatedWorkLog = { ...newLog, jiraWorklogId: jiraId };
-            await db.workLogs.put(updatedWorkLog);
-            set((state) => ({
-              workLogs: replaceWorkLog(state.workLogs, updatedWorkLog),
-            }));
-          }
-
-          const current = get().tasks.find((candidate) => candidate.id === log.taskId);
-          if (current?.isDirty) {
-            const syncedTask = await persistSyncedTask(current);
-            set((state) => ({ tasks: replaceTask(state.tasks, syncedTask) }));
-          }
-        })
-        .catch((error) => {
-          logStoreError(`Failed to add worklog for ${task.jiraTaskId}:`, error);
-        });
     },
 
     removeWorkLog: (logId) => {
       const log = get().workLogs.find((workLog) => workLog.id === logId);
-      deleteWorkLogInBackground(logId);
-      set((state) => ({ workLogs: state.workLogs.filter((workLog) => workLog.id !== logId) }));
+      if (!log) return;
 
-      // Mark parent task dirty while Jira delete is in flight.
-      const task = log ? get().tasks.find((candidate) => candidate.id === log.taskId) : undefined;
+      if (isPendingCreateWorkLog(log)) {
+        deleteWorkLogInBackground(logId);
+        set((state) => ({ workLogs: removeWorkLog(state.workLogs, logId) }));
+      } else {
+        const pendingDeletedWorkLog: WorkLog = { ...log, syncStatus: "pending_delete" };
+        persistWorkLogInBackground(pendingDeletedWorkLog);
+        set((state) => ({
+          workLogs: replaceWorkLog(state.workLogs, pendingDeletedWorkLog),
+        }));
+      }
+
+      // Keep the parent task dirty so the delete waits for manual push sync.
+      const task = get().tasks.find((candidate) => candidate.id === log.taskId);
       if (task) {
         const dirtyTask = markDirty(task, {});
         set((state) => ({ tasks: replaceTask(state.tasks, dirtyTask) }));
-      }
-
-      if (log?.jiraWorklogId) {
-        const jiraTask = get().tasks.find((candidate) => candidate.id === log.taskId);
-        if (!jiraTask) return;
-
-        const account = getAccountForTask(jiraTask, getJiraAccounts());
-        if (!account) return;
-
-        deleteJiraWorkLog(account, jiraTask.jiraTaskId, log.jiraWorklogId)
-          .then(async () => {
-            const current = get().tasks.find((candidate) => candidate.id === log.taskId);
-            if (current?.isDirty) {
-              const syncedTask = await persistSyncedTask(current);
-              set((state) => ({ tasks: replaceTask(state.tasks, syncedTask) }));
-            }
-          })
-          .catch((error) => {
-            logStoreError(
-              `Failed to delete worklog ${log.jiraWorklogId} for ${jiraTask.jiraTaskId}:`,
-              error,
-            );
-          });
-      } else if (task) {
-        // No Jira worklog id means it was local-only — clear dirty immediately.
-        const current = get().tasks.find((candidate) => candidate.id === task.id);
-        if (current) {
-          const syncedTask = toSyncedTask(current);
-          persistTaskInBackground(syncedTask);
-          set((state) => ({ tasks: replaceTask(state.tasks, syncedTask) }));
-        }
       }
     },
 
@@ -362,9 +366,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       const task = get().tasks.find((candidate) => candidate.id === taskId);
       if (!task || !task.isDirty) return;
 
-      await pushTaskToJira(task, getJiraAccounts());
-      const syncedTask = await persistSyncedTask(task);
-      set((state) => ({ tasks: replaceTask(state.tasks, syncedTask) }));
+      await syncDirtyTask(task, getJiraAccounts());
+      await get().reloadFromDB();
     },
 
     syncAllDirtyTasks: async () => {
@@ -373,7 +376,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
 
       const accounts = getJiraAccounts();
       const settled = await Promise.allSettled(
-        dirtyTasks.map((task) => pushTaskToJira(task, accounts)),
+        dirtyTasks.map((task) => syncDirtyTask(task, accounts)),
       );
 
       const failures: { jiraId: string; reason: unknown }[] = [];
@@ -387,17 +390,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         }
       });
 
-      const syncedTasks = dirtyTasks
-        .filter((_, index) => settled[index].status === "fulfilled")
-        .map(toSyncedTask);
-
-      if (syncedTasks.length > 0) {
-        await db.tasks.bulkPut(syncedTasks);
-        const syncedTasksById = new Map(syncedTasks.map((task) => [task.id, task]));
-        set((state) => ({
-          tasks: state.tasks.map((task) => syncedTasksById.get(task.id) ?? task),
-        }));
-      }
+      await get().reloadFromDB();
 
       if (failures.length > 0) {
         const failedList = failures.map((failure) => failure.jiraId).join(", ");
@@ -425,14 +418,14 @@ export const useTaskStore = create<TaskStore>((set, get) => {
 
     getWorkLogsForTask: (taskId) =>
       get()
-        .workLogs.filter((workLog) => workLog.taskId === taskId)
+        .workLogs.filter((workLog) => workLog.taskId === taskId && isVisibleWorkLog(workLog))
         .sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
 
     getTaskById: (taskId) => get().tasks.find((task) => task.id === taskId),
     getProjectById: (projectId) => get().projects.find((project) => project.id === projectId),
     getTotalTimeForTask: (taskId) =>
       get()
-        .workLogs.filter((workLog) => workLog.taskId === taskId)
+        .workLogs.filter((workLog) => workLog.taskId === taskId && isVisibleWorkLog(workLog))
         .reduce((sum, workLog) => sum + workLog.timeSpentMinutes, 0),
   };
 });

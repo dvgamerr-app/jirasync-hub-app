@@ -44,6 +44,8 @@ export interface WorkLog {
   comment: string | null;
   createdAt: string;
   jiraWorklogId?: string | null;
+  syncStatus?: WorkLogSyncStatus | null;
 }
 
 export type StoryLevel = 1 | 2 | 3 | 5;
+export type WorkLogSyncStatus = "synced" | "pending_create" | "pending_delete";

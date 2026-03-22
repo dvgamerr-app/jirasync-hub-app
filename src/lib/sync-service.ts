@@ -2,6 +2,7 @@ import { db, getJiraAccounts } from "./jira-db";
 import { fetchAssignedJiraData, fetchJiraOrganization } from "./jira-api";
 import type { Task, WorkLog } from "@/types/jira";
 import { getOrganizationId } from "@/lib/jira-ids";
+import { isPendingCreateWorkLog, isPendingDeleteWorkLog } from "@/lib/worklog-sync";
 
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let isSyncing = false;
@@ -46,16 +47,28 @@ function mergeRemoteTaskWithLocalState(remoteTask: Task, localTask?: Task): Task
 
 async function replaceTaskWorklogs(taskId: string, freshLogs: WorkLog[]): Promise<void> {
   const existingWorkLogs = await db.workLogs.where("taskId").equals(taskId).toArray();
+  const pendingDeletedJiraIds = new Set(
+    existingWorkLogs
+      .filter(isPendingDeleteWorkLog)
+      .map((workLog) => workLog.jiraWorklogId)
+      .filter((jiraWorklogId): jiraWorklogId is string => Boolean(jiraWorklogId)),
+  );
+
   const jiraSourcedIds = existingWorkLogs
-    .filter((workLog) => Boolean(workLog.jiraWorklogId))
+    .filter((workLog) => Boolean(workLog.jiraWorklogId) && !isPendingDeleteWorkLog(workLog))
     .map((workLog) => workLog.id);
 
   if (jiraSourcedIds.length > 0) {
     await db.workLogs.bulkDelete(jiraSourcedIds);
   }
 
-  if (freshLogs.length > 0) {
-    await db.workLogs.bulkPut(freshLogs);
+  const visibleFreshLogs = freshLogs.filter(
+    (workLog) =>
+      !pendingDeletedJiraIds.has(workLog.jiraWorklogId ?? "") && !isPendingCreateWorkLog(workLog),
+  );
+
+  if (visibleFreshLogs.length > 0) {
+    await db.workLogs.bulkPut(visibleFreshLogs);
   }
 }
 
