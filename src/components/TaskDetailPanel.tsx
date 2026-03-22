@@ -24,7 +24,7 @@ import {
   ClipboardList,
   Trash2,
 } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
+import { format as formatDate, formatDistanceToNow } from "date-fns";
 import { toast } from "@/hooks/use-toast";
 import { openExternal } from "@/lib/desktop";
 import { hasAdfContent } from "@/lib/adf-content";
@@ -226,25 +226,28 @@ export function TaskDetailPanel() {
           ) : (
             workLogs.map((wl) => (
               <div key={wl.id} className="rounded-md border border-border bg-muted/20 px-3 py-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[12px] font-medium tabular-nums">
-                    {formatMinutes(wl.timeSpentMinutes)}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] text-muted-foreground">{wl.logDate}</span>
-                    <button
-                      type="button"
-                      className="text-muted-foreground transition-colors hover:text-destructive"
-                      onClick={() => removeWorkLog(wl.id)}
-                      title="Delete work log"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
-                  </div>
+                <div className="mb-2 text-[11px] text-muted-foreground">
+                  {formatWorkLogDate(wl.logDate)}
                 </div>
-                {wl.comment && (
-                  <p className="mt-1 text-[12px] text-muted-foreground">{wl.comment}</p>
-                )}
+
+                <div className="flex items-start justify-between gap-2">
+                  <div className="space-y-1">
+                    <span className="text-[12px] font-medium tabular-nums">
+                      {formatMinutes(wl.timeSpentMinutes)}
+                    </span>
+                    {wl.comment && (
+                      <p className="text-[12px] text-muted-foreground">{wl.comment}</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className="mt-0.5 text-muted-foreground transition-colors hover:text-destructive"
+                    onClick={() => removeWorkLog(wl.id)}
+                    title="Delete work log"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
               </div>
             ))
           )}
@@ -443,4 +446,9 @@ function NoteField({
       />
     </div>
   );
+}
+
+function formatWorkLogDate(logDate: string): string {
+  const parsedDate = new Date(logDate);
+  return Number.isNaN(parsedDate.getTime()) ? logDate : formatDate(parsedDate, "d MMM yyyy");
 }

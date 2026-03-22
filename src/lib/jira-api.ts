@@ -43,6 +43,11 @@ type JiraWorklog = {
   comment?: JiraTextContent;
 };
 
+type JiraIssueLinkEntry = {
+  inwardIssue?: { key: string } | null;
+  outwardIssue?: { key: string } | null;
+};
+
 type JiraIssueFields = {
   summary?: string | null;
   description?: JiraTextContent;
@@ -60,6 +65,7 @@ type JiraIssueFields = {
   worklog?: {
     worklogs?: JiraWorklog[];
   } | null;
+  issuelinks?: JiraIssueLinkEntry[] | null;
 };
 
 type JiraIssue = {
@@ -342,12 +348,15 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
     "worklog",
     "timetracking",
     "project",
+    "issuelinks",
   ];
 
   const projectMap = new Map<string, Project>();
   const statusSetByProjectId = new Map<string, Set<string>>();
   const tasks: Task[] = [];
   const worklogsByTaskId: Record<string, WorkLog[]> = {};
+  const fetchedKeys = new Set<string>();
+  const linkedKeys = new Set<string>();
   let nextPageToken: string | undefined;
 
   while (true) {
@@ -363,6 +372,8 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
     for (const issue of data.issues ?? []) {
       const projectKey = issue.fields.project?.key;
       if (!projectKey) continue;
+
+      fetchedKeys.add(issue.key);
 
       const projectId = getProjectId(account.id, projectKey);
       const project =
@@ -393,11 +404,72 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
       if (worklogs.length > 0) {
         worklogsByTaskId[task.id] = worklogs;
       }
+
+      // Collect linked issue keys for a follow-up fetch
+      for (const link of issue.fields.issuelinks ?? []) {
+        const key = link.inwardIssue?.key ?? link.outwardIssue?.key;
+        if (key) linkedKeys.add(key);
+      }
     }
 
     if (data.isLast) break;
     nextPageToken = data.nextPageToken;
     if (!nextPageToken) break;
+  }
+
+  // Fetch linked issues that weren't already returned by the main query
+  const unfetchedLinkedKeys = Array.from(linkedKeys).filter((k) => !fetchedKeys.has(k));
+  if (unfetchedLinkedKeys.length > 0) {
+    const BATCH = 50;
+    for (let i = 0; i < unfetchedLinkedKeys.length; i += BATCH) {
+      const batch = unfetchedLinkedKeys.slice(i, i + BATCH);
+      const linkedJql = `issueKey in (${batch.map((k) => `"${k}"`).join(",")})`;
+      const body: Record<string, unknown> = { jql: linkedJql, maxResults: BATCH, fields };
+
+      try {
+        const res = await jiraFetch("search/jql", account, {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        const data = (await res.json()) as JiraSearchResponse;
+
+        for (const issue of data.issues ?? []) {
+          if (fetchedKeys.has(issue.key)) continue;
+          fetchedKeys.add(issue.key);
+
+          const projectKey = issue.fields.project?.key;
+          if (!projectKey) continue;
+
+          const projectId = getProjectId(account.id, projectKey);
+          if (!projectMap.has(projectKey)) {
+            projectMap.set(projectKey, {
+              id: projectId,
+              orgId: getOrganizationId(account.id),
+              name: issue.fields.project?.name ?? projectKey,
+              jiraProjectKey: projectKey,
+              availableStatuses: [],
+            } satisfies Project);
+          }
+
+          const status = issue.fields.status?.name ?? null;
+          if (status) {
+            const projectStatuses = statusSetByProjectId.get(projectId) ?? new Set<string>();
+            projectStatuses.add(status);
+            statusSetByProjectId.set(projectId, projectStatuses);
+          }
+
+          const task = mapIssueToTask(issue, account, projectKey);
+          tasks.push(task);
+
+          const worklogs = mapWorklogsFromIssue(issue, task.id);
+          if (worklogs.length > 0) {
+            worklogsByTaskId[task.id] = worklogs;
+          }
+        }
+      } catch {
+        // Linked issues batch failed (e.g. permission denied) — skip silently
+      }
+    }
   }
 
   const projects = Array.from(projectMap.values()).map((project) => ({
@@ -473,12 +545,12 @@ export async function addJiraWorkLog(
       started: new Date(started).toISOString().replace("Z", "+0000"),
       ...(comment
         ? {
-            comment: {
-              type: "doc",
-              version: 1,
-              content: [{ type: "paragraph", content: [{ type: "text", text: comment }] }],
-            },
-          }
+          comment: {
+            type: "doc",
+            version: 1,
+            content: [{ type: "paragraph", content: [{ type: "text", text: comment }] }],
+          },
+        }
         : {}),
     }),
   });

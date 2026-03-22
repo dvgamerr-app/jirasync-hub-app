@@ -26,6 +26,7 @@ interface LogWorkModalProps {
 
 export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModalProps) {
   const [open, setOpen] = useState(false);
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [timeInput, setTimeInput] = useState("");
   const [date, setDate] = useState<Date>(new Date());
   const [comment, setComment] = useState("");
@@ -48,6 +49,7 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
     });
     setTimeInput("");
     setComment("");
+    setDatePickerOpen(false);
     setOpen(false);
   };
 
@@ -66,13 +68,46 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
     );
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (!nextOpen) {
+          setDatePickerOpen(false);
+        }
+      }}
+    >
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
       <PopoverContent
         className={cn("space-y-3", variant === "inline" ? "w-64" : "w-72")}
         align="end"
       >
         <h4 className="text-[13px] font-semibold">Log Work</h4>
+
+        <div className="space-y-1.5">
+          <label className="text-[11px] font-medium text-muted-foreground">Date</label>
+          <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" className="h-8 w-full justify-start text-[13px] font-normal">
+                <CalendarIcon className="mr-2 h-3.5 w-3.5" />
+                {format(date, "PPP")}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={date}
+                onSelect={(d) => {
+                  if (!d) return;
+                  setDate(d);
+                  setDatePickerOpen(false);
+                }}
+                initialFocus
+                className="pointer-events-auto p-3"
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
 
         <div className="space-y-1.5">
           <label className="text-[11px] font-medium text-muted-foreground">Time Spent</label>
@@ -86,30 +121,6 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
               if (e.key === "Enter") handleSubmit();
             }}
           />
-        </div>
-
-        <div className="space-y-1.5">
-          <label className="text-[11px] font-medium text-muted-foreground">Date</label>
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                className="h-8 w-full justify-start text-[13px] font-normal"
-              >
-                <CalendarIcon className="mr-2 h-3.5 w-3.5" />
-                {format(date, "PPP")}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar
-                mode="single"
-                selected={date}
-                onSelect={(d) => d && setDate(d)}
-                initialFocus
-                className="pointer-events-auto p-3"
-              />
-            </PopoverContent>
-          </Popover>
         </div>
 
         <div className="space-y-1.5">
