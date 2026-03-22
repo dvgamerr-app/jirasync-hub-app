@@ -247,7 +247,7 @@ function mapIssueToTask(issue: JiraIssue, account: JiraAccount, projectKey: stri
     : null;
 
   const issueType = issue.fields.issuetype?.name ?? undefined;
-  const type: Task["type"] = issueType ? ISSUE_TYPE_MAP[issueType] ?? "Task" : null;
+  const type: Task["type"] = issueType ? (ISSUE_TYPE_MAP[issueType] ?? "Task") : null;
 
   return {
     id: getTaskId(account.id, issue.key),
@@ -479,7 +479,7 @@ export async function addJiraWorkLog(
             },
           }
         : {}),
-      }),
+    }),
   });
   const data = (await res.json()) as JiraCreatedWorklogResponse;
   return data.id ?? null;

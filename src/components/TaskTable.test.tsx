@@ -22,10 +22,7 @@ vi.mock("@/components/ui/select", () => ({
   Select: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   SelectContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   SelectItem: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  SelectTrigger: ({
-    children,
-    ...props
-  }: ButtonHTMLAttributes<HTMLButtonElement>) => (
+  SelectTrigger: ({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) => (
     <button type="button" {...props}>
       {children}
     </button>
@@ -140,7 +137,11 @@ describe("TaskTable", () => {
 
   it("does not mark note dirty when the inline editor is blurred without changes", async () => {
     await act(async () => {
-      clickElement(Array.from(container.querySelectorAll("span")).find((node) => node.textContent === "Keep me") ?? null);
+      clickElement(
+        Array.from(container.querySelectorAll("span")).find(
+          (node) => node.textContent === "Keep me",
+        ) ?? null,
+      );
     });
 
     const input = container.querySelector('input[aria-label="Edit note for task-1"]');

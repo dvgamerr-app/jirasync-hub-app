@@ -172,6 +172,14 @@ function getCurrentPeriod() {
   };
 }
 
+function getFirstRecordPeriod(rows: ExportRow[]): { monthIndex: number; year: number } {
+  if (rows.length === 0) return getCurrentPeriod();
+  const first = rows.reduce((min, row) =>
+    row.year < min.year || (row.year === min.year && row.monthIndex < min.monthIndex) ? row : min,
+  );
+  return { monthIndex: first.monthIndex, year: first.year };
+}
+
 function getExportFileName(monthIndex: number, year: number): string {
   return `jirasync-export-${year}-${String(monthIndex + 1).padStart(2, "0")}.csv`;
 }
@@ -184,11 +192,12 @@ function getDisplayFileName(path: string): string {
 export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: ExportDialogProps) {
   const currentPeriod = getCurrentPeriod();
   const exportRows = createExportRows(tasks, workLogs, projects);
+  const firstRecordPeriod = getFirstRecordPeriod(exportRows);
   const exportYears = Array.from(
     new Set([currentPeriod.year, ...exportRows.map((row) => row.year)]),
   ).sort((a, b) => b - a);
-  const [selectedMonth, setSelectedMonth] = useState(currentPeriod.monthIndex.toString());
-  const [selectedYear, setSelectedYear] = useState(currentPeriod.year.toString());
+  const [selectedMonth, setSelectedMonth] = useState(firstRecordPeriod.monthIndex.toString());
+  const [selectedYear, setSelectedYear] = useState(firstRecordPeriod.year.toString());
   const [exporting, setExporting] = useState(false);
   const [exportDone, setExportDone] = useState(false);
   const [savedFileName, setSavedFileName] = useState("");
@@ -196,12 +205,12 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
   useEffect(() => {
     if (!open) return;
 
-    const period = getCurrentPeriod();
+    const period = getFirstRecordPeriod(exportRows);
     setSelectedMonth(period.monthIndex.toString());
     setSelectedYear(period.year.toString());
     setExportDone(false);
     setSavedFileName("");
-  }, [open]);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const monthIndex = Number(selectedMonth);
   const year = Number(selectedYear);
