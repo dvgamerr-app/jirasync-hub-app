@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { format } from "date-fns";
 import { Check, Download } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
@@ -26,21 +27,6 @@ import {
 import { toast } from "@/hooks/use-toast";
 import type { Project, Task, WorkLog } from "@/types/jira";
 
-const MONTH_OPTIONS = [
-  { value: "0", label: "January" },
-  { value: "1", label: "February" },
-  { value: "2", label: "March" },
-  { value: "3", label: "April" },
-  { value: "4", label: "May" },
-  { value: "5", label: "June" },
-  { value: "6", label: "July" },
-  { value: "7", label: "August" },
-  { value: "8", label: "September" },
-  { value: "9", label: "October" },
-  { value: "10", label: "November" },
-  { value: "11", label: "December" },
-] as const;
-
 const CSV_HEADER = [
   "FullName",
   "Project",
@@ -54,18 +40,40 @@ const CSV_HEADER = [
   "Note",
 ];
 
+function formatMinutesLong(minutes: number): string {
+  const WEEK = 5 * 8 * 60; // 2400 min
+  const DAY = 8 * 60; // 480 min
+  const w = Math.floor(minutes / WEEK);
+  const d = Math.floor((minutes % WEEK) / DAY);
+  const h = Math.floor((minutes % DAY) / 60);
+  const m = minutes % 60;
+  const parts: string[] = [];
+  if (w > 0) parts.push(`${w}w`);
+  if (d > 0) parts.push(`${d}d`);
+  if (h > 0) parts.push(`${h}h`);
+  if (m > 0 || parts.length === 0) parts.push(`${m}m`);
+  return parts.join(" ");
+}
+
 type ExportRow = {
   accountId: string | null;
+  periodLabel: string;
+  periodMonth: string;
+  periodYear: string;
+  periodValue: string;
   projectName: string;
-  monthLabel: string;
-  monthIndex: number;
+  taskId: string;
   note: string;
   refUrl: string;
   severity: string;
   storyPoint: string;
   timeSpentMinutes: number;
   type: string;
-  year: number;
+};
+
+type ExportPeriod = {
+  label: string;
+  value: string;
 };
 
 interface ExportDialogProps {
@@ -88,8 +96,8 @@ function buildCsv(rows: ExportRow[], fullNamesByAccountId: Record<string, string
     ...rows.map((row) => [
       row.accountId ? (fullNamesByAccountId[row.accountId] ?? "") : "",
       row.projectName,
-      row.monthLabel,
-      row.year.toString(),
+      row.periodMonth,
+      row.periodYear,
       row.type,
       row.storyPoint,
       row.severity,
@@ -150,14 +158,16 @@ function createExportRows(tasks: Task[], workLogs: WorkLog[], projects: Project[
     return [
       {
         accountId: getAccountIdFromTask(task),
+        periodLabel: format(date, "yyyy-MMM"),
+        periodMonth: format(date, "MMM"),
+        periodYear: format(date, "yyyy"),
+        periodValue: format(date, "yyyy-MM"),
         projectName: project?.name ?? "",
-        monthLabel: MONTH_OPTIONS[date.getMonth()].label,
-        monthIndex: date.getMonth(),
+        taskId: task.id,
         note: task.note ?? "",
         refUrl: task.refUrl ?? "",
         severity: task.severity ?? "NA",
         storyPoint: task.storyLevel?.toString() ?? "",
-        year: date.getFullYear(),
         timeSpentMinutes: log.timeSpentMinutes,
         type: task.type ?? "",
       },
@@ -165,24 +175,27 @@ function createExportRows(tasks: Task[], workLogs: WorkLog[], projects: Project[
   });
 }
 
-function getCurrentPeriod() {
-  const now = new Date();
-  return {
-    monthIndex: now.getMonth(),
-    year: now.getFullYear(),
-  };
+function comparePeriodValuesDescending(left: string, right: string): number {
+  return right.localeCompare(left);
 }
 
-function getFirstRecordPeriod(rows: ExportRow[]): { monthIndex: number; year: number } {
-  if (rows.length === 0) return getCurrentPeriod();
-  const first = rows.reduce((min, row) =>
-    row.year < min.year || (row.year === min.year && row.monthIndex < min.monthIndex) ? row : min,
+function getExportPeriods(rows: ExportRow[]): ExportPeriod[] {
+  const periodsByValue = new Map<string, ExportPeriod>();
+
+  rows.forEach((row) => {
+    periodsByValue.set(row.periodValue, {
+      label: row.periodLabel,
+      value: row.periodValue,
+    });
+  });
+
+  return Array.from(periodsByValue.values()).sort((left, right) =>
+    comparePeriodValuesDescending(left.value, right.value),
   );
-  return { monthIndex: first.monthIndex, year: first.year };
 }
 
-function getExportFileName(monthIndex: number, year: number): string {
-  return `jirasync-export-${year}-${String(monthIndex + 1).padStart(2, "0")}.csv`;
+function getExportFileName(periodLabel: string): string {
+  return `jirasync-export-${periodLabel}.csv`;
 }
 
 function getDisplayFileName(path: string): string {
@@ -191,34 +204,33 @@ function getDisplayFileName(path: string): string {
 }
 
 export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: ExportDialogProps) {
-  const currentPeriod = getCurrentPeriod();
   const exportRows = createExportRows(tasks, workLogs, projects);
-  const firstRecordPeriod = getFirstRecordPeriod(exportRows);
-  const exportYears = Array.from(
-    new Set([currentPeriod.year, ...exportRows.map((row) => row.year)]),
-  ).sort((a, b) => b - a);
-  const [selectedMonth, setSelectedMonth] = useState(firstRecordPeriod.monthIndex.toString());
-  const [selectedYear, setSelectedYear] = useState(firstRecordPeriod.year.toString());
+  const exportPeriods = getExportPeriods(exportRows);
+  const latestPeriod = exportPeriods[0] ?? null;
+  const [selectedPeriodValue, setSelectedPeriodValue] = useState(latestPeriod?.value ?? "");
   const [exporting, setExporting] = useState(false);
-  const [exportDone, setExportDone] = useState(false);
   const [savedFileName, setSavedFileName] = useState("");
+  const [savedPeriodValue, setSavedPeriodValue] = useState("");
 
   useEffect(() => {
     if (!open) return;
 
-    const period = getFirstRecordPeriod(exportRows);
-    setSelectedMonth(period.monthIndex.toString());
-    setSelectedYear(period.year.toString());
-    setExportDone(false);
+    setSelectedPeriodValue(getExportPeriods(exportRows)[0]?.value ?? "");
     setSavedFileName("");
+    setSavedPeriodValue("");
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const monthIndex = Number(selectedMonth);
-  const year = Number(selectedYear);
-  const matchingRows = exportRows.filter(
-    (row) => row.monthIndex === monthIndex && row.year === year,
-  );
+  const taskById = new Map(tasks.map((t) => [t.id, t]));
+  const matchingRows = exportRows.filter((row) => row.periodValue === selectedPeriodValue);
   const totalMinutes = matchingRows.reduce((sum, row) => sum + row.timeSpentMinutes, 0);
+  const uniqueTaskIds = new Set(matchingRows.map((r) => r.taskId));
+  const totalMandayMinutes = Array.from(uniqueTaskIds).reduce((sum, id) => {
+    const task = taskById.get(id);
+    return sum + (task?.mandays ?? 0) * 480;
+  }, 0);
+  const selectedPeriodLabel =
+    exportPeriods.find((period) => period.value === selectedPeriodValue)?.label ?? "";
+  const hasSavedCurrentPeriod = Boolean(savedFileName) && savedPeriodValue === selectedPeriodValue;
 
   const handleExport = async () => {
     if (exporting || matchingRows.length === 0) return;
@@ -227,7 +239,7 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
 
     try {
       const filePath = await save({
-        defaultPath: getExportFileName(monthIndex, year),
+        defaultPath: getExportFileName(selectedPeriodLabel),
         filters: [{ name: "CSV", extensions: ["csv"] }],
       });
 
@@ -235,15 +247,15 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
 
       const fileName = getDisplayFileName(filePath);
       const fullNamesByAccountId = await getFullNamesByAccountId(matchingRows);
-      await writeTextFile(filePath, buildCsv(matchingRows, fullNamesByAccountId));
+      const csvContent = buildCsv(matchingRows, fullNamesByAccountId);
+      await writeTextFile(filePath, csvContent);
 
       setSavedFileName(fileName);
-      setExportDone(true);
+      setSavedPeriodValue(selectedPeriodValue);
       toast({
         title: "Export complete",
         description: `${matchingRows.length} worklog(s) saved to ${fileName}`,
       });
-      setTimeout(() => onOpenChange(false), 1200);
     } catch (error) {
       toast({
         title: "Export failed",
@@ -261,37 +273,21 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
         <DialogHeader>
           <DialogTitle>Export CSV</DialogTitle>
           <DialogDescription>
-            Choose the month and year to export, then pick where the CSV file should be saved.
+            Choose the month from Time Tracking, then pick where the CSV file should be saved.
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
           <div className="grid gap-2">
-            <Label htmlFor="export-month">Month</Label>
-            <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-              <SelectTrigger id="export-month">
+            <Label htmlFor="export-period">Month</Label>
+            <Select value={selectedPeriodValue} onValueChange={setSelectedPeriodValue}>
+              <SelectTrigger id="export-period">
                 <SelectValue placeholder="Select month" />
               </SelectTrigger>
               <SelectContent>
-                {MONTH_OPTIONS.map((month) => (
-                  <SelectItem key={month.value} value={month.value}>
-                    {month.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="grid gap-2">
-            <Label htmlFor="export-year">Year</Label>
-            <Select value={selectedYear} onValueChange={setSelectedYear}>
-              <SelectTrigger id="export-year">
-                <SelectValue placeholder="Select year" />
-              </SelectTrigger>
-              <SelectContent>
-                {exportYears.map((optionYear) => (
-                  <SelectItem key={optionYear} value={optionYear.toString()}>
-                    {optionYear}
+                {exportPeriods.map((period) => (
+                  <SelectItem key={period.value} value={period.value}>
+                    {period.label}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -299,46 +295,52 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
           </div>
 
           <div
-            className={`rounded-lg border px-3 py-3 ${
-              exportDone ? "border-green-500/40 bg-green-500/10" : "bg-muted/40"
-            }`}
+            className={`rounded-lg border px-3 py-3 ${hasSavedCurrentPeriod ? "border-green-500/40 bg-green-500/10" : "bg-muted/40"}`}
           >
             <p className="text-sm font-medium">
-              {exportDone
-                ? `Saved to ${savedFileName}`
-                : matchingRows.length > 0
-                  ? `${matchingRows.length} worklog(s) ready to export`
-                  : "No worklogs found for this period"}
+              {matchingRows.length > 0
+                ? `${matchingRows.length} worklog(s) ready to export`
+                : "No worklogs found for this month"}
             </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {exportDone
-                ? "The dialog will close automatically."
-                : matchingRows.length > 0
-                  ? `Total logged time: ${totalMinutes} minute(s)`
-                  : "Change the month or year if you need a different export range."}
-            </p>
+            {matchingRows.length > 0 && (
+              <>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Total logged time: {formatMinutesLong(totalMinutes)}
+                </p>
+                {totalMandayMinutes > 0 && (
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Total manday: {formatMinutesLong(totalMandayMinutes)}
+                  </p>
+                )}
+              </>
+            )}
+            {matchingRows.length === 0 && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Select another month from Time Tracking to export.
+              </p>
+            )}
+            {hasSavedCurrentPeriod && (
+              <p className="mt-2 text-xs font-medium text-green-700 dark:text-green-400">
+                Saved to {savedFileName}
+              </p>
+            )}
           </div>
         </div>
 
         <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={exporting || exportDone}
-          >
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={exporting}>
             Cancel
           </Button>
           <Button
             onClick={() => void handleExport()}
-            disabled={exporting || exportDone || matchingRows.length === 0}
-            className={exportDone ? "border-green-500 text-green-600 dark:text-green-400" : ""}
+            disabled={exporting || matchingRows.length === 0}
           >
-            {exportDone ? (
+            {hasSavedCurrentPeriod && !exporting ? (
               <Check className="animate-check-pop h-4 w-4 text-green-500" />
             ) : (
               <Download className="h-4 w-4" />
             )}
-            {exporting ? "Saving..." : exportDone ? "Done" : "Save CSV"}
+            {exporting ? "Saving..." : "Save CSV"}
           </Button>
         </DialogFooter>
       </DialogContent>
