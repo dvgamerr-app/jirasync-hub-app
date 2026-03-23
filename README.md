@@ -34,6 +34,32 @@ bun run build
 bun run tauri
 ```
 
+## macOS Build
+
+```bash
+# Build JiraSync Hub on macOS with Homebrew-installed Bun and Rust:
+brew tap oven-sh/bun
+brew install bun
+brew install rust
+
+# If the Xcode Command Line Tools are not installed yet, run:
+xcode-select --install
+
+# Install dependencies:
+bun i
+
+# Build the macOS application and installer:
+bun tauri build
+```
+
+The macOS build artifacts are generated under:
+
+```text
+src-tauri/target/release/bundle/
+```
+
+With `"bundle.targets": "all"`, Tauri generates the native macOS bundle for the current OS target, including artifacts such as `.app` and `.dmg`.
+
 Useful direct commands:
 
 ```bash
