@@ -130,6 +130,7 @@ function buildBaseStoreState() {
     tasks: [buildTask("task-account-1-ALPHA-1", projectAlpha.id, "ALPHA-1")],
     selectedTaskId: null,
     selectedProjectId: projectAlpha.id,
+    taskStatusFilter: "active" as const,
     getFilteredTasks: () => [buildTask("task-account-1-ALPHA-1", projectAlpha.id, "ALPHA-1")],
     projects: [projectAlpha, projectBeta],
     workLogs: [],
@@ -137,6 +138,7 @@ function buildBaseStoreState() {
     getDirtyTaskCount: () => 0,
     loadFromDB: vi.fn(async () => undefined),
     reloadFromDB: vi.fn(async () => undefined),
+    setTaskStatusFilter: vi.fn(),
     isLoaded: true,
   };
 }
@@ -211,8 +213,30 @@ describe("Index", () => {
 
     const exportButton = findButton(container, "Export");
 
-    expect(container.textContent).toContain("No tasks yet");
+    expect(container.textContent).toContain("No matching tasks");
+    expect(container.textContent).toContain("No active tasks match the current project selection.");
     expect(exportButton).toBeDefined();
     expect(exportButton?.disabled).toBe(false);
+  });
+
+  it("lets users switch the task status filter", async () => {
+    const storeState = buildStoreState();
+    useTaskStoreMock.mockImplementation(() => storeState);
+
+    await act(async () => {
+      root.render(<Index />);
+    });
+
+    const doneFilterButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Done",
+    );
+
+    expect(doneFilterButton).toBeDefined();
+
+    await act(async () => {
+      doneFilterButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(storeState.setTaskStatusFilter).toHaveBeenCalledWith("done");
   });
 });

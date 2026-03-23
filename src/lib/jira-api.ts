@@ -81,6 +81,14 @@ type JiraProjectSearchResponse = {
   isLast?: boolean;
 };
 
+type JiraProjectStatus = {
+  name?: string | null;
+};
+
+type JiraProjectIssueTypeStatuses = {
+  statuses?: JiraProjectStatus[] | null;
+};
+
 type JiraMyselfResponse = {
   displayName?: string | null;
 };
@@ -279,6 +287,37 @@ function mapIssueToTask(issue: JiraIssue, account: JiraAccount, projectKey: stri
   };
 }
 
+function mergeStatuses(primary: Iterable<string>, secondary: Iterable<string>): string[] {
+  const seen = new Set<string>();
+  const merged: string[] = [];
+
+  for (const status of primary) {
+    if (!status || seen.has(status)) continue;
+    seen.add(status);
+    merged.push(status);
+  }
+
+  for (const status of secondary) {
+    if (!status || seen.has(status)) continue;
+    seen.add(status);
+    merged.push(status);
+  }
+
+  return merged;
+}
+
+async function fetchProjectStatuses(account: JiraAccount, projectKey: string): Promise<string[]> {
+  const res = await jiraFetch(`project/${encodeURIComponent(projectKey)}/statuses`, account);
+  const data = (await res.json()) as JiraProjectIssueTypeStatuses[];
+
+  return mergeStatuses(
+    (data ?? []).flatMap((issueType) =>
+      (issueType.statuses ?? []).map((status) => status.name ?? "").filter(Boolean),
+    ),
+    [],
+  );
+}
+
 // Fetch issues for a project using the new /search/jql endpoint
 export async function fetchJiraIssues(
   account: JiraAccount,
@@ -329,7 +368,16 @@ export async function fetchJiraIssues(
     if (!nextPageToken) break;
   }
 
-  return { tasks: allTasks, statuses: Array.from(statusSet), worklogsByTaskId };
+  const projectStatuses = await fetchProjectStatuses(account, projectKey).catch((error: unknown) => {
+    console.warn(`Failed fetching statuses for project ${projectKey}:`, error);
+    return [];
+  });
+
+  return {
+    tasks: allTasks,
+    statuses: mergeStatuses(projectStatuses, statusSet),
+    worklogsByTaskId,
+  };
 }
 
 export async function fetchAssignedJiraData(account: JiraAccount): Promise<AssignedJiraData> {
@@ -472,10 +520,28 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
     }
   }
 
-  const projects = Array.from(projectMap.values()).map((project) => ({
-    ...project,
-    availableStatuses: Array.from(statusSetByProjectId.get(project.id) ?? []),
-  }));
+  const collectedProjects = Array.from(projectMap.values());
+  const projectStatusResults = await Promise.allSettled(
+    collectedProjects.map((project) => fetchProjectStatuses(account, project.jiraProjectKey)),
+  );
+
+  const projects = collectedProjects.map((project, index) => {
+    const statusResult = projectStatusResults[index];
+    if (statusResult.status === "rejected") {
+      console.warn(
+        `Failed fetching statuses for project ${project.jiraProjectKey}:`,
+        statusResult.reason,
+      );
+    }
+
+    return {
+      ...project,
+      availableStatuses: mergeStatuses(
+        statusResult.status === "fulfilled" ? statusResult.value : [],
+        statusSetByProjectId.get(project.id) ?? [],
+      ),
+    };
+  });
 
   return { projects, tasks, worklogsByTaskId };
 }

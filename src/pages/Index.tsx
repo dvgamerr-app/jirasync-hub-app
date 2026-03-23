@@ -7,7 +7,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { MobileSidebar } from "@/components/MobileSidebar";
 import { ExportDialog } from "@/components/ExportDialog";
 import { JiraSettingsDialog } from "@/components/JiraSettings";
-import { useTaskStore } from "@/store/task-store";
+import { type TaskStatusFilter, useTaskStore } from "@/store/task-store";
 import {
   Search,
   CloudUpload,
@@ -22,30 +22,48 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "@/hooks/use-toast";
 import { onSyncStatus, startBackgroundSync, stopBackgroundSync, syncNow } from "@/lib/sync-service";
 import { getJiraAccounts } from "@/lib/jira-db";
+import { cn } from "@/lib/utils";
+
+const TASK_STATUS_FILTERS: Array<{ value: TaskStatusFilter; label: string }> = [
+  { value: "active", label: "Active" },
+  { value: "done", label: "Done" },
+  { value: "all", label: "All" },
+];
 
 function EmptyTasksState({
   hasJiraAccounts,
+  hasAnyTasks,
   syncing,
+  taskStatusFilter,
   onOpenSettings,
   onSync,
 }: {
   hasJiraAccounts: boolean;
+  hasAnyTasks: boolean;
   syncing: boolean;
+  taskStatusFilter: TaskStatusFilter;
   onOpenSettings: () => void;
   onSync: () => Promise<void>;
 }) {
+  const title = hasAnyTasks ? "No matching tasks" : "No tasks yet";
+  const message = hasAnyTasks
+    ? taskStatusFilter === "done"
+      ? "No done tasks match the current project selection."
+      : taskStatusFilter === "active"
+        ? "No active tasks match the current project selection."
+        : "No tasks match the current project selection."
+    : hasJiraAccounts
+      ? "This workspace is still empty. Run Sync to pull tasks from your connected Jira instance."
+      : "Add a Jira instance in Jira Settings to start your first sync and load tasks into this workspace.";
+
   return (
     <div className="flex flex-1 items-center justify-center p-6">
       <div className="w-full max-w-md rounded-2xl border border-dashed border-border bg-card/70 p-8 text-center shadow-sm">
         <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-muted">
           <Server className="h-6 w-6 text-muted-foreground" />
         </div>
-        <h2 className="text-lg font-semibold">No tasks yet</h2>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          {hasJiraAccounts
-            ? "This workspace is still empty. Run Sync to pull tasks from your connected Jira instance."
-            : "Add a Jira instance in Jira Settings to start your first sync and load tasks into this workspace."}
-        </p>
+        <h2 className="text-lg font-semibold">{title}</h2>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">{message}</p>
 
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           {hasJiraAccounts ? (
@@ -81,8 +99,10 @@ const Index = () => {
     workLogs,
     syncAllDirtyTasks,
     getDirtyTaskCount,
+    taskStatusFilter,
     loadFromDB,
     reloadFromDB,
+    setTaskStatusFilter,
     isLoaded,
   } = useTaskStore();
   const filteredTasks = getFilteredTasks();
@@ -145,14 +165,31 @@ const Index = () => {
       </div>
 
       <div className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex h-11 items-center justify-between border-b border-border px-4">
-          <div className="flex items-center gap-2">
+        <header className="flex min-h-11 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-[13px] font-semibold">
               {currentProject ? currentProject.name : "All Tasks"}
             </h1>
             <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground">
               {filteredTasks.length}
             </span>
+            <div className="flex items-center rounded-md border border-border bg-muted/30 p-0.5">
+              {TASK_STATUS_FILTERS.map((filter) => (
+                <button
+                  key={filter.value}
+                  type="button"
+                  onClick={() => setTaskStatusFilter(filter.value)}
+                  className={cn(
+                    "rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors sm:text-[12px]",
+                    taskStatusFilter === filter.value
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
             <Button
               variant="outline"
               size="sm"
@@ -247,7 +284,9 @@ const Index = () => {
           {showEmptyState ? (
             <EmptyTasksState
               hasJiraAccounts={hasJiraAccounts}
+              hasAnyTasks={allTasks.length > 0}
               syncing={syncing}
+              taskStatusFilter={taskStatusFilter}
               onOpenSettings={() => setSettingsOpen(true)}
               onSync={handleManualSync}
             />

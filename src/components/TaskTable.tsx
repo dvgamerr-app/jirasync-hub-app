@@ -263,13 +263,13 @@ function TaskRow({
         </Select>
       </TableCell>
       {/* Status */}
-      <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
+      <TableCell className="w-[140px] py-1.5" onClick={(e) => e.stopPropagation()}>
         <Select value={task.status ?? ""} onValueChange={(v) => updateTaskStatus(task.id, v)}>
-          <SelectTrigger className="h-7 w-full border-none bg-transparent p-0 shadow-none focus:ring-0 [&>svg]:h-3 [&>svg]:w-3">
-            <SelectValue>
-              <StatusBadge status={task.status} />
-            </SelectValue>
-          </SelectTrigger>
+            <SelectTrigger className="h-7 w-full min-w-0 border-none bg-transparent p-0 text-left shadow-none focus:ring-0 [&>span]:min-w-0 [&>span]:flex-1 [&>svg]:h-3 [&>svg]:w-3">
+              <SelectValue>
+                <StatusBadge status={task.status} truncate />
+              </SelectValue>
+            </SelectTrigger>
           <SelectContent>
             {statuses.map((s) => (
               <SelectItem key={s} value={s} className="text-[13px]">

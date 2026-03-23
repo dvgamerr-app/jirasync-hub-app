@@ -20,6 +20,8 @@ import {
   toSyncedWorkLog,
 } from "@/lib/worklog-sync";
 
+export type TaskStatusFilter = "active" | "done" | "all";
+
 interface TaskStore {
   organizations: Organization[];
   projects: Project[];
@@ -29,10 +31,12 @@ interface TaskStore {
 
   selectedProjectId: string | null;
   selectedTaskId: string | null;
+  taskStatusFilter: TaskStatusFilter;
   taskDetailViewMode: "details" | "description";
 
   setSelectedProject: (projectId: string | null) => void;
   setSelectedTask: (taskId: string | null) => void;
+  setTaskStatusFilter: (filter: TaskStatusFilter) => void;
   setTaskDetailViewMode: (mode: "details" | "description") => void;
 
   loadFromDB: () => Promise<void>;
@@ -205,6 +209,37 @@ function removeWorkLog(workLogs: WorkLog[], workLogId: string): WorkLog[] {
   return workLogs.filter((workLog) => workLog.id !== workLogId);
 }
 
+function isDoneTask(task: Pick<Task, "status">): boolean {
+  return task.status?.trim().toLowerCase() === "done";
+}
+
+function matchesTaskStatusFilter(
+  task: Pick<Task, "status">,
+  taskStatusFilter: TaskStatusFilter,
+): boolean {
+  switch (taskStatusFilter) {
+    case "done":
+      return isDoneTask(task);
+    case "active":
+      return !isDoneTask(task);
+    case "all":
+    default:
+      return true;
+  }
+}
+
+function getVisibleTasks(
+  tasks: Task[],
+  selectedProjectId: string | null,
+  taskStatusFilter: TaskStatusFilter,
+): Task[] {
+  const filteredByProject = selectedProjectId
+    ? tasks.filter((task) => task.projectId === selectedProjectId)
+    : tasks;
+
+  return filteredByProject.filter((task) => matchesTaskStatusFilter(task, taskStatusFilter));
+}
+
 function markDirty(task: Task, updates: Partial<Task>): Task {
   const updated = {
     ...task,
@@ -269,7 +304,13 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     const collections = await loadScopedCollections(getJiraAccounts().map((account) => account.id));
     const currentState = get();
     const visibleProjectIds = new Set(collections.projects.map((project) => project.id));
-    const visibleTaskIds = new Set(collections.tasks.map((task) => task.id));
+    const visibleTaskIds = new Set(
+      getVisibleTasks(
+        collections.tasks,
+        currentState.selectedProjectId,
+        currentState.taskStatusFilter,
+      ).map((task) => task.id),
+    );
 
     set({
       ...collections,
@@ -284,9 +325,19 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   };
 
   const updateTask = (taskId: string, updates: Partial<Task>) => {
-    set((state) => ({
-      tasks: state.tasks.map((task) => (task.id === taskId ? markDirty(task, updates) : task)),
-    }));
+    set((state) => {
+      const tasks = state.tasks.map((task) => (task.id === taskId ? markDirty(task, updates) : task));
+      const visibleTaskIds = new Set(
+        getVisibleTasks(tasks, state.selectedProjectId, state.taskStatusFilter).map((task) => task.id),
+      );
+
+      return {
+        tasks,
+        ...(state.selectedTaskId && !visibleTaskIds.has(state.selectedTaskId)
+          ? { selectedTaskId: null }
+          : {}),
+      };
+    });
   };
 
   return {
@@ -298,10 +349,24 @@ export const useTaskStore = create<TaskStore>((set, get) => {
 
     selectedProjectId: null,
     selectedTaskId: null,
+    taskStatusFilter: "active",
     taskDetailViewMode: "details",
 
     setSelectedProject: (projectId) => set({ selectedProjectId: projectId, selectedTaskId: null }),
     setSelectedTask: (taskId) => set({ selectedTaskId: taskId }),
+    setTaskStatusFilter: (taskStatusFilter) =>
+      set((state) => {
+        const visibleTaskIds = new Set(
+          getVisibleTasks(state.tasks, state.selectedProjectId, taskStatusFilter).map((task) => task.id),
+        );
+
+        return {
+          taskStatusFilter,
+          ...(state.selectedTaskId && !visibleTaskIds.has(state.selectedTaskId)
+            ? { selectedTaskId: null }
+            : {}),
+        };
+      }),
     setTaskDetailViewMode: (mode) => set({ taskDetailViewMode: mode }),
 
     loadFromDB: async () => {
@@ -402,10 +467,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     getDirtyTaskCount: () => get().tasks.filter((task) => task.isDirty).length,
 
     getFilteredTasks: () => {
-      const { tasks, selectedProjectId } = get();
-      const filtered = selectedProjectId
-        ? tasks.filter((task) => task.projectId === selectedProjectId)
-        : tasks;
+      const { tasks, selectedProjectId, taskStatusFilter } = get();
+      const filtered = getVisibleTasks(tasks, selectedProjectId, taskStatusFilter);
       return [...filtered].sort(
         (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
       );

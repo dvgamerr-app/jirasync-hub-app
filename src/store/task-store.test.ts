@@ -246,6 +246,7 @@ function seedStore(tasks: Task[], workLogs: WorkLog[]) {
     isLoaded: true,
     selectedProjectId: null,
     selectedTaskId: null,
+    taskStatusFilter: "active",
     taskDetailViewMode: "details",
     reloadFromDB,
   });
@@ -269,6 +270,7 @@ describe("task-store manual worklog sync", () => {
       isLoaded: false,
       selectedProjectId: null,
       selectedTaskId: null,
+      taskStatusFilter: "active",
       taskDetailViewMode: "details",
     });
   });
@@ -379,5 +381,70 @@ describe("task-store manual worklog sync", () => {
       }),
     );
     expect(reloadFromDB).toHaveBeenCalledOnce();
+  });
+});
+
+describe("task-store task status filters", () => {
+  beforeEach(() => {
+    mocked.reset();
+    useTaskStore.setState({
+      organizations: [],
+      projects: [],
+      tasks: [],
+      workLogs: [],
+      isLoaded: false,
+      selectedProjectId: null,
+      selectedTaskId: null,
+      taskStatusFilter: "active",
+      taskDetailViewMode: "details",
+    });
+  });
+
+  it("shows only non-done tasks by default, supports done and all filters", () => {
+    const activeTask = createTask({
+      id: "task-account-1-ALPHA-1",
+      jiraTaskId: "ALPHA-1",
+      status: "In Progress",
+      createdAt: "2026-03-21T10:00:00.000Z",
+    });
+    const doneTask = createTask({
+      id: "task-account-1-ALPHA-2",
+      jiraTaskId: "ALPHA-2",
+      status: "Done",
+      createdAt: "2026-03-21T12:00:00.000Z",
+    });
+    seedStore([activeTask, doneTask], []);
+
+    expect(useTaskStore.getState().taskStatusFilter).toBe("active");
+    expect(useTaskStore.getState().getFilteredTasks().map((task) => task.id)).toEqual([activeTask.id]);
+
+    useTaskStore.getState().setTaskStatusFilter("done");
+    expect(useTaskStore.getState().getFilteredTasks().map((task) => task.id)).toEqual([doneTask.id]);
+
+    useTaskStore.getState().setTaskStatusFilter("all");
+    expect(useTaskStore.getState().getFilteredTasks().map((task) => task.id)).toEqual([
+      doneTask.id,
+      activeTask.id,
+    ]);
+  });
+
+  it("clears the selected task when it no longer matches the active filter", () => {
+    const activeTask = createTask({
+      id: "task-account-1-ALPHA-1",
+      jiraTaskId: "ALPHA-1",
+      status: "In Progress",
+    });
+    const doneTask = createTask({
+      id: "task-account-1-ALPHA-2",
+      jiraTaskId: "ALPHA-2",
+      status: "Done",
+    });
+    seedStore([activeTask, doneTask], []);
+
+    useTaskStore.setState({ selectedTaskId: doneTask.id, taskStatusFilter: "all" });
+
+    useTaskStore.getState().setTaskStatusFilter("active");
+
+    expect(useTaskStore.getState().selectedTaskId).toBeNull();
   });
 });
