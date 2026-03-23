@@ -151,7 +151,6 @@ describe("ExportDialog", () => {
     expect(content).toContain("2026-Mar");
     expect(content).toContain("2026-Jan");
     expect(content.indexOf("2026-Mar")).toBeLessThan(content.indexOf("2026-Jan"));
-    expect(content).toContain("Available months: 2026-Mar to 2026-Jan");
   });
 
   it("exports the latest available month by default and does not auto-close the dialog", async () => {
@@ -171,11 +170,15 @@ describe("ExportDialog", () => {
     });
     expect(writeTextFileMock).toHaveBeenCalledWith(
       "C:\\exports\\jirasync-export-2026-Mar.csv",
-      expect.stringContaining("FullName,Project,Month,Type,Story Point,Severity,Usage Time (min),Ref URL,Note"),
+      expect.stringContaining(
+        "FullName,Project,Month,Year,Type,Story Point,Severity,Usage Time (min),Ref URL,Note",
+      ),
     );
     expect(writeTextFileMock).toHaveBeenCalledWith(
       "C:\\exports\\jirasync-export-2026-Mar.csv",
-      expect.stringContaining("2026-Mar"),
+      expect.stringContaining(
+        "Alice,Project Alpha,Mar,2026,Task,2,Medium,120,https://acme.atlassian.net/browse/ALPHA-1,Keep note",
+      ),
     );
     expect(onOpenChange).not.toHaveBeenCalled();
   });

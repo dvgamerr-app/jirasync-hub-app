@@ -73,6 +73,7 @@ function EmptyTasksState({
 
 const Index = () => {
   const {
+    tasks: allTasks,
     selectedTaskId,
     selectedProjectId,
     getFilteredTasks,
@@ -84,7 +85,7 @@ const Index = () => {
     reloadFromDB,
     isLoaded,
   } = useTaskStore();
-  const tasks = getFilteredTasks();
+  const filteredTasks = getFilteredTasks();
   const currentProject = projects.find((p) => p.id === selectedProjectId);
   const isMobile = useIsMobile();
   const dirtyCount = getDirtyTaskCount();
@@ -94,7 +95,7 @@ const Index = () => {
   const [pushDone, setPushDone] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const hasJiraAccounts = getJiraAccounts().length > 0;
-  const showEmptyState = isLoaded && tasks.length === 0 && !selectedTaskId;
+  const showEmptyState = isLoaded && filteredTasks.length === 0 && !selectedTaskId;
 
   // Load data from IndexedDB on mount
   useEffect(() => {
@@ -150,7 +151,7 @@ const Index = () => {
               {currentProject ? currentProject.name : "All Tasks"}
             </h1>
             <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground">
-              {tasks.length}
+              {filteredTasks.length}
             </span>
             <Button
               variant="outline"
@@ -229,7 +230,7 @@ const Index = () => {
               variant="outline"
               size="sm"
               className="h-7 gap-1.5 text-[12px] transition-all duration-300"
-              disabled={tasks.length === 0}
+              disabled={allTasks.length === 0}
               onClick={() => {
                 setExportDialogOpen(true);
               }}
@@ -269,7 +270,7 @@ const Index = () => {
       <ExportDialog
         open={exportDialogOpen}
         onOpenChange={setExportDialogOpen}
-        tasks={tasks}
+        tasks={allTasks}
         workLogs={workLogs}
         projects={projects}
       />
