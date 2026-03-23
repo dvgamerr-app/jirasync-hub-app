@@ -58,6 +58,7 @@ interface TaskStore {
   getDirtyTaskCount: () => number;
 
   getFilteredTasks: () => Task[];
+  getVisibleProjects: () => Project[];
   getStatusesForProject: (projectId: string) => string[];
   getWorkLogsForTask: (taskId: string) => WorkLog[];
   getTaskById: (taskId: string) => Task | undefined;
@@ -240,6 +241,43 @@ function getVisibleTasks(
   return filteredByProject.filter((task) => matchesTaskStatusFilter(task, taskStatusFilter));
 }
 
+function getVisibleProjectIds(
+  tasks: Task[],
+  projects: Project[],
+  taskStatusFilter: TaskStatusFilter,
+): Set<string> {
+  const knownProjectIds = new Set(projects.map((project) => project.id));
+
+  return new Set(
+    tasks
+      .filter(
+        (task) => knownProjectIds.has(task.projectId) && matchesTaskStatusFilter(task, taskStatusFilter),
+      )
+      .map((task) => task.projectId),
+  );
+}
+
+function getNormalizedSelectionState(
+  tasks: Task[],
+  projects: Project[],
+  selectedProjectId: string | null,
+  selectedTaskId: string | null,
+  taskStatusFilter: TaskStatusFilter,
+): Pick<TaskStore, "selectedProjectId" | "selectedTaskId"> {
+  const visibleProjectIds = getVisibleProjectIds(tasks, projects, taskStatusFilter);
+  const nextSelectedProjectId =
+    selectedProjectId && !visibleProjectIds.has(selectedProjectId) ? null : selectedProjectId;
+  const visibleTaskIds = new Set(
+    getVisibleTasks(tasks, nextSelectedProjectId, taskStatusFilter).map((task) => task.id),
+  );
+
+  return {
+    selectedProjectId: nextSelectedProjectId,
+    selectedTaskId:
+      selectedTaskId && !visibleTaskIds.has(selectedTaskId) ? null : selectedTaskId,
+  };
+}
+
 function markDirty(task: Task, updates: Partial<Task>): Task {
   const updated = {
     ...task,
@@ -303,39 +341,35 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   const refreshStoreFromDB = async (markAsLoaded: boolean): Promise<void> => {
     const collections = await loadScopedCollections(getJiraAccounts().map((account) => account.id));
     const currentState = get();
-    const visibleProjectIds = new Set(collections.projects.map((project) => project.id));
-    const visibleTaskIds = new Set(
-      getVisibleTasks(
-        collections.tasks,
-        currentState.selectedProjectId,
-        currentState.taskStatusFilter,
-      ).map((task) => task.id),
+    const normalizedSelection = getNormalizedSelectionState(
+      collections.tasks,
+      collections.projects,
+      currentState.selectedProjectId,
+      currentState.selectedTaskId,
+      currentState.taskStatusFilter,
     );
 
     set({
       ...collections,
       ...(markAsLoaded ? { isLoaded: true } : {}),
-      ...(currentState.selectedProjectId && !visibleProjectIds.has(currentState.selectedProjectId)
-        ? { selectedProjectId: null }
-        : {}),
-      ...(currentState.selectedTaskId && !visibleTaskIds.has(currentState.selectedTaskId)
-        ? { selectedTaskId: null }
-        : {}),
+      ...normalizedSelection,
     });
   };
 
   const updateTask = (taskId: string, updates: Partial<Task>) => {
     set((state) => {
       const tasks = state.tasks.map((task) => (task.id === taskId ? markDirty(task, updates) : task));
-      const visibleTaskIds = new Set(
-        getVisibleTasks(tasks, state.selectedProjectId, state.taskStatusFilter).map((task) => task.id),
+      const normalizedSelection = getNormalizedSelectionState(
+        tasks,
+        state.projects,
+        state.selectedProjectId,
+        state.selectedTaskId,
+        state.taskStatusFilter,
       );
 
       return {
         tasks,
-        ...(state.selectedTaskId && !visibleTaskIds.has(state.selectedTaskId)
-          ? { selectedTaskId: null }
-          : {}),
+        ...normalizedSelection,
       };
     });
   };
@@ -356,15 +390,17 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     setSelectedTask: (taskId) => set({ selectedTaskId: taskId }),
     setTaskStatusFilter: (taskStatusFilter) =>
       set((state) => {
-        const visibleTaskIds = new Set(
-          getVisibleTasks(state.tasks, state.selectedProjectId, taskStatusFilter).map((task) => task.id),
+        const normalizedSelection = getNormalizedSelectionState(
+          state.tasks,
+          state.projects,
+          state.selectedProjectId,
+          state.selectedTaskId,
+          taskStatusFilter,
         );
 
         return {
           taskStatusFilter,
-          ...(state.selectedTaskId && !visibleTaskIds.has(state.selectedTaskId)
-            ? { selectedTaskId: null }
-            : {}),
+          ...normalizedSelection,
         };
       }),
     setTaskDetailViewMode: (mode) => set({ taskDetailViewMode: mode }),
@@ -472,6 +508,12 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       return [...filtered].sort(
         (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
       );
+    },
+
+    getVisibleProjects: () => {
+      const { projects, tasks, taskStatusFilter } = get();
+      const visibleProjectIds = getVisibleProjectIds(tasks, projects, taskStatusFilter);
+      return projects.filter((project) => visibleProjectIds.has(project.id));
     },
 
     getStatusesForProject: (projectId) => {

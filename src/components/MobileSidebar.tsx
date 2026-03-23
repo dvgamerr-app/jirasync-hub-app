@@ -12,7 +12,8 @@ interface MobileSidebarProps {
 
 export function MobileSidebar({ onOpenSettings }: MobileSidebarProps) {
   const [open, setOpen] = useState(false);
-  const { organizations, projects, selectedProjectId, setSelectedProject } = useTaskStore();
+  const { organizations, selectedProjectId, setSelectedProject, getVisibleProjects } = useTaskStore();
+  const projects = getVisibleProjects();
 
   const handleSelect = (id: string | null) => {
     setSelectedProject(id);

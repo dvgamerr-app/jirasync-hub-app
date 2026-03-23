@@ -11,7 +11,8 @@ interface AppSidebarProps {
 }
 
 export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
-  const { organizations, projects, selectedProjectId, setSelectedProject } = useTaskStore();
+  const { organizations, selectedProjectId, setSelectedProject, getVisibleProjects } = useTaskStore();
+  const projects = getVisibleProjects();
   const [lastSync, setLastSync] = useState<string | null>(null);
 
   useEffect(() => {

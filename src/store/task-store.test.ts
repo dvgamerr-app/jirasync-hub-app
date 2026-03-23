@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Task, WorkLog } from "@/types/jira";
+import type { Project, Task, WorkLog } from "@/types/jira";
 
 type StoredTaskRow = Task;
 type StoredWorkLogRow = WorkLog;
@@ -215,6 +215,17 @@ function createTask(overrides: Partial<Task> = {}): Task {
   };
 }
 
+function createProject(overrides: Partial<Project> = {}): Project {
+  return {
+    id: "proj-account-1-ALPHA",
+    orgId: "org-account-1",
+    name: "Project Alpha",
+    jiraProjectKey: "ALPHA",
+    availableStatuses: ["To Do", "In Progress", "Done"],
+    ...overrides,
+  };
+}
+
 function createWorkLog(overrides: Partial<WorkLog> = {}): WorkLog {
   return {
     id: "wl-1",
@@ -229,7 +240,7 @@ function createWorkLog(overrides: Partial<WorkLog> = {}): WorkLog {
   };
 }
 
-function seedStore(tasks: Task[], workLogs: WorkLog[]) {
+function seedStore(tasks: Task[], workLogs: WorkLog[], projects: Project[] = []) {
   mocked.tasks.clear();
   tasks.forEach((task) => mocked.tasks.set(task.id, task));
 
@@ -240,7 +251,7 @@ function seedStore(tasks: Task[], workLogs: WorkLog[]) {
 
   useTaskStore.setState({
     organizations: [],
-    projects: [],
+    projects,
     tasks,
     workLogs,
     isLoaded: true,
@@ -401,6 +412,7 @@ describe("task-store task status filters", () => {
   });
 
   it("shows only non-done tasks by default, supports done and all filters", () => {
+    const project = createProject();
     const activeTask = createTask({
       id: "task-account-1-ALPHA-1",
       jiraTaskId: "ALPHA-1",
@@ -413,7 +425,7 @@ describe("task-store task status filters", () => {
       status: "Done",
       createdAt: "2026-03-21T12:00:00.000Z",
     });
-    seedStore([activeTask, doneTask], []);
+    seedStore([activeTask, doneTask], [], [project]);
 
     expect(useTaskStore.getState().taskStatusFilter).toBe("active");
     expect(useTaskStore.getState().getFilteredTasks().map((task) => task.id)).toEqual([activeTask.id]);
@@ -429,6 +441,7 @@ describe("task-store task status filters", () => {
   });
 
   it("clears the selected task when it no longer matches the active filter", () => {
+    const project = createProject();
     const activeTask = createTask({
       id: "task-account-1-ALPHA-1",
       jiraTaskId: "ALPHA-1",
@@ -439,12 +452,47 @@ describe("task-store task status filters", () => {
       jiraTaskId: "ALPHA-2",
       status: "Done",
     });
-    seedStore([activeTask, doneTask], []);
+    seedStore([activeTask, doneTask], [], [project]);
 
     useTaskStore.setState({ selectedTaskId: doneTask.id, taskStatusFilter: "all" });
 
     useTaskStore.getState().setTaskStatusFilter("active");
 
     expect(useTaskStore.getState().selectedTaskId).toBeNull();
+  });
+
+  it("hides projects that have no tasks left for the current filter", () => {
+    const activeProject = createProject({
+      id: "proj-account-1-ALPHA",
+      name: "Project Alpha",
+      jiraProjectKey: "ALPHA",
+    });
+    const doneOnlyProject = createProject({
+      id: "proj-account-1-BETA",
+      name: "Project Beta",
+      jiraProjectKey: "BETA",
+    });
+    const activeTask = createTask({
+      id: "task-account-1-ALPHA-1",
+      projectId: activeProject.id,
+      jiraTaskId: "ALPHA-1",
+      status: "In Progress",
+    });
+    const doneTask = createTask({
+      id: "task-account-1-BETA-1",
+      projectId: doneOnlyProject.id,
+      jiraTaskId: "BETA-1",
+      status: "Done",
+    });
+    seedStore([activeTask, doneTask], [], [activeProject, doneOnlyProject]);
+
+    useTaskStore.setState({ selectedProjectId: doneOnlyProject.id, taskStatusFilter: "all" });
+
+    useTaskStore.getState().setTaskStatusFilter("active");
+
+    expect(useTaskStore.getState().getVisibleProjects().map((project) => project.id)).toEqual([
+      activeProject.id,
+    ]);
+    expect(useTaskStore.getState().selectedProjectId).toBeNull();
   });
 });
