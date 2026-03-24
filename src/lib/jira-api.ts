@@ -1,4 +1,4 @@
-import { getJiraBaseUrl, type JiraAccount } from "./jira-db";
+import { getJiraBaseUrl, getStoryPointFieldMap, type JiraAccount } from "./jira-db";
 import type { Organization, Project, Task, WorkLog } from "@/types/jira";
 import { fetch } from "@tauri-apps/plugin-http";
 import { getOrganizationId, getProjectId, getTaskId } from "@/lib/jira-ids";
@@ -56,6 +56,7 @@ type JiraIssueFields = {
   priority?: JiraNamedField | null;
   assignee?: JiraAssignee | null;
   customfield_10016?: number | null;
+  [key: string]: unknown; // allow dynamic custom fields (e.g. story point overrides)
   timetracking?: {
     originalEstimateSeconds?: number | null;
   } | null;
@@ -117,6 +118,13 @@ type JiraTransitionsResponse = {
 type JiraCreatedWorklogResponse = {
   id?: string | null;
 };
+
+export interface JiraField {
+  id: string;
+  name: string;
+  custom: boolean;
+  schema?: { type?: string };
+}
 
 type AssignedJiraData = {
   projects: Project[];
@@ -236,6 +244,61 @@ function adfToText(node: JiraTextContent): string {
   return "";
 }
 
+/** Fetches all custom Jira fields for the account, sorted by name. */
+export async function fetchJiraFields(account: JiraAccount): Promise<JiraField[]> {
+  const res = await jiraFetch("field", account);
+  const data = (await res.json()) as JiraField[];
+  return data.filter((f) => f.custom).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export type StoryPointCandidate = JiraField & { occurrences: number };
+
+/**
+ * Samples up to 20 recent issues from a project and finds which numeric custom
+ * fields actually have values — so the user doesn't have to guess from a list
+ * of identically-named "Story Point" fields.
+ *
+ * @param numericFields - pre-fetched list of numeric custom fields (from fetchJiraFields)
+ */
+export async function detectStoryPointCandidates(
+  account: JiraAccount,
+  projectKey: string,
+  numericFields: JiraField[],
+): Promise<StoryPointCandidate[]> {
+  if (numericFields.length === 0) return [];
+
+  const fieldIds = numericFields.map((f) => f.id);
+
+  try {
+    const res = await jiraFetch("search/jql", account, {
+      method: "POST",
+      body: JSON.stringify({
+        jql: `project = "${projectKey}" ORDER BY updated DESC`,
+        maxResults: 20,
+        fields: fieldIds,
+      }),
+    });
+    const data = (await res.json()) as JiraSearchResponse;
+    const issues = data.issues ?? [];
+
+    const counts = new Map<string, number>();
+    for (const issue of issues) {
+      for (const fieldId of fieldIds) {
+        if (issue.fields[fieldId] != null) {
+          counts.set(fieldId, (counts.get(fieldId) ?? 0) + 1);
+        }
+      }
+    }
+
+    return numericFields
+      .filter((f) => counts.has(f.id))
+      .map((f) => ({ ...f, occurrences: counts.get(f.id)! }))
+      .sort((a, b) => b.occurrences - a.occurrences);
+  } catch {
+    return [];
+  }
+}
+
 function normalizeStoryLevel(value: number | null | undefined): Task["storyLevel"] {
   switch (value) {
     case 1:
@@ -248,7 +311,12 @@ function normalizeStoryLevel(value: number | null | undefined): Task["storyLevel
   }
 }
 
-function mapIssueToTask(issue: JiraIssue, account: JiraAccount, projectKey: string): Task {
+function mapIssueToTask(
+  issue: JiraIssue,
+  account: JiraAccount,
+  projectKey: string,
+  storyPointFieldId = "customfield_10016",
+): Task {
   const desc = issue.fields.description;
   // Preserve raw ADF as JSON string so the renderer can produce rich output.
   // Fall back to adfToText for plain-string descriptions from older API versions.
@@ -272,7 +340,7 @@ function mapIssueToTask(issue: JiraIssue, account: JiraAccount, projectKey: stri
     status: issue.fields.status?.name ?? null,
     type,
     severity: mapPriorityToSeverity(issue.fields.priority?.name),
-    storyLevel: normalizeStoryLevel(issue.fields.customfield_10016),
+    storyLevel: normalizeStoryLevel(issue.fields[storyPointFieldId] as number | null | undefined),
     mandays:
       issue.fields.timetracking?.originalEstimateSeconds != null
         ? Math.round((issue.fields.timetracking.originalEstimateSeconds / 28800) * 1000) / 1000
@@ -323,6 +391,10 @@ export async function fetchJiraIssues(
   account: JiraAccount,
   projectKey: string,
 ): Promise<{ tasks: Task[]; statuses: string[]; worklogsByTaskId: Record<string, WorkLog[]> }> {
+  const projectId = getProjectId(account.id, projectKey);
+  const storyPointFieldMap = getStoryPointFieldMap();
+  const storyPointFieldId = storyPointFieldMap[projectId] ?? "customfield_10016";
+
   const jql = `project = "${projectKey}" AND (assignee = currentUser() OR assignee was currentUser()) ORDER BY updated DESC`;
   const fields = [
     "summary",
@@ -333,7 +405,7 @@ export async function fetchJiraIssues(
     "description",
     "created",
     "updated",
-    "customfield_10016",
+    storyPointFieldId,
     "parent",
     "worklog",
     "timetracking",
@@ -357,7 +429,7 @@ export async function fetchJiraIssues(
     for (const issue of data.issues ?? []) {
       const status = issue.fields.status?.name ?? null;
       if (status) statusSet.add(status);
-      const task = mapIssueToTask(issue, account, projectKey);
+      const task = mapIssueToTask(issue, account, projectKey, storyPointFieldId);
       allTasks.push(task);
       const wls = mapWorklogsFromIssue(issue, task.id);
       if (wls.length > 0) worklogsByTaskId[task.id] = wls;
@@ -381,6 +453,13 @@ export async function fetchJiraIssues(
 }
 
 export async function fetchAssignedJiraData(account: JiraAccount): Promise<AssignedJiraData> {
+  const storyPointFieldMap = getStoryPointFieldMap();
+  // Collect all unique story-point field IDs configured for this account's projects.
+  const storyPointFieldIds = new Set(["customfield_10016"]);
+  for (const fieldId of Object.values(storyPointFieldMap)) {
+    if (fieldId) storyPointFieldIds.add(fieldId);
+  }
+
   const jql = `(assignee = currentUser() OR assignee was currentUser()) ORDER BY updated DESC`;
   const fields = [
     "summary",
@@ -391,7 +470,7 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
     "description",
     "created",
     "updated",
-    "customfield_10016",
+    ...storyPointFieldIds,
     "parent",
     "worklog",
     "timetracking",
@@ -445,7 +524,8 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
         statusSetByProjectId.set(projectId, projectStatuses);
       }
 
-      const task = mapIssueToTask(issue, account, projectKey);
+      const projectStoryPointFieldId = storyPointFieldMap[projectId] ?? "customfield_10016";
+      const task = mapIssueToTask(issue, account, projectKey, projectStoryPointFieldId);
       tasks.push(task);
 
       const worklogs = mapWorklogsFromIssue(issue, task.id);
@@ -506,7 +586,9 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
             statusSetByProjectId.set(projectId, projectStatuses);
           }
 
-          const task = mapIssueToTask(issue, account, projectKey);
+          const linkedProjectId = getProjectId(account.id, projectKey);
+          const linkedStoryPointFieldId = storyPointFieldMap[linkedProjectId] ?? "customfield_10016";
+          const task = mapIssueToTask(issue, account, projectKey, linkedStoryPointFieldId);
           tasks.push(task);
 
           const worklogs = mapWorklogsFromIssue(issue, task.id);

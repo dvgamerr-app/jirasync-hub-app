@@ -115,6 +115,25 @@ export function clearJiraSettings(): void {
   localStorage.removeItem(JIRA_SETTINGS_KEY_LEGACY);
 }
 
+// ── Story Point Field Mapping ──────────────────────────────────────────────────
+// Maps projectId → Jira custom field ID for story points.
+// Stored in localStorage so it persists across app restarts without a DB migration.
+const STORY_POINT_FIELDS_KEY = "jira-story-point-fields";
+
+/** Returns the saved { projectId → fieldId } mapping. */
+export function getStoryPointFieldMap(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(STORY_POINT_FIELDS_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveStoryPointFieldMap(map: Record<string, string>): void {
+  localStorage.setItem(STORY_POINT_FIELDS_KEY, JSON.stringify(map));
+}
+
 export function getJiraBaseUrl(account: Pick<JiraAccount, "instanceUrl">): string {
   const url = account.instanceUrl.trim();
   if (url.startsWith("http")) return url.replace(/\/$/, "");

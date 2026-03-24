@@ -181,6 +181,7 @@ const mocked = vi.hoisted(() => {
 vi.mock("@/lib/jira-db", () => ({
   db: mocked.db,
   getJiraAccounts: mocked.getJiraAccounts,
+  getStoryPointFieldMap: () => ({}),
 }));
 
 vi.mock("@/lib/jira-api", () => ({

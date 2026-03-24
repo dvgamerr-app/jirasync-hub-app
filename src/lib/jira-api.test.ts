@@ -10,6 +10,7 @@ vi.mock("@tauri-apps/plugin-http", () => ({
 
 vi.mock("@/lib/jira-db", () => ({
   getJiraBaseUrl: (account: { instanceUrl: string }) => account.instanceUrl,
+  getStoryPointFieldMap: () => ({}),
 }));
 
 const account: JiraAccount = {
@@ -82,7 +83,7 @@ describe("fetchAssignedJiraData", () => {
   });
 
   it("falls back to issue-derived statuses if project status lookup fails", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => { });
 
     httpFetchMock.mockImplementation(async (url: string) => {
       if (url.endsWith("/rest/api/3/search/jql")) {

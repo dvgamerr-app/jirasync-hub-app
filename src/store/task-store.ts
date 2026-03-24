@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { Organization, Project, Task, WorkLog, StoryLevel, TaskType, Severity } from "@/types/jira";
-import { db, getJiraAccounts, type JiraAccount } from "@/lib/jira-db";
+import { db, getJiraAccounts, getStoryPointFieldMap, type JiraAccount } from "@/lib/jira-db";
 import {
   getAccountIdFromTask,
   isOrganizationIdForAccounts,
@@ -84,9 +84,13 @@ function getAccountForTask(task: Task, accounts: JiraAccount[]): JiraAccount | u
 async function pushTaskToJira(task: Task, accounts: JiraAccount[]): Promise<void> {
   const account = getAccountForTask(task, accounts);
   if (!account) return;
+
+  const storyPointFieldMap = getStoryPointFieldMap();
+  const storyPointFieldId = storyPointFieldMap[task.projectId] ?? "customfield_10016";
+
   const fields: Record<string, unknown> = {};
-  // Always send customfield_10016 — null clears story points in Jira
-  fields.customfield_10016 = task.storyLevel ?? null;
+  // Always send the story point field — null clears it in Jira
+  fields[storyPointFieldId] = task.storyLevel ?? null;
   if (task.severity && task.severity !== "NA" && SEVERITY_TO_PRIORITY[task.severity]) {
     fields.priority = { name: SEVERITY_TO_PRIORITY[task.severity] };
   }
