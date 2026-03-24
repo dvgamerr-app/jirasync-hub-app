@@ -1,277 +1,97 @@
-# JiraSync Hub — Agent Knowledge Base
+# JiraSync Hub — Agent Notes
 
-> สรุปสภาพโปรเจกต์ที่ verify จาก source ปัจจุบัน
-> อัปเดตล่าสุด: 2026-03-21
+## App in 1 minute
 
----
+- Desktop app สำหรับ sync Jira tasks/worklogs มาทำงานในเครื่อง, แก้แบบ offline-first-ish, แล้ว push เฉพาะ task ที่ dirty กลับ Jira
+- รองรับเฉพาะ `windows`, `linux`, `macos`
+- Stack หลัก: Tauri 2, React 19, Vite 7, Tailwind + shadcn/ui, Zustand, Dexie, localStorage, Vitest
 
-## Current Stack
+## Code map
 
-- **Desktop shell:** Tauri 2 (`src-tauri/`)
-- **Frontend:** React 19 + Vite 7 + Tailwind CSS + shadcn/ui
-- **State / storage:** Zustand + Dexie IndexedDB + localStorage
-- **Tooling:** Vitest, ESLint, Prettier
+- `src/App.tsx`: app shell, titlebar/resize handles, `HashRouter`
+- `src/pages/Index.tsx`: main dashboard, sync/export/settings controls
+- `src/store/task-store.ts`: source of truth ของ UI, dirty state, push ไป Jira
+- `src/lib/sync-service.ts`: background pull sync ทุก 1 ชั่วโมง
+- `src/lib/jira-api.ts`: Jira HTTP client + Jira -> local model mapping
+- `src/lib/jira-db.ts`: Dexie + localStorage helpers
+- `src/lib/jira-ids.ts`: account-scoped IDs
+- `src/components/JiraSettings.tsx`: Jira accounts + story point field mapping
+- `src/components/ExportDialog.tsx`: export CSV ผ่าน Tauri dialog/fs
+- `src-tauri/src/lib.rs`: สร้าง main window และลง plugins
 
----
+## Data / storage
 
-## Platform Support Scope
+- localStorage:
+  - `jira-accounts`
+  - `jira-settings` เป็น legacy key และ migrate อัตโนมัติ
+  - `jira-story-point-fields` = `{ [projectId]: jiraCustomFieldId }`
+- IndexedDB (`jira-task-manager`):
+  - `organizations: "id, name"`
+  - `projects: "id, orgId, jiraProjectKey"`
+  - `tasks: "id, projectId, jiraTaskId, status, isDirty"`
+  - `workLogs: "id, taskId, logDate"`
+  - `syncMeta: "id"`
+- ID format:
+  - org: `org-${accountId}`
+  - project: `proj-${accountId}-${projectKey}`
+  - task: `task-${accountId}-${issueKey}`
 
-- ระบุการรองรับ/รับรองเฉพาะ **desktop**: `linux`, `macos`, `windows`
-- ไม่ต้องเขียนหรืออ้างว่าโปรเจกต์นี้รับรอง `android` หรือ `ios`
-- หากพบ asset หรือ dependency ของ mobile platform ใน lockfile / generated files ให้ถือว่าเป็น artifact ของ ecosystem ไม่ใช่ platform เป้าหมายของแอป
+## Jira behavior
 
----
+- Auth = Basic `email:apiToken`
+- Frontend เรียก Jira ตรงผ่าน `@tauri-apps/plugin-http`; ยังไม่มี Rust proxy
+- Endpoint ที่ใช้จริง:
+  - `myself`, `serverInfo`, `project/search`, `project/{key}/statuses`, `field`, `search/jql`
+  - `issue/{key}`, `issue/{key}/transitions`, `issue/{key}/worklog`, `issue/{key}/worklog/{id}`
+- Pull sync:
+  - ดึง issue ที่ current user ถูก assign หรือเคยถูก assign
+  - ดึง linked issues เพิ่ม ถ้ายังไม่ติดมาจาก query หลัก
+  - merge statuses จาก project endpoint + statuses ที่เห็นจาก issues
+- Push sync:
+  - ส่ง story points, priority จาก severity, timetracking, และ Jira description จาก `task.note`
+  - `mandays` ภายในระบบคิดเป็น decimal day โดย `1 = 8 ชั่วโมง`
+  - severity map เป็น `Critical -> Highest`, `High -> High`, `Medium -> Medium`, `Low -> Low`
 
-## Project Structure
+## Current product behavior
 
-```text
-wedo-jirasync-hub-app/
-├── index.html
-├── package.json
-├── vite.config.ts
-├── vitest.config.ts
-├── tailwind.config.ts
-├── src/
-│   ├── App.tsx
-│   ├── main.tsx
-│   ├── components/
-│   │   ├── TitleBar.tsx
-│   │   ├── JiraSettings.tsx
-│   │   └── ui/
-│   ├── hooks/
-│   ├── lib/
-│   │   ├── desktop.ts
-│   │   ├── jira-api.ts
-│   │   ├── jira-db.ts
-│   │   ├── sync-service.ts
-│   │   └── utils.ts
-│   ├── pages/
-│   ├── store/task-store.ts
-│   ├── test/
-│   └── types/jira.ts
-└── src-tauri/
-    ├── tauri.conf.json
-    ├── Cargo.toml
-    ├── capabilities/default.json
-    └── src/
-        ├── main.rs
-        └── lib.rs
-```
+- แก้จาก UI ได้: status, type, severity, story level, mandays, note, worklogs
+- `storyLevel` รับเฉพาะ `1 | 2 | 3 | 5`
+- `task.description` เก็บ Jira description เดิม; ถ้าเป็น ADF จะเก็บเป็น JSON string เพื่อ render ด้วย `AdfRenderer`
+- `task.note` เป็น field local แต่ตอน push จะเขียนกลับไปที่ Jira `description`
+- Worklog ใช้ `syncStatus = synced | pending_create | pending_delete`
+- Export CSV ใช้เฉพาะ worklogs ที่ยัง visible และเลือก export ตามเดือน
+- Story point field ต่อ project เลือกได้ใน Jira Settings และ auto-detect จาก numeric custom fields ที่มีค่าจริง
 
----
+## Window / platform
 
-## Window Strategy
+- รองรับเฉพาะ desktop; อย่าอ้างรองรับ `android` หรือ `ios`
+- Windows/Linux: custom HTML titlebar + resize handles
+- macOS: native transparent titlebar จาก Rust (`hidden_title`, `TitleBarStyle::Transparent`)
+- main window ถูกสร้างใน Rust (`src-tauri/src/lib.rs`) ไม่ได้ประกาศใน `tauri.conf.json`
+- Window state restore ผ่าน `tauri-plugin-window-state`
+- Tauri plugins ที่ใช้จริง: `http`, `dialog`, `fs`, `opener`, `window-state`
+- capability HTTP อนุญาต `https://*.atlassian.net`
 
-### Windows / Linux
+## Rules / gotchas
 
-- The app uses a **custom HTML titlebar**
-- Native window decorations are disabled in Rust with `.decorations(false)`
-- Frontend window actions call Tauri window APIs from `src/lib/desktop.ts`
-- Resize handles in `src/App.tsx` call `startResizeDragging()`
+- อย่า hardcode story point field ใหม่ตรงๆ; ใช้ `getStoryPointFieldMap()[projectId] ?? "customfield_10016"`
+- `JiraIssueFields` ต้องมี `[key: string]: unknown` เพื่อรองรับ dynamic custom fields
+- `detectStoryPointCandidates()` ต้อง fail เงียบและ return `[]`
+- mock `@/lib/jira-db` ใน Vitest ต้อง export `getStoryPointFieldMap`
+- `removeJiraAccount()` ปัจจุบันลบ org/project/task/worklog ของ account นั้นออกจาก local DB แล้ว
+- `sync-service.ts` ยัง persist เฉพาะ project ที่มี fetched issues; project ว่างจะไม่ถูกเก็บ
+- `removeStaleProjectsForAccount()` ลบเฉพาะ project rows; tasks/worklogs เก่าของ project ที่หายไปอาจยังค้างใน Dexie แต่จะถูก filter ออกจาก UI
+- Theme ยังควบคุมแค่ DOM class; ไม่มี native Tauri theme bridge
+- asset ฝั่ง mobile ใน `src-tauri/icons` เป็น artifact ของ Tauri tooling ไม่ใช่ target platform
 
-### macOS
-
-- The app uses the **native macOS titlebar**
-- The main window is created in `src-tauri/src/lib.rs`
-- macOS builder path uses:
-  - `.hidden_title(true)`
-  - `.title_bar_style(TitleBarStyle::Transparent)`
-- Window background color is set from Rust via `cocoa`
-
-### Tauri Plugins
-
-| Plugin           | Crate                       | Purpose                                                                                                                                                                               |
-| ---------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **opener**       | `tauri-plugin-opener`       | Opens external URLs via OS default handler. Used by `openExternal()` in `desktop.ts`.                                                                                                 |
-| **window-state** | `tauri-plugin-window-state` | Persists window size, position, and maximized state to disk. State is restored automatically on next launch. Hooked via `WindowExt::restore_state(StateFlags::all())` inside `setup`. |
-
----
-
-## Window State Persistence
-
-- Saved automatically when the window closes (plugin hooks into the close event).
-- Restored on startup inside `setup` via `window.restore_state(StateFlags::all())`.
-- `StateFlags::all()` covers: **size**, **position**, **maximized** — all three are preserved.
-- State file is written to the app's data directory by the plugin; no manual I/O needed.
-- Default size (`1280×800`) is used only on first launch when no saved state exists.
-
----
-
-## Capability permissions
-
-`src-tauri/capabilities/default.json` grants:
-
-- `core:window:allow-close`
-- `core:window:allow-minimize`
-- `core:window:allow-toggle-maximize`
-- `core:window:allow-start-dragging`
-- `core:window:allow-start-resize-dragging`
-- `opener:default`
-- `window-state:default`
-
----
-
-## Vite + Tauri Configuration
-
-### Vite
-
-```typescript
-// vite.config.ts
-plugins: [react()];
-resolve.alias["@"] = path.resolve(__dirname, "src");
-server.port = 1420;
-server.strictPort = true;
-server.watch.ignored = ["**/src-tauri/**"];
-```
-
-- Root HTML entry is `index.html`
-- Frontend entry is `/src/main.tsx`
-- `TAURI_DEV_HOST` only adjusts HMR websocket settings for `tauri dev`
-
-### Tauri
-
-```json
-// src-tauri/tauri.conf.json
-{
-  "build": {
-    "beforeDevCommand": "bun run dev",
-    "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run build",
-    "frontendDist": "../dist"
-  },
-  "app": {
-    "windows": []
-  }
-}
-```
-
-- `main` window is created manually in Rust during `setup`
-- Default window size is `1280x800`
-- Minimum size is `1200x800`
-
----
-
-## Jira Integration
-
-### Authentication
-
-```typescript
-const authHeader = "Basic " + btoa(`${email}:${apiToken}`);
-```
-
-Headers sent by `jira-api.ts`:
-
-```typescript
-{
-  Authorization: "Basic ...",
-  "Content-Type": "application/json",
-  Accept: "application/json"
-}
-```
-
-### Current Jira endpoints in use
-
-- `GET /rest/api/3/myself`
-- `GET /rest/api/3/serverInfo`
-- `GET /rest/api/3/project/search`
-- `POST /rest/api/3/search/jql`
-- `GET /rest/api/3/issue/{key}/transitions`
-- `POST /rest/api/3/issue/{key}/transitions`
-- `PUT /rest/api/3/issue/{key}`
-- `POST /rest/api/3/issue/{key}/worklog`
-- `DELETE /rest/api/3/issue/{key}/worklog/{id}`
-
-### Request path
-
-- Jira calls are made from the frontend with `fetch(..., { credentials: "omit" })`
-- There is currently **no** Rust-side HTTP proxy
-
----
-
-## Local Storage and IndexedDB
-
-### Jira accounts
-
-- localStorage key: `jira-accounts`
-- legacy key: `jira-settings`
-- `getJiraAccounts()` migrates old single-account data automatically
-
-```typescript
-interface JiraAccount {
-  id: string;
-  name: string;
-  instanceUrl: string;
-  email: string;
-  apiToken: string;
-}
-```
-
-### Dexie schema
-
-Database name: `jira-task-manager`
-
-```typescript
-organizations: "id, name";
-projects: "id, orgId, jiraProjectKey";
-tasks: "id, projectId, jiraTaskId, status, isDirty";
-workLogs: "id, taskId, logDate";
-syncMeta: "id";
-```
-
-### ID namespacing
-
-- Organization: `org-${account.id}`
-- Project: `proj-${account.id}-${projectKey}`
-- Task: `task-${account.id}-${issueKey}`
-
----
-
-## Store and Sync Behavior
-
-`src/store/task-store.ts`:
-
-- loads IndexedDB rows and filters by active Jira account IDs
-- marks local edits with `isDirty = true`
-- pushes dirty task fields back to Jira
-- syncs status, story points, severity-to-priority, mandays, note, and worklogs
-
-`src/lib/sync-service.ts`:
-
-- syncs all configured accounts
-- preserves local dirty fields when merging remote Jira data
-- replaces Jira-sourced worklogs with the latest remote copy
-- updates `syncMeta["last-sync"]`
-- runs background sync every 1 hour
-
----
-
-## Commands
-
-### package.json scripts
+## Useful commands
 
 ```bash
 bun run dev
 bun run build
-bun run preview
 bun run tauri
+bun run lint
 bun run format
-bun run format:fix
-```
-
-### Useful direct commands
-
-```bash
 bun x vitest run
-bun x eslint .
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
-
----
-
-## Known Gotchas
-
-1. macOS titlebar behavior is implemented in Rust, so frontend-only changes do not fully describe window chrome on macOS.
-2. `removeJiraAccount()` removes the account plus org/project rows, but leaves namespaced task/worklog rows in Dexie.
-3. `sync-service.ts` skips projects with zero matching tasks, so empty Jira projects are not persisted locally.
-4. Worklog add/remove updates local IndexedDB first, then reconciles Jira asynchronously.
-5. `ThemeToggle` manages theme by toggling `document.documentElement.classList`; there is no global Tauri theme bridge yet.
