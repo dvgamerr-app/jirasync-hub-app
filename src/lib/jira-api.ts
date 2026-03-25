@@ -440,10 +440,12 @@ export async function fetchJiraIssues(
     if (!nextPageToken) break;
   }
 
-  const projectStatuses = await fetchProjectStatuses(account, projectKey).catch((error: unknown) => {
-    console.warn(`Failed fetching statuses for project ${projectKey}:`, error);
-    return [];
-  });
+  const projectStatuses = await fetchProjectStatuses(account, projectKey).catch(
+    (error: unknown) => {
+      console.warn(`Failed fetching statuses for project ${projectKey}:`, error);
+      return [];
+    },
+  );
 
   return {
     tasks: allTasks,
@@ -587,7 +589,8 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
           }
 
           const linkedProjectId = getProjectId(account.id, projectKey);
-          const linkedStoryPointFieldId = storyPointFieldMap[linkedProjectId] ?? "customfield_10016";
+          const linkedStoryPointFieldId =
+            storyPointFieldMap[linkedProjectId] ?? "customfield_10016";
           const task = mapIssueToTask(issue, account, projectKey, linkedStoryPointFieldId);
           tasks.push(task);
 
@@ -693,12 +696,12 @@ export async function addJiraWorkLog(
       started: new Date(started).toISOString().replace("Z", "+0000"),
       ...(comment
         ? {
-          comment: {
-            type: "doc",
-            version: 1,
-            content: [{ type: "paragraph", content: [{ type: "text", text: comment }] }],
-          },
-        }
+            comment: {
+              type: "doc",
+              version: 1,
+              content: [{ type: "paragraph", content: [{ type: "text", text: comment }] }],
+            },
+          }
         : {}),
     }),
   });

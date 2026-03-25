@@ -88,7 +88,10 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
           <label className="text-[11px] font-medium text-muted-foreground">Date</label>
           <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
             <PopoverTrigger asChild>
-              <Button variant="outline" className="h-8 w-full justify-start text-[13px] font-normal">
+              <Button
+                variant="outline"
+                className="h-8 w-full justify-start text-[13px] font-normal"
+              >
                 <CalendarIcon className="mr-2 h-3.5 w-3.5" />
                 {format(date, "PPP")}
               </Button>

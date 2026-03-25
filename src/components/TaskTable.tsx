@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useTaskStore } from "@/store/task-store";
 import { Task, TaskType, Severity } from "@/types/jira";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -30,6 +30,7 @@ const TASK_TYPES: TaskType[] = ["Story", "Bug", "Task"];
 const SEVERITIES: Severity[] = ["Critical", "High", "Medium", "Low", "NA"];
 const COMPACT_COLUMN_COUNT = 4;
 const FULL_COLUMN_COUNT = 9;
+const NO_PENDING_MANDAY = Symbol("no-pending-manday");
 
 function TypeIcon({ type }: { type: TaskType | null }) {
   switch (type) {
@@ -265,11 +266,11 @@ function TaskRow({
       {/* Status */}
       <TableCell className="w-[140px] py-1.5" onClick={(e) => e.stopPropagation()}>
         <Select value={task.status ?? ""} onValueChange={(v) => updateTaskStatus(task.id, v)}>
-            <SelectTrigger className="h-7 w-full min-w-0 border-none bg-transparent p-0 text-left shadow-none focus:ring-0 [&>span]:min-w-0 [&>span]:flex-1 [&>svg]:h-3 [&>svg]:w-3">
-              <SelectValue>
-                <StatusBadge status={task.status} truncate />
-              </SelectValue>
-            </SelectTrigger>
+          <SelectTrigger className="h-7 w-full min-w-0 border-none bg-transparent p-0 text-left shadow-none focus:ring-0 [&>span]:min-w-0 [&>span]:flex-1 [&>svg]:h-3 [&>svg]:w-3">
+            <SelectValue>
+              <StatusBadge status={task.status} truncate />
+            </SelectValue>
+          </SelectTrigger>
           <SelectContent>
             {statuses.map((s) => (
               <SelectItem key={s} value={s} className="text-[13px]">
@@ -342,23 +343,19 @@ function InlineManday({
 }) {
   const [editing, setEditing] = useState(false);
   const [raw, setRaw] = useState("");
-  const initialValueRef = useRef(value);
   const skipBlurCommitRef = useRef(false);
+  const [pendingSourceValue, setPendingSourceValue] = useState<
+    number | null | typeof NO_PENDING_MANDAY
+  >(NO_PENDING_MANDAY);
   const display = formatMandayValue(value);
-
-  useEffect(() => {
-    initialValueRef.current = value;
-    if (!editing) {
-      setRaw(formatMandayValue(value));
-    }
-  }, [editing, value]);
 
   const commit = (inputRaw: string) => {
     setEditing(false);
     const trimmed = inputRaw.trim();
 
     if (!trimmed) {
-      if (initialValueRef.current !== null) {
+      if (value !== null) {
+        setPendingSourceValue(value);
         onUpdate(taskId, null);
       }
       return;
@@ -366,12 +363,13 @@ function InlineManday({
 
     const mins = parseTimeInput(trimmed);
     if (mins == null) {
-      setRaw(formatMandayValue(initialValueRef.current));
+      setRaw(formatMandayValue(value));
       return;
     }
 
     const nextValue = mins / 480;
-    if (nextValue !== initialValueRef.current) {
+    if (nextValue !== value) {
+      setPendingSourceValue(value);
       onUpdate(taskId, nextValue);
     }
   };
@@ -387,7 +385,12 @@ function InlineManday({
       <Input
         autoFocus
         aria-label={`Edit mandays for ${taskId}`}
-        className="h-6 w-full px-1 text-center text-[12px]"
+        className={cn(
+          "h-6 w-full px-1 text-center text-[12px]",
+          pendingSourceValue !== NO_PENDING_MANDAY &&
+            value === pendingSourceValue &&
+            "border-warning ring-warning/50 ring-1",
+        )}
         placeholder="1d 4h"
         value={raw}
         onChange={(e) => setRaw(e.target.value)}
@@ -416,6 +419,7 @@ function InlineManday({
     <span
       className="cursor-text text-[13px] tabular-nums hover:text-foreground"
       onClick={() => {
+        setPendingSourceValue(NO_PENDING_MANDAY);
         setRaw(display);
         setEditing(true);
       }}
@@ -434,16 +438,29 @@ function InlineNote({
   note: string | null;
   onUpdate: (taskId: string, note: string | null) => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(note ?? "");
-  const originalRef = useRef(note ?? "");
-  const skipBlurCommitRef = useRef(false);
+  return (
+    <InlineNoteEditor
+      key={note ?? "__empty__"}
+      taskId={taskId}
+      initialValue={note ?? ""}
+      onUpdate={onUpdate}
+    />
+  );
+}
 
-  useEffect(() => {
-    const normalizedNote = note ?? "";
-    setValue(normalizedNote);
-    originalRef.current = normalizedNote;
-  }, [note]);
+function InlineNoteEditor({
+  taskId,
+  initialValue,
+  onUpdate,
+}: {
+  taskId: string;
+  initialValue: string;
+  onUpdate: (taskId: string, note: string | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(initialValue);
+  const originalRef = useRef(initialValue);
+  const skipBlurCommitRef = useRef(false);
 
   const commit = () => {
     const trimmed = value.trim() || null;
@@ -494,11 +511,11 @@ function InlineNote({
     <span
       className="line-clamp-1 cursor-text text-[12px] text-muted-foreground hover:text-foreground"
       onClick={() => {
-        setValue(note ?? "");
+        setValue(initialValue);
         setEditing(true);
       }}
     >
-      {note || "—"}
+      {initialValue || "—"}
     </span>
   );
 }

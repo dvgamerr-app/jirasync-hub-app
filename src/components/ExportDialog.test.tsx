@@ -154,8 +154,8 @@ describe("ExportDialog", () => {
   });
 
   it("exports the latest available month by default and does not auto-close the dialog", async () => {
-    const saveButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.includes("Save CSV"),
+    const saveButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Save CSV"),
     );
 
     expect(saveButton).toBeDefined();

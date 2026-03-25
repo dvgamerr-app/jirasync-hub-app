@@ -130,7 +130,7 @@ async function pushTaskToJira(task: Task, accounts: JiraAccount[]): Promise<void
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`Failed updating issue ${task.jiraTaskId}:`, err);
-      throw new Error(`Failed updating ${task.jiraTaskId}: ${message}`);
+      throw new Error(`Failed updating ${task.jiraTaskId}: ${message}`, { cause: err });
     }
   }
   if (task.status) {
@@ -255,7 +255,8 @@ function getVisibleProjectIds(
   return new Set(
     tasks
       .filter(
-        (task) => knownProjectIds.has(task.projectId) && matchesTaskStatusFilter(task, taskStatusFilter),
+        (task) =>
+          knownProjectIds.has(task.projectId) && matchesTaskStatusFilter(task, taskStatusFilter),
       )
       .map((task) => task.projectId),
   );
@@ -277,8 +278,7 @@ function getNormalizedSelectionState(
 
   return {
     selectedProjectId: nextSelectedProjectId,
-    selectedTaskId:
-      selectedTaskId && !visibleTaskIds.has(selectedTaskId) ? null : selectedTaskId,
+    selectedTaskId: selectedTaskId && !visibleTaskIds.has(selectedTaskId) ? null : selectedTaskId,
   };
 }
 
@@ -362,7 +362,9 @@ export const useTaskStore = create<TaskStore>((set, get) => {
 
   const updateTask = (taskId: string, updates: Partial<Task>) => {
     set((state) => {
-      const tasks = state.tasks.map((task) => (task.id === taskId ? markDirty(task, updates) : task));
+      const tasks = state.tasks.map((task) =>
+        task.id === taskId ? markDirty(task, updates) : task,
+      );
       const normalizedSelection = getNormalizedSelectionState(
         tasks,
         state.projects,

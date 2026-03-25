@@ -23,7 +23,9 @@ describe("AppSidebar", () => {
     root = createRoot(container);
 
     useTaskStoreMock.mockImplementation(() => ({
-      organizations: [{ id: "org-1", name: "Acme", jiraInstanceUrl: "https://acme.test", lastSyncedAt: null }],
+      organizations: [
+        { id: "org-1", name: "Acme", jiraInstanceUrl: "https://acme.test", lastSyncedAt: null },
+      ],
       selectedProjectId: null,
       setSelectedProject: vi.fn(),
       getVisibleProjects: () => [

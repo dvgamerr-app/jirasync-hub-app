@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 import { useTaskStore } from "@/store/task-store";
 import { StatusBadge } from "@/components/StatusBadge";
 import { StoryLevel, TaskType, Severity } from "@/types/jira";
@@ -34,6 +34,7 @@ import { formatMinutes, parseTimeInput } from "@/lib/worklog-time";
 
 const TASK_TYPES: TaskType[] = ["Story", "Bug", "Task"];
 const SEVERITIES: Severity[] = ["Critical", "High", "Medium", "Low", "NA"];
+const NO_PENDING_MANDAY = Symbol("no-pending-manday");
 
 export function TaskDetailPanel() {
   const {
@@ -354,29 +355,25 @@ function MandayInput({
 }) {
   const [editing, setEditing] = useState(false);
   const [raw, setRaw] = useState("");
-  const [dirty, setDirty] = useState(false);
-  const initialValueRef = useRef(value);
+  const [pendingSourceValue, setPendingSourceValue] = useState<
+    number | null | typeof NO_PENDING_MANDAY
+  >(NO_PENDING_MANDAY);
   const display = value != null ? formatMinutes(Math.round(value * 480)) : "";
-
-  // Reset dirty when the prop value changes (e.g. after sync reloads from DB)
-  useEffect(() => {
-    if (value !== initialValueRef.current) {
-      initialValueRef.current = value;
-      setDirty(false);
-    }
-  }, [value]);
+  const dirty = pendingSourceValue !== NO_PENDING_MANDAY && value === pendingSourceValue;
 
   const commit = (inputRaw: string) => {
     setEditing(false);
     if (!inputRaw.trim()) {
-      if (initialValueRef.current !== null) setDirty(true);
+      if (value !== null) setPendingSourceValue(value);
       onSave(null);
       return;
     }
     const mins = parseTimeInput(inputRaw);
     if (mins != null) {
       const newVal = mins / 480;
-      if (newVal !== initialValueRef.current) setDirty(true);
+      if (newVal !== value) {
+        setPendingSourceValue(value);
+      }
       onSave(newVal);
     }
   };
@@ -387,6 +384,7 @@ function MandayInput({
       placeholder="e.g. 1d 4h 30m"
       value={editing ? raw : display}
       onFocus={() => {
+        setPendingSourceValue(NO_PENDING_MANDAY);
         setRaw(display);
         setEditing(true);
       }}
@@ -396,7 +394,10 @@ function MandayInput({
         if (e.key === "Enter") {
           (e.target as HTMLElement).blur();
         }
-        if (e.key === "Escape") setEditing(false);
+        if (e.key === "Escape") {
+          setRaw(display);
+          setEditing(false);
+        }
       }}
     />
   );
@@ -409,13 +410,18 @@ function NoteField({
   value: string | null;
   onSave: (v: string | null) => void;
 }) {
-  const [current, setCurrent] = useState(value ?? "");
-  const originalRef = useRef(value ?? "");
+  return <NoteFieldEditor key={value ?? "__empty__"} initialValue={value ?? ""} onSave={onSave} />;
+}
 
-  useEffect(() => {
-    setCurrent(value ?? "");
-    originalRef.current = value ?? "";
-  }, [value]);
+function NoteFieldEditor({
+  initialValue,
+  onSave,
+}: {
+  initialValue: string;
+  onSave: (v: string | null) => void;
+}) {
+  const [current, setCurrent] = useState(initialValue);
+  const originalRef = useRef(initialValue);
 
   const commit = () => {
     const trimmed = current.trim() || null;

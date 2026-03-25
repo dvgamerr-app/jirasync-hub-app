@@ -83,7 +83,7 @@ describe("fetchAssignedJiraData", () => {
   });
 
   it("falls back to issue-derived statuses if project status lookup fails", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => { });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     httpFetchMock.mockImplementation(async (url: string) => {
       if (url.endsWith("/rest/api/3/search/jql")) {

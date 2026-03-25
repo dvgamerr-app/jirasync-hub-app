@@ -429,16 +429,28 @@ describe("task-store task status filters", () => {
     seedStore([activeTask, doneTask], [], [project]);
 
     expect(useTaskStore.getState().taskStatusFilter).toBe("active");
-    expect(useTaskStore.getState().getFilteredTasks().map((task) => task.id)).toEqual([activeTask.id]);
+    expect(
+      useTaskStore
+        .getState()
+        .getFilteredTasks()
+        .map((task) => task.id),
+    ).toEqual([activeTask.id]);
 
     useTaskStore.getState().setTaskStatusFilter("done");
-    expect(useTaskStore.getState().getFilteredTasks().map((task) => task.id)).toEqual([doneTask.id]);
+    expect(
+      useTaskStore
+        .getState()
+        .getFilteredTasks()
+        .map((task) => task.id),
+    ).toEqual([doneTask.id]);
 
     useTaskStore.getState().setTaskStatusFilter("all");
-    expect(useTaskStore.getState().getFilteredTasks().map((task) => task.id)).toEqual([
-      doneTask.id,
-      activeTask.id,
-    ]);
+    expect(
+      useTaskStore
+        .getState()
+        .getFilteredTasks()
+        .map((task) => task.id),
+    ).toEqual([doneTask.id, activeTask.id]);
   });
 
   it("clears the selected task when it no longer matches the active filter", () => {
@@ -491,9 +503,12 @@ describe("task-store task status filters", () => {
 
     useTaskStore.getState().setTaskStatusFilter("active");
 
-    expect(useTaskStore.getState().getVisibleProjects().map((project) => project.id)).toEqual([
-      activeProject.id,
-    ]);
+    expect(
+      useTaskStore
+        .getState()
+        .getVisibleProjects()
+        .map((project) => project.id),
+    ).toEqual([activeProject.id]);
     expect(useTaskStore.getState().selectedProjectId).toBeNull();
   });
 });
