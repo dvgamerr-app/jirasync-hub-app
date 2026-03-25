@@ -1,4 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+} from "recharts";
 import { format } from "date-fns";
 import { Check, Download } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -203,6 +212,18 @@ function getDisplayFileName(path: string): string {
   return segments[segments.length - 1] || path;
 }
 
+function workingDaysInMonth(yearMonth: string): number {
+  const [year, month] = yearMonth.split("-").map(Number);
+  const date = new Date(year, month - 1, 1);
+  let count = 0;
+  while (date.getMonth() === month - 1) {
+    const dow = date.getDay();
+    if (dow !== 0 && dow !== 6) count++;
+    date.setDate(date.getDate() + 1);
+  }
+  return count;
+}
+
 export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: ExportDialogProps) {
   const exportRows = createExportRows(tasks, workLogs, projects);
   const exportPeriods = getExportPeriods(exportRows);
@@ -220,10 +241,11 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
     setSavedPeriodValue("");
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const taskById = new Map(tasks.map((t) => [t.id, t]));
   const matchingRows = exportRows.filter((row) => row.periodValue === selectedPeriodValue);
   const totalMinutes = matchingRows.reduce((sum, row) => sum + row.timeSpentMinutes, 0);
+  const capacityMinutes = workingDaysInMonth(selectedPeriodValue) * 8 * 60;
   const uniqueTaskIds = new Set(matchingRows.map((r) => r.taskId));
+  const taskById = new Map(tasks.map((t) => [t.id, t]));
   const totalMandayMinutes = Array.from(uniqueTaskIds).reduce((sum, id) => {
     const task = taskById.get(id);
     return sum + (task?.mandays ?? 0) * 480;
@@ -231,6 +253,28 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
   const selectedPeriodLabel =
     exportPeriods.find((period) => period.value === selectedPeriodValue)?.label ?? "";
   const hasSavedCurrentPeriod = Boolean(savedFileName) && savedPeriodValue === selectedPeriodValue;
+
+  const chartData = useMemo(() => {
+    const byMonth = new Map<string, { label: string; loggedMin: number }>();
+    for (const row of exportRows) {
+      const entry = byMonth.get(row.periodValue) ?? { label: row.periodLabel, loggedMin: 0 };
+      entry.loggedMin += row.timeSpentMinutes;
+      byMonth.set(row.periodValue, entry);
+    }
+    return Array.from(byMonth.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .flatMap(([value, v]) => {
+        if (v.loggedMin <= 0) return [];
+        const cap = workingDaysInMonth(value) * 8 * 60;
+        return [
+          {
+            value,
+            month: v.label.replace(/^\d{4}-/, ""),
+            speed: Math.round((v.loggedMin / cap) * 1000) / 10,
+          },
+        ];
+      });
+  }, [exportRows]);
 
   const handleExport = async () => {
     if (exporting || matchingRows.length === 0) return;
@@ -312,6 +356,21 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
                     Total manday: {formatMinutesLong(totalMandayMinutes)}
                   </p>
                 )}
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Capacity: {workingDaysInMonth(selectedPeriodValue)} working days
+                </p>
+                <p className="mt-0.5 text-xs font-medium">
+                  Speed rate:{" "}
+                  <span
+                    className={
+                      totalMinutes / capacityMinutes >= 0.8
+                        ? "text-green-600 dark:text-green-400"
+                        : "text-amber-600 dark:text-amber-400"
+                    }
+                  >
+                    {Math.round((totalMinutes / capacityMinutes) * 1000) / 10}%
+                  </span>
+                </p>
               </>
             )}
             {matchingRows.length === 0 && (
@@ -325,6 +384,63 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
               </p>
             )}
           </div>
+
+          {chartData.length > 1 && (
+            <div>
+              <p className="mb-1 text-[11px] text-muted-foreground">Speed rate % / month</p>
+              <ResponsiveContainer width="100%" height={80}>
+                <LineChart data={chartData} margin={{ top: 4, right: 4, left: -28, bottom: 0 }}>
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    vertical={false}
+                    stroke="hsl(var(--border))"
+                  />
+                  <XAxis dataKey="month" tick={{ fontSize: 9 }} tickLine={false} axisLine={false} />
+                  <ReferenceLine
+                    y={100}
+                    stroke="hsl(var(--muted-foreground))"
+                    strokeDasharray="4 3"
+                    strokeOpacity={0.5}
+                  />
+                  <Tooltip
+                    formatter={(v) => [`${v}%`, "Speed"]}
+                    contentStyle={{ fontSize: 11, padding: "2px 8px", borderRadius: "6px" }}
+                    cursor={{ stroke: "hsl(var(--border))", strokeWidth: 1 }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="speed"
+                    stroke="hsl(var(--primary))"
+                    strokeWidth={2}
+                    dot={(props) => {
+                      const { cx, cy, payload } = props as {
+                        cx: number;
+                        cy: number;
+                        payload: { value: string; speed: number };
+                      };
+                      const isSelected = payload.value === selectedPeriodValue;
+                      return (
+                        <circle
+                          key={payload.value}
+                          cx={cx}
+                          cy={cy}
+                          r={isSelected ? 4 : 2.5}
+                          fill={isSelected ? "hsl(var(--primary))" : "hsl(var(--background))"}
+                          stroke="hsl(var(--primary))"
+                          strokeWidth={isSelected ? 0 : 2}
+                        />
+                      );
+                    }}
+                    activeDot={{ r: 4, strokeWidth: 0 }}
+                    connectNulls
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+              <p className="mt-1 text-[10px] text-muted-foreground/60">
+                Speed rate = logged ÷ (working days × 8h) × 100
+              </p>
+            </div>
+          )}
         </div>
 
         <DialogFooter>

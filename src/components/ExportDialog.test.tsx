@@ -103,13 +103,13 @@ const workLogs: WorkLog[] = [
 describe("ExportDialog", () => {
   let container: HTMLDivElement;
   let root: Root;
-  let onOpenChange: ReturnType<typeof vi.fn>;
+  let onOpenChange: ReturnType<typeof vi.fn<(open: boolean) => void>>;
 
   beforeEach(async () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
-    onOpenChange = vi.fn();
+    onOpenChange = vi.fn<(open: boolean) => void>();
 
     saveMock.mockResolvedValue("C:\\exports\\jirasync-export-2026-Mar.csv");
     writeTextFileMock.mockResolvedValue(undefined);
