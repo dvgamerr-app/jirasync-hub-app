@@ -28,10 +28,8 @@ JiraSync Hub is a Tauri desktop app for syncing Jira tasks into a local workspac
 ## Development
 
 ```bash
-bun install
-bun run dev
-bun run build
-bun run tauri
+bun i
+bun tauri dev
 ```
 
 ## macOS Build

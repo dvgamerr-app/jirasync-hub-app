@@ -56,6 +56,9 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Sync app version from Git tag
+        run: bun run sync:version -- "${{ github.ref_name }}"
+
       # ── Rust toolchain ───────────────────────────────────────────────────
       - name: Setup Rust (stable)
         uses: dtolnay/rust-toolchain@stable
