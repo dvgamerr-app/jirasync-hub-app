@@ -32,6 +32,10 @@ const COMPACT_COLUMN_COUNT = 4;
 const FULL_COLUMN_COUNT = 9;
 const NO_PENDING_MANDAY = Symbol("no-pending-manday");
 
+function hasStoryPointRuleViolation(task: Pick<Task, "type" | "storyLevel">): boolean {
+  return task.type !== "Story" && task.storyLevel !== null;
+}
+
 function TypeIcon({ type }: { type: TaskType | null }) {
   switch (type) {
     case "Bug":
@@ -113,22 +117,19 @@ export function TaskTable() {
                       </TooltipTrigger>
                       <TooltipContent
                         side="bottom"
-                        className="max-w-[240px] p-3 text-[12px] leading-relaxed"
+                        align="start"
+                        className="max-w-[210px] p-2 text-left text-[11px] leading-snug"
                       >
-                        <p className="mb-1.5 font-semibold">Estimation Rule</p>
+                        <p className="mb-1 font-semibold">Estimation Rule</p>
                         <ul className="space-y-1 text-muted-foreground">
                           <li>
                             • Story Point ให้ estimate เฉพาะ{" "}
                             <span className="font-medium text-foreground">Story</span> เท่านั้น
                           </li>
                           <li>
-                            • <span className="font-medium text-foreground">Task / Sub-task</span> —
-                            ไม่ใส่ Story Point
-                          </li>
-                          <li>
                             • Track effort รายคน ให้ใช้{" "}
                             <span className="font-medium text-foreground">Time (Log Work)</span> ใน
-                            Task แทน
+                            Task
                           </li>
                           <li>• ห้าม Story Point ซ้ำหลายระดับ — velocity จะเปรียบเทียบกันไม่ได้</li>
                         </ul>
@@ -207,11 +208,14 @@ function TaskRow({
     updateTaskNote,
     updateTaskMandays,
   } = useTaskStore();
+  const hasStoryPointViolation = hasStoryPointRuleViolation(task);
 
   return (
     <TableRow
       className={cn(
         "group h-10 cursor-pointer transition-colors duration-150",
+        hasStoryPointViolation &&
+          "bg-red-50/80 hover:bg-red-50 dark:bg-red-950/20 dark:hover:bg-red-950/30",
         task.isDirty && "bg-yellow-50 dark:bg-yellow-900/20",
         isSelected && "border-l-2 border-l-primary bg-primary/5",
       )}
@@ -304,7 +308,14 @@ function TaskRow({
       )}
       {showExtendedColumns && (
         <TableCell className="py-1.5 text-center" onClick={onSelect}>
-          <span className="text-[13px] tabular-nums">{task.storyLevel ?? "—"}</span>
+          <span
+            className={cn(
+              "text-[13px] tabular-nums",
+              hasStoryPointViolation && "font-medium text-destructive",
+            )}
+          >
+            {task.storyLevel ?? "—"}
+          </span>
         </TableCell>
       )}
       {showExtendedColumns && (

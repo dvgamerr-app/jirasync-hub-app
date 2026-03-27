@@ -31,10 +31,12 @@ import { hasAdfContent } from "@/lib/adf-content";
 import { LogWorkModal } from "@/components/LogWorkModal";
 import { AdfRenderer } from "@/components/AdfRenderer";
 import { formatMinutes, parseTimeInput } from "@/lib/worklog-time";
+import { cn } from "@/lib/utils";
 
 const TASK_TYPES: TaskType[] = ["Story", "Bug", "Task"];
 const SEVERITIES: Severity[] = ["Critical", "High", "Medium", "Low", "NA"];
 const NO_PENDING_MANDAY = Symbol("no-pending-manday");
+const STORY_LEVEL_OPTIONS: StoryLevel[] = [1, 2, 3, 5];
 
 export function TaskDetailPanel() {
   const {
@@ -68,6 +70,8 @@ export function TaskDetailPanel() {
   const hasDescription = hasAdfContent(task.description);
   const activeView =
     hasDescription && taskDetailViewMode === "description" ? "description" : "details";
+  const canAssignStoryLevel = task.type === "Story";
+  const hasInvalidStoryLevel = task.storyLevel !== null && !canAssignStoryLevel;
 
   const detailContent = (
     <>
@@ -154,27 +158,55 @@ export function TaskDetailPanel() {
           </label>
           <Select
             value={task.storyLevel?.toString() ?? "__none__"}
-            onValueChange={(v) =>
-              updateTaskStoryLevel(
-                task.id,
-                (v === "__none__" ? null : Number(v)) as StoryLevel | null,
-              )
-            }
+            onValueChange={(v) => {
+              const nextLevel = (v === "__none__" ? null : Number(v)) as StoryLevel | null;
+              if (nextLevel !== null && !canAssignStoryLevel) {
+                return;
+              }
+              updateTaskStoryLevel(task.id, nextLevel);
+            }}
+            disabled={!canAssignStoryLevel && task.storyLevel === null}
           >
-            <SelectTrigger className="h-8 text-[13px]">
+            <SelectTrigger
+              className={cn(
+                "h-8 text-[13px]",
+                hasInvalidStoryLevel && "border-destructive/40 bg-destructive/5 text-destructive",
+              )}
+            >
               <SelectValue placeholder="—" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__none__" className="text-[13px] text-muted-foreground">
                 —
               </SelectItem>
-              {[1, 2, 3, 5].map((l) => (
-                <SelectItem key={l} value={l.toString()} className="text-[13px]">
-                  {l}
+              {hasInvalidStoryLevel && (
+                <SelectItem
+                  value={task.storyLevel!.toString()}
+                  className="text-[13px] text-destructive"
+                >
+                  {task.storyLevel}
                 </SelectItem>
-              ))}
+              )}
+              {canAssignStoryLevel &&
+                STORY_LEVEL_OPTIONS.map((l) => (
+                  <SelectItem key={l} value={l.toString()} className="text-[13px]">
+                    {l}
+                  </SelectItem>
+                ))}
             </SelectContent>
           </Select>
+          {!canAssignStoryLevel && (
+            <p
+              className={cn(
+                "text-[11px] text-muted-foreground",
+                hasInvalidStoryLevel && "text-destructive",
+              )}
+            >
+              {hasInvalidStoryLevel
+                ? "Only Story tasks can keep Story Level. Clear it or change type to Story."
+                : "Story Level can be set only when type is Story."}
+            </p>
+          )}
         </div>
 
         {/* Mandays */}

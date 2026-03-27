@@ -420,7 +420,12 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     },
 
     updateTaskStatus: (taskId, status) => updateTask(taskId, { status }),
-    updateTaskStoryLevel: (taskId, level) => updateTask(taskId, { storyLevel: level }),
+    updateTaskStoryLevel: (taskId, level) => {
+      const task = get().tasks.find((candidate) => candidate.id === taskId);
+      if (!task) return;
+      if (level !== null && task.type !== "Story") return;
+      updateTask(taskId, { storyLevel: level });
+    },
     updateTaskMandays: (taskId, mandays) => updateTask(taskId, { mandays }),
     updateTaskType: (taskId, type) => updateTask(taskId, { type }),
     updateTaskSeverity: (taskId, severity) => updateTask(taskId, { severity }),

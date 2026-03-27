@@ -33,7 +33,19 @@ vi.mock("@/components/ui/select", () => ({
 vi.mock("@/components/ui/tooltip", () => ({
   TooltipProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
-  TooltipContent: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipContent: ({
+    children,
+    className,
+    align,
+  }: {
+    children: ReactNode;
+    className?: string;
+    align?: string;
+  }) => (
+    <div data-align={align} className={className}>
+      {children}
+    </div>
+  ),
   TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
@@ -174,5 +186,27 @@ describe("TaskTable", () => {
 
   it("aggregates total logged time once per task row", () => {
     expect(container.textContent).toContain("1h 30m");
+  });
+
+  it("renders the story tooltip left aligned with compact text sizing", () => {
+    const tooltip = container.querySelector('div[data-align="start"]');
+
+    expect(tooltip?.textContent).toContain("Estimation Rule");
+    expect(tooltip?.getAttribute("data-align")).toBe("start");
+    expect(tooltip?.className).toContain("text-left");
+    expect(tooltip?.className).toContain("text-[11px]");
+    expect(tooltip?.className).toContain("max-w-[210px]");
+  });
+
+  it("marks rows red when a non-story task still has story points", async () => {
+    storeState.getFilteredTasks = () => [task];
+
+    await act(async () => {
+      root.render(<TaskTable />);
+    });
+
+    const row = container.querySelector("tbody tr");
+    expect(row?.className).toContain("bg-red-50/80");
+    expect(row?.textContent).toContain("1");
   });
 });

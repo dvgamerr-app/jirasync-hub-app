@@ -512,3 +512,73 @@ describe("task-store task status filters", () => {
     expect(useTaskStore.getState().selectedProjectId).toBeNull();
   });
 });
+
+describe("task-store story level rules", () => {
+  beforeEach(() => {
+    mocked.reset();
+    useTaskStore.setState({
+      organizations: [],
+      projects: [],
+      tasks: [],
+      workLogs: [],
+      isLoaded: false,
+      selectedProjectId: null,
+      selectedTaskId: null,
+      taskStatusFilter: "active",
+      taskDetailViewMode: "details",
+    });
+  });
+
+  it("rejects assigning story level to non-story tasks", async () => {
+    const task = createTask({
+      type: "Task",
+      storyLevel: null,
+      isDirty: false,
+      isSynced: true,
+    });
+    seedStore([task], []);
+
+    useTaskStore.getState().updateTaskStoryLevel(task.id, 3);
+
+    await flushAsyncWork();
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      id: task.id,
+      storyLevel: null,
+      isDirty: false,
+      isSynced: true,
+    });
+    expect(mocked.db.tasks.put).not.toHaveBeenCalled();
+  });
+
+  it("allows clearing an invalid story level on non-story tasks", async () => {
+    const task = createTask({
+      type: "Task",
+      storyLevel: 2,
+      isDirty: false,
+      isSynced: true,
+    });
+    seedStore([task], []);
+
+    useTaskStore.getState().updateTaskStoryLevel(task.id, null);
+
+    await flushAsyncWork();
+
+    const state = useTaskStore.getState();
+    expect(state.tasks[0]).toMatchObject({
+      id: task.id,
+      storyLevel: null,
+      isDirty: true,
+      isSynced: false,
+    });
+    expect(mocked.db.tasks.put).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: task.id,
+        storyLevel: null,
+        isDirty: true,
+        isSynced: false,
+      }),
+    );
+  });
+});
