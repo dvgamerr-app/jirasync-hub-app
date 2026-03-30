@@ -158,6 +158,14 @@ const Index = () => {
     }
   };
 
+  const handleSettingsOpenChange = (open: boolean) => {
+    setSettingsOpen(open);
+
+    if (!open && settingsOpen) {
+      void reloadFromDB();
+    }
+  };
+
   return (
     <div className="flex h-full w-full overflow-hidden bg-background">
       <div className="hidden md:block">
@@ -313,7 +321,7 @@ const Index = () => {
         workLogs={workLogs}
         projects={projects}
       />
-      <JiraSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <JiraSettingsDialog open={settingsOpen} onOpenChange={handleSettingsOpenChange} />
     </div>
   );
 };

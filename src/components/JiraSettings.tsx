@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   getJiraAccounts,
   addJiraAccount,
   updateJiraAccount,
+  reorderJiraAccounts,
   removeJiraAccount,
   getStoryPointFieldMap,
   saveStoryPointFieldMap,
@@ -47,9 +48,11 @@ import {
   Plus,
   Pencil,
   Trash2,
+  GripVertical,
   Server,
   Settings,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface Props {
   open: boolean;
@@ -76,6 +79,8 @@ function JiraSettingsDialogContent() {
   const [showToken, setShowToken] = useState(false);
   const [testing, setTesting] = useState(false);
   const [status, setStatus] = useState<"idle" | "ok" | "fail">("idle");
+  const [draggingAccountId, setDraggingAccountId] = useState<string | null>(null);
+  const [dragOverAccountId, setDragOverAccountId] = useState<string | null>(null);
 
   // Story-point field mapping
   const [spFieldMap, setSpFieldMap] = useState<Record<string, string>>({});
@@ -85,6 +90,29 @@ function JiraSettingsDialogContent() {
   const [spLoading, setSpLoading] = useState(false);
 
   const refresh = () => setAccounts(getJiraAccounts());
+
+  const moveAccount = (activeId: string, overId: string) => {
+    const nextAccounts = reorderJiraAccounts(activeId, overId);
+    setAccounts(nextAccounts);
+    setDragOverAccountId(overId);
+  };
+
+  useEffect(() => {
+    if (!draggingAccountId) {
+      return;
+    }
+
+    const stopDragging = () => {
+      setDraggingAccountId(null);
+      setDragOverAccountId(null);
+    };
+
+    window.addEventListener("mouseup", stopDragging);
+
+    return () => {
+      window.removeEventListener("mouseup", stopDragging);
+    };
+  }, [draggingAccountId]);
 
   const startStoryPoints = async () => {
     const currentAccounts = getJiraAccounts();
@@ -286,9 +314,36 @@ function JiraSettingsDialogContent() {
                 {accounts.map((acc) => (
                   <div
                     key={acc.id}
-                    className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2"
+                    onMouseMove={() => {
+                      if (draggingAccountId && draggingAccountId !== acc.id) {
+                        moveAccount(draggingAccountId, acc.id);
+                      } else if (draggingAccountId === acc.id) {
+                        setDragOverAccountId(acc.id);
+                      }
+                    }}
+                    className={cn(
+                      "flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 transition-colors",
+                      draggingAccountId === acc.id && "opacity-60",
+                      dragOverAccountId === acc.id &&
+                        draggingAccountId !== acc.id &&
+                      "border-primary bg-primary/5",
+                    )}
                   >
-                    <CheckCircle2 className="text-success h-3.5 w-3.5 shrink-0" />
+                    <button
+                      type="button"
+                      aria-label={`Reorder ${acc.name || acc.instanceUrl}`}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        setDraggingAccountId(acc.id);
+                        setDragOverAccountId(acc.id);
+                      }}
+                      className={cn(
+                        "shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
+                        draggingAccountId ? "cursor-grabbing" : "cursor-grab",
+                      )}
+                    >
+                      <GripVertical className="h-3.5 w-3.5" />
+                    </button>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-[13px] font-medium">
                         {acc.name || acc.instanceUrl}

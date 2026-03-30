@@ -3,6 +3,8 @@ import { Organization, Project, Task, WorkLog, StoryLevel, TaskType, Severity } 
 import { db, getJiraAccounts, getStoryPointFieldMap, type JiraAccount } from "@/lib/jira-db";
 import {
   getAccountIdFromTask,
+  getOrganizationId,
+  getProjectIdPrefix,
   isOrganizationIdForAccounts,
   isProjectIdForAccounts,
   isTaskIdForAccounts,
@@ -183,10 +185,12 @@ async function loadScopedCollections(accountIds: string[]): Promise<ScopedTaskCo
     db.workLogs.toArray(),
   ]);
 
-  const organizations = allOrganizations.filter((org) =>
-    isOrganizationIdForAccounts(org.id, accountIds),
-  );
-  const projects = allProjects.filter((project) => isProjectIdForAccounts(project.id, accountIds));
+  const organizations = allOrganizations
+    .filter((org) => isOrganizationIdForAccounts(org.id, accountIds))
+    .sort((left, right) => compareScopedEntityOrder(left.id, right.id, accountIds, "organization"));
+  const projects = allProjects
+    .filter((project) => isProjectIdForAccounts(project.id, accountIds))
+    .sort((left, right) => compareScopedEntityOrder(left.id, right.id, accountIds, "project"));
   const visibleProjectIds = new Set(projects.map((project) => project.id));
   const tasks = allTasks.filter(
     (task) => isTaskIdForAccounts(task.id, accountIds) && visibleProjectIds.has(task.projectId),
@@ -200,6 +204,36 @@ async function loadScopedCollections(accountIds: string[]): Promise<ScopedTaskCo
     tasks,
     workLogs,
   };
+}
+
+function compareScopedEntityOrder(
+  leftId: string,
+  rightId: string,
+  accountIds: string[],
+  entityType: "organization" | "project",
+): number {
+  const leftIndex = getScopedEntityAccountIndex(leftId, accountIds, entityType);
+  const rightIndex = getScopedEntityAccountIndex(rightId, accountIds, entityType);
+
+  if (leftIndex !== rightIndex) {
+    return leftIndex - rightIndex;
+  }
+
+  return leftId.localeCompare(rightId);
+}
+
+function getScopedEntityAccountIndex(
+  entityId: string,
+  accountIds: string[],
+  entityType: "organization" | "project",
+): number {
+  const accountIndex = accountIds.findIndex((accountId) =>
+    entityType === "organization"
+      ? entityId === getOrganizationId(accountId)
+      : entityId.startsWith(getProjectIdPrefix(accountId)),
+  );
+
+  return accountIndex === -1 ? Number.MAX_SAFE_INTEGER : accountIndex;
 }
 
 function replaceTask(tasks: Task[], nextTask: Task): Task[] {

@@ -86,6 +86,22 @@ export function updateJiraAccount(account: JiraAccount): void {
   saveJiraAccounts(getJiraAccounts().map((a) => (a.id === account.id ? account : a)));
 }
 
+export function reorderJiraAccounts(activeId: string, overId: string): JiraAccount[] {
+  const accounts = getJiraAccounts();
+  const fromIndex = accounts.findIndex((account) => account.id === activeId);
+  const toIndex = accounts.findIndex((account) => account.id === overId);
+
+  if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) {
+    return accounts;
+  }
+
+  const nextAccounts = [...accounts];
+  const [movedAccount] = nextAccounts.splice(fromIndex, 1);
+  nextAccounts.splice(toIndex, 0, movedAccount);
+  saveJiraAccounts(nextAccounts);
+  return nextAccounts;
+}
+
 export function removeJiraAccount(id: string): void {
   saveJiraAccounts(getJiraAccounts().filter((a) => a.id !== id));
   void cleanupAccountData(id);

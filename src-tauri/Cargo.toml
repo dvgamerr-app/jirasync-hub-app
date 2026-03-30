@@ -1,5 +1,5 @@
 [package]
-name = "wedo-jirasync-hub-app"
+name = "jirasync-hub-app"
 version = "0.1.0"
 description = "A Tauri App"
 authors = ["you"]

@@ -2,7 +2,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Index from "@/pages/Index";
-import type { Project, Task } from "@/types/jira";
+import type { Project, Task, WorkLog } from "@/types/jira";
 
 const useTaskStoreMock = vi.fn();
 const exportDialogMock = vi.fn();
@@ -12,6 +12,7 @@ const startBackgroundSyncMock = vi.fn();
 const stopBackgroundSyncMock = vi.fn();
 const syncNowMock = vi.fn();
 const toastMock = vi.fn();
+const jiraSettingsDialogMock = vi.fn();
 
 vi.mock("@/store/task-store", () => ({
   useTaskStore: () => useTaskStoreMock(),
@@ -56,9 +57,26 @@ vi.mock("@/components/ExportDialog", () => ({
 }));
 
 vi.mock("@/components/JiraSettings", () => ({
-  JiraSettingsDialog: ({ open }: { open: boolean }) => (
-    <div data-open={String(open)}>Jira Settings</div>
-  ),
+  JiraSettingsDialog: ({
+    open,
+    onOpenChange,
+  }: {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+  }) => {
+    jiraSettingsDialogMock({ open, onOpenChange });
+
+    return (
+      <div data-open={String(open)}>
+        Jira Settings
+        {open ? (
+          <button type="button" onClick={() => onOpenChange(false)}>
+            Close Jira Settings
+          </button>
+        ) : null}
+      </div>
+    );
+  },
 }));
 
 vi.mock("@/hooks/use-mobile", () => ({
@@ -96,6 +114,22 @@ const projectBeta: Project = {
   availableStatuses: [],
 };
 
+type IndexStoreState = {
+  tasks: Task[];
+  selectedTaskId: string | null;
+  selectedProjectId: string | null;
+  taskStatusFilter: "active" | "done" | "all";
+  getFilteredTasks: () => Task[];
+  projects: Project[];
+  workLogs: WorkLog[];
+  syncAllDirtyTasks: () => Promise<void>;
+  getDirtyTaskCount: () => number;
+  loadFromDB: () => Promise<void>;
+  reloadFromDB: () => Promise<void>;
+  setTaskStatusFilter: (filter: "active" | "done" | "all") => void;
+  isLoaded: boolean;
+};
+
 function buildTask(id: string, projectId: string, jiraTaskId: string): Task {
   return {
     id,
@@ -118,14 +152,14 @@ function buildTask(id: string, projectId: string, jiraTaskId: string): Task {
   };
 }
 
-function buildStoreState(overrides?: Partial<ReturnType<typeof buildBaseStoreState>>) {
+function buildStoreState(overrides?: Partial<IndexStoreState>): IndexStoreState {
   return {
     ...buildBaseStoreState(),
     ...overrides,
   };
 }
 
-function buildBaseStoreState() {
+function buildBaseStoreState(): IndexStoreState {
   return {
     tasks: [buildTask("task-account-1-ALPHA-1", projectAlpha.id, "ALPHA-1")],
     selectedTaskId: null,
@@ -164,6 +198,7 @@ describe("Index", () => {
     stopBackgroundSyncMock.mockReset();
     syncNowMock.mockReset();
     exportDialogMock.mockReset();
+    jiraSettingsDialogMock.mockReset();
   });
 
   afterEach(async () => {
@@ -238,5 +273,45 @@ describe("Index", () => {
     });
 
     expect(storeState.setTaskStatusFilter).toHaveBeenCalledWith("done");
+  });
+
+  it("reloads the store when Jira Settings closes so sidebar ordering can refresh", async () => {
+    const storeState = buildStoreState({
+      tasks: [],
+      projects: [],
+      selectedProjectId: null,
+      getFilteredTasks: () => [],
+      reloadFromDB: vi.fn(async () => undefined),
+    });
+    useTaskStoreMock.mockImplementation(() => storeState);
+    getJiraAccountsMock.mockReturnValue([
+      {
+        id: "account-1",
+        name: "Acme",
+        instanceUrl: "https://acme.atlassian.net",
+        email: "dev@acme.test",
+        apiToken: "token",
+      },
+    ]);
+
+    await act(async () => {
+      root.render(<Index />);
+    });
+
+    const openSettingsButton = findButton(container, "Jira Settings");
+    expect(openSettingsButton).toBeDefined();
+
+    await act(async () => {
+      openSettingsButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const closeSettingsButton = findButton(container, "Close Jira Settings");
+    expect(closeSettingsButton).toBeDefined();
+
+    await act(async () => {
+      closeSettingsButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(storeState.reloadFromDB).toHaveBeenCalledOnce();
   });
 });

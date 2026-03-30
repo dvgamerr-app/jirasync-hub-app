@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Project, Task, WorkLog } from "@/types/jira";
+import type { Organization, Project, Task, WorkLog } from "@/types/jira";
 
 type StoredTaskRow = Task;
 type StoredWorkLogRow = WorkLog;
@@ -49,20 +49,20 @@ const mocked = vi.hoisted(() => {
 
   const db = {
     organizations: {
-      toArray: vi.fn(async () => []),
+      toArray: vi.fn<() => Promise<Organization[]>>(async () => []),
       delete: vi.fn(async () => undefined),
       where: vi.fn(() => ({
         equals: vi.fn(() => ({
-          toArray: vi.fn(async () => []),
+          toArray: vi.fn<() => Promise<Organization[]>>(async () => []),
           delete: vi.fn(async () => undefined),
         })),
       })),
     },
     projects: {
-      toArray: vi.fn(async () => []),
+      toArray: vi.fn<() => Promise<Project[]>>(async () => []),
       where: vi.fn(() => ({
         equals: vi.fn(() => ({
-          toArray: vi.fn(async () => []),
+          toArray: vi.fn<() => Promise<Project[]>>(async () => []),
           delete: vi.fn(async () => undefined),
         })),
       })),
@@ -510,6 +510,76 @@ describe("task-store task status filters", () => {
         .map((project) => project.id),
     ).toEqual([activeProject.id]);
     expect(useTaskStore.getState().selectedProjectId).toBeNull();
+  });
+
+  it("orders visible projects by Jira connection order", async () => {
+    mocked.db.organizations.toArray.mockResolvedValue([
+      {
+        id: "org-account-1",
+        name: "Account One",
+        jiraInstanceUrl: "https://account-1.atlassian.net",
+        lastSyncedAt: null,
+      },
+      {
+        id: "org-account-2",
+        name: "Account Two",
+        jiraInstanceUrl: "https://account-2.atlassian.net",
+        lastSyncedAt: null,
+      },
+    ]);
+    mocked.db.projects.toArray.mockResolvedValue([
+      createProject({
+        id: "proj-account-2-BETA",
+        orgId: "org-account-2",
+        name: "Project Beta",
+        jiraProjectKey: "BETA",
+      }),
+      createProject({
+        id: "proj-account-1-ALPHA",
+        orgId: "org-account-1",
+        name: "Project Alpha",
+        jiraProjectKey: "ALPHA",
+      }),
+    ]);
+    mocked.db.tasks.toArray.mockResolvedValue([
+      createTask({
+        id: "task-account-2-BETA-1",
+        projectId: "proj-account-2-BETA",
+        jiraTaskId: "BETA-1",
+        status: "In Progress",
+      }),
+      createTask({
+        id: "task-account-1-ALPHA-1",
+        projectId: "proj-account-1-ALPHA",
+        jiraTaskId: "ALPHA-1",
+        status: "In Progress",
+      }),
+    ]);
+    mocked.db.workLogs.toArray.mockResolvedValue([]);
+    mocked.getJiraAccounts.mockReturnValue([
+      mocked.accounts[0],
+      {
+        id: "account-2",
+        name: "Second",
+        instanceUrl: "https://account-2.atlassian.net",
+        email: "dev2@acme.test",
+        apiToken: "token-2",
+      },
+    ]);
+
+    await useTaskStore.getState().loadFromDB();
+
+    expect(
+      useTaskStore
+        .getState()
+        .getVisibleProjects()
+        .map((project) => project.id),
+    ).toEqual(["proj-account-1-ALPHA", "proj-account-2-BETA"]);
+    expect(
+      useTaskStore
+        .getState()
+        .organizations.map((organization) => organization.id),
+    ).toEqual(["org-account-1", "org-account-2"]);
   });
 });
 
