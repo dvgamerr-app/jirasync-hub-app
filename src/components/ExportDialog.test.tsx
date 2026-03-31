@@ -182,4 +182,20 @@ describe("ExportDialog", () => {
     );
     expect(onOpenChange).not.toHaveBeenCalled();
   });
+
+  it("shows total manday prorated to the selected month from time tracking", async () => {
+    await act(async () => {
+      root.render(
+        <ExportDialog
+          open
+          onOpenChange={onOpenChange}
+          projects={[project]}
+          tasks={[task]}
+          workLogs={workLogs}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("Total manday: 5h 20m");
+  });
 });

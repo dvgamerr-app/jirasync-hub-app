@@ -49,9 +49,11 @@ const CSV_HEADER = [
   "Note",
 ];
 
+const MINUTES_PER_MANDAY = 8 * 60;
+
 function formatMinutesLong(minutes: number): string {
   const WEEK = 5 * 8 * 60; // 2400 min
-  const DAY = 8 * 60; // 480 min
+  const DAY = MINUTES_PER_MANDAY;
   const w = Math.floor(minutes / WEEK);
   const d = Math.floor((minutes % WEEK) / DAY);
   const h = Math.floor((minutes % DAY) / 60);
@@ -224,6 +226,28 @@ function workingDaysInMonth(yearMonth: string): number {
   return count;
 }
 
+function calculateMandayMinutesForPeriod(tasks: Task[], rows: ExportRow[], periodValue: string): number {
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
+  const taskMinutes = new Map<string, { total: number; inPeriod: number }>();
+
+  rows.forEach((row) => {
+    const entry = taskMinutes.get(row.taskId) ?? { total: 0, inPeriod: 0 };
+    entry.total += row.timeSpentMinutes;
+    if (row.periodValue === periodValue) entry.inPeriod += row.timeSpentMinutes;
+    taskMinutes.set(row.taskId, entry);
+  });
+
+  return Math.round(
+    Array.from(taskMinutes.entries()).reduce((sum, [taskId, minutes]) => {
+      const taskMandayMinutes = (taskById.get(taskId)?.mandays ?? 0) * MINUTES_PER_MANDAY;
+
+      if (minutes.total <= 0 || minutes.inPeriod <= 0 || taskMandayMinutes <= 0) return sum;
+
+      return sum + taskMandayMinutes * (minutes.inPeriod / minutes.total);
+    }, 0),
+  );
+}
+
 export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: ExportDialogProps) {
   const exportRows = createExportRows(tasks, workLogs, projects);
   const exportPeriods = getExportPeriods(exportRows);
@@ -243,13 +267,12 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
 
   const matchingRows = exportRows.filter((row) => row.periodValue === selectedPeriodValue);
   const totalMinutes = matchingRows.reduce((sum, row) => sum + row.timeSpentMinutes, 0);
-  const capacityMinutes = workingDaysInMonth(selectedPeriodValue) * 8 * 60;
-  const uniqueTaskIds = new Set(matchingRows.map((r) => r.taskId));
-  const taskById = new Map(tasks.map((t) => [t.id, t]));
-  const totalMandayMinutes = Array.from(uniqueTaskIds).reduce((sum, id) => {
-    const task = taskById.get(id);
-    return sum + (task?.mandays ?? 0) * 480;
-  }, 0);
+  const capacityMinutes = workingDaysInMonth(selectedPeriodValue) * MINUTES_PER_MANDAY;
+  const totalMandayMinutes = calculateMandayMinutesForPeriod(
+    tasks,
+    exportRows,
+    selectedPeriodValue,
+  );
   const selectedPeriodLabel =
     exportPeriods.find((period) => period.value === selectedPeriodValue)?.label ?? "";
   const hasSavedCurrentPeriod = Boolean(savedFileName) && savedPeriodValue === selectedPeriodValue;
@@ -265,7 +288,7 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
       .sort(([a], [b]) => a.localeCompare(b))
       .flatMap(([value, v]) => {
         if (v.loggedMin <= 0) return [];
-        const cap = workingDaysInMonth(value) * 8 * 60;
+        const cap = workingDaysInMonth(value) * MINUTES_PER_MANDAY;
         return [
           {
             value,
