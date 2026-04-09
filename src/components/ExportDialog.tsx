@@ -427,7 +427,15 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
                   />
                   <Tooltip
                     formatter={(v) => [`${v}%`, "Speed"]}
-                    contentStyle={{ fontSize: 11, padding: "2px 8px", borderRadius: "6px" }}
+                    contentStyle={{
+                      fontSize: 11,
+                      padding: "2px 8px",
+                      borderRadius: "6px",
+                      backgroundColor: "hsl(var(--popover))",
+                      color: "hsl(var(--popover-foreground))",
+                      borderColor: "hsl(var(--border))",
+                    }}
+                    labelStyle={{ color: "hsl(var(--muted-foreground))" }}
                     cursor={{ stroke: "hsl(var(--border))", strokeWidth: 1 }}
                   />
                   <Line
