@@ -1,5 +1,6 @@
 import { Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
+import { setWindowTheme } from "@/lib/desktop";
 import { Button } from "@/components/ui/button";
 
 export function ThemeToggle() {
@@ -18,6 +19,7 @@ export function ThemeToggle() {
       root.classList.remove("dark");
       localStorage.setItem("theme", "light");
     }
+    void setWindowTheme(dark);
   }, [dark]);
 
   return (

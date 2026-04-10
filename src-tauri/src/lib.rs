@@ -4,6 +4,37 @@ use tauri_plugin_window_state::{Builder as WindowStateBuilder, StateFlags, Windo
 #[cfg(target_os = "macos")]
 use tauri::TitleBarStyle;
 
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn set_window_theme(window: tauri::WebviewWindow, is_dark: bool) {
+    use objc2_app_kit::{NSColor, NSWindow};
+    unsafe {
+        let ns_window = &*(window.ns_window().unwrap() as *mut NSWindow);
+        let bg_color = if is_dark {
+            // dark --background: hsl(222, 25%, 8%) ≈ rgb(15, 18, 26)
+            NSColor::colorWithRed_green_blue_alpha(
+                15.0 / 255.0,
+                18.0 / 255.0,
+                26.0 / 255.0,
+                1.0,
+            )
+        } else {
+            // light --background: hsl(220, 20%, 97%) ≈ rgb(244, 247, 250)
+            NSColor::colorWithRed_green_blue_alpha(
+                244.0 / 255.0,
+                247.0 / 255.0,
+                250.0 / 255.0,
+                1.0,
+            )
+        };
+        ns_window.setBackgroundColor(Some(&*bg_color));
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn set_window_theme(_window: tauri::WebviewWindow, _is_dark: bool) {}
+
 const WINDOW_TITLE: &str = "JiraSync Hub";
 const WINDOW_WIDTH: f64 = 1280.0;
 const WINDOW_HEIGHT: f64 = 800.0;
@@ -18,6 +49,7 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(WindowStateBuilder::default().build())
         .plugin(tauri_plugin_opener::init())
+        .invoke_handler(tauri::generate_handler![set_window_theme])
         .setup(|app| {
             let window_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title(WINDOW_TITLE)

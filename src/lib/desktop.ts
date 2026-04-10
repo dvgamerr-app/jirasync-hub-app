@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
@@ -64,6 +65,15 @@ export async function startWindowDragging(): Promise<void> {
 
 export async function startWindowResize(direction: WindowResizeDirection): Promise<void> {
   await withCurrentWindow((window) => window.startResizeDragging(direction));
+}
+
+export async function setWindowTheme(isDark: boolean): Promise<void> {
+  if (!isTauriRuntime() || !isMacOS()) return;
+  try {
+    await invoke("set_window_theme", { isDark });
+  } catch {
+    // Ignore in plain-browser preview mode.
+  }
 }
 
 export async function openExternal(url: string): Promise<void> {
