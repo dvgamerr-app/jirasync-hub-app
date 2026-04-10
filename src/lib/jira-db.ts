@@ -38,35 +38,38 @@ export interface JiraAccount {
   apiToken: string;
 }
 
-/** Backward-compat alias used by older code */
+/** @deprecated Use JiraAccount directly */
 export type JiraSettings = JiraAccount;
 
 const JIRA_ACCOUNTS_KEY = "jira-accounts";
 const JIRA_SETTINGS_KEY_LEGACY = "jira-settings";
 
+export function migrateLegacyJiraSettings(): void {
+  if (localStorage.getItem(JIRA_ACCOUNTS_KEY)) return;
+  const legacy = localStorage.getItem(JIRA_SETTINGS_KEY_LEGACY);
+  if (!legacy) return;
+  try {
+    const old = JSON.parse(legacy) as Record<string, unknown>;
+    if (old?.instanceUrl && old?.email && old?.apiToken) {
+      const account: JiraAccount = {
+        id: crypto.randomUUID(),
+        name: deriveAccountName(old as Pick<JiraAccount, "instanceUrl">),
+        instanceUrl: old.instanceUrl as string,
+        email: old.email as string,
+        apiToken: old.apiToken as string,
+      };
+      saveJiraAccounts([account]);
+      localStorage.removeItem(JIRA_SETTINGS_KEY_LEGACY);
+    }
+  } catch {
+    // ignore malformed legacy data
+  }
+}
+
 export function getJiraAccounts(): JiraAccount[] {
   try {
     const raw = localStorage.getItem(JIRA_ACCOUNTS_KEY);
-    if (raw) return (JSON.parse(raw) as JiraAccount[]) ?? [];
-
-    // Migrate from legacy single-settings key
-    const legacy = localStorage.getItem(JIRA_SETTINGS_KEY_LEGACY);
-    if (legacy) {
-      const old = JSON.parse(legacy);
-      if (old?.instanceUrl && old?.email && old?.apiToken) {
-        const account: JiraAccount = {
-          id: crypto.randomUUID(),
-          name: getJiraBaseUrl(old).replace("https://", "").replace(".atlassian.net", ""),
-          instanceUrl: old.instanceUrl,
-          email: old.email,
-          apiToken: old.apiToken,
-        };
-        saveJiraAccounts([account]);
-        localStorage.removeItem(JIRA_SETTINGS_KEY_LEGACY);
-        return [account];
-      }
-    }
-    return [];
+    return raw ? (JSON.parse(raw) as JiraAccount[]) : [];
   } catch {
     return [];
   }
@@ -102,9 +105,9 @@ export function reorderJiraAccounts(activeId: string, overId: string): JiraAccou
   return nextAccounts;
 }
 
-export function removeJiraAccount(id: string): void {
+export async function removeJiraAccount(id: string): Promise<void> {
   saveJiraAccounts(getJiraAccounts().filter((a) => a.id !== id));
-  void cleanupAccountData(id);
+  await cleanupAccountData(id);
 }
 
 // Backward-compat helpers
@@ -116,11 +119,7 @@ export function saveJiraSettings(s: Omit<JiraAccount, "id" | "name">): void {
   const existing = getJiraAccounts();
   const account: JiraAccount = {
     id: existing[0]?.id ?? crypto.randomUUID(),
-    name:
-      existing[0]?.name ??
-      getJiraBaseUrl(s as JiraAccount)
-        .replace("https://", "")
-        .replace(".atlassian.net", ""),
+    name: existing[0]?.name ?? deriveAccountName(s as JiraAccount),
     ...s,
   };
   saveJiraAccounts([account, ...existing.slice(1)]);
@@ -156,6 +155,10 @@ export function getJiraBaseUrl(account: Pick<JiraAccount, "instanceUrl">): strin
   return `https://${url}.atlassian.net`;
 }
 
+function deriveAccountName(account: Pick<JiraAccount, "instanceUrl">): string {
+  return getJiraBaseUrl(account).replace("https://", "").replace(".atlassian.net", "");
+}
+
 async function cleanupAccountData(accountId: string): Promise<void> {
   const orgId = getOrganizationId(accountId);
   const taskIdPrefix = getTaskIdPrefix(accountId);
@@ -164,14 +167,8 @@ async function cleanupAccountData(accountId: string): Promise<void> {
     await db.transaction("rw", db.organizations, db.projects, db.tasks, db.workLogs, async () => {
       await db.organizations.delete(orgId);
       await db.projects.where("orgId").equals(orgId).delete();
-      await db.tasks
-        .toCollection()
-        .filter((task) => task.id.startsWith(taskIdPrefix))
-        .delete();
-      await db.workLogs
-        .toCollection()
-        .filter((workLog) => workLog.taskId.startsWith(taskIdPrefix))
-        .delete();
+      await db.tasks.where("id").startsWith(taskIdPrefix).delete();
+      await db.workLogs.where("taskId").startsWith(taskIdPrefix).delete();
     });
   } catch (error) {
     console.error(`Failed to clean local Jira data for account ${accountId}:`, error);

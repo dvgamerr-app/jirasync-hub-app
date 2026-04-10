@@ -59,6 +59,23 @@ describe("parseTimeInput", () => {
     // 0d 0h 0m → total 0 → null
     expect(parseTimeInput("0m")).toBeNull();
   });
+
+  it("returns null for input with unknown unit suffix (e.g. '1.5m')", () => {
+    // \d+ regex for minMatch won't match '1.5m'; must not silently treat as 1.5 hours
+    expect(parseTimeInput("1.5m")).toBeNull();
+  });
+
+  it("returns null for '0d'", () => {
+    expect(parseTimeInput("0d")).toBeNull();
+  });
+
+  it("returns null for '0h'", () => {
+    expect(parseTimeInput("0h")).toBeNull();
+  });
+
+  it("returns null for input with trailing unit letters and no valid unit (e.g. '5x')", () => {
+    expect(parseTimeInput("5x")).toBeNull();
+  });
 });
 
 describe("formatMinutes", () => {

@@ -75,6 +75,8 @@ const SEVERITY_TO_PRIORITY: Record<string, string> = {
   Low: "Low",
 };
 
+const DONE_STATUS = "done";
+
 type ScopedTaskCollections = Pick<TaskStore, "organizations" | "projects" | "tasks" | "workLogs">;
 
 function getAccountForTask(task: Task, accounts: JiraAccount[]): JiraAccount | undefined {
@@ -126,24 +128,19 @@ async function pushTaskToJira(task: Task, accounts: JiraAccount[]): Promise<void
     };
   }
 
-  if (Object.keys(fields).length > 0) {
-    try {
-      await updateJiraIssue(account, task.jiraTaskId, fields);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`Failed updating issue ${task.jiraTaskId}:`, err);
-      throw new Error(`Failed updating ${task.jiraTaskId}: ${message}`, { cause: err });
-    }
+  try {
+    await updateJiraIssue(account, task.jiraTaskId, fields);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`Failed updating issue ${task.jiraTaskId}:`, err);
+    throw new Error(`Failed updating ${task.jiraTaskId}: ${message}`, { cause: err });
   }
+
   if (task.status) {
-    await transitionJiraIssue(account, task.jiraTaskId, task.status).catch(() => {
-      // transition may fail if status name doesn't match — non-fatal
+    await transitionJiraIssue(account, task.jiraTaskId, task.status).catch((err: unknown) => {
+      console.warn(`Transition failed for ${task.jiraTaskId} → "${task.status}":`, err);
     });
   }
-}
-
-function logStoreError(message: string, error: unknown): void {
-  console.error(message, error);
 }
 
 async function persistTask(task: Task): Promise<void> {
@@ -152,19 +149,19 @@ async function persistTask(task: Task): Promise<void> {
 
 function persistTaskInBackground(task: Task): void {
   void persistTask(task).catch((error) => {
-    logStoreError(`Failed to persist task ${task.id}:`, error);
+    console.error(`Failed to persist task ${task.id}:`, error);
   });
 }
 
 function persistWorkLogInBackground(workLog: WorkLog): void {
   void db.workLogs.put(workLog).catch((error) => {
-    logStoreError(`Failed to persist worklog ${workLog.id}:`, error);
+    console.error(`Failed to persist worklog ${workLog.id}:`, error);
   });
 }
 
 function deleteWorkLogInBackground(workLogId: string): void {
   void db.workLogs.delete(workLogId).catch((error) => {
-    logStoreError(`Failed to delete worklog ${workLogId}:`, error);
+    console.error(`Failed to delete worklog ${workLogId}:`, error);
   });
 }
 
@@ -249,7 +246,7 @@ function removeWorkLog(workLogs: WorkLog[], workLogId: string): WorkLog[] {
 }
 
 function isDoneTask(task: Pick<Task, "status">): boolean {
-  return task.status?.trim().toLowerCase() === "done";
+  return task.status?.trim().toLowerCase() === DONE_STATUS;
 }
 
 function matchesTaskStatusFilter(
@@ -316,7 +313,7 @@ function getNormalizedSelectionState(
   };
 }
 
-function markDirty(task: Task, updates: Partial<Task>): Task {
+function markDirtyAndPersist(task: Task, updates: Partial<Task>): Task {
   const updated = {
     ...task,
     ...updates,
@@ -328,12 +325,8 @@ function markDirty(task: Task, updates: Partial<Task>): Task {
   return updated;
 }
 
-function toSyncedTask(task: Task): Task {
-  return { ...task, isDirty: false, isSynced: true };
-}
-
 async function persistSyncedTask(task: Task): Promise<Task> {
-  const synced = toSyncedTask(task);
+  const synced: Task = { ...task, isDirty: false, isSynced: true };
   await persistTask(synced);
   return synced;
 }
@@ -341,29 +334,28 @@ async function persistSyncedTask(task: Task): Promise<Task> {
 async function syncTaskWorkLogsToJira(task: Task, account: JiraAccount): Promise<void> {
   const taskWorkLogs = await db.workLogs.where("taskId").equals(task.id).toArray();
 
-  for (const workLog of taskWorkLogs.filter(isPendingCreateWorkLog)) {
-    const jiraWorklogId = await addJiraWorkLog(
-      account,
-      task.jiraTaskId,
-      workLog.timeSpentMinutes,
-      workLog.logDate,
-      workLog.comment,
-    );
+  await Promise.all(
+    taskWorkLogs.filter(isPendingCreateWorkLog).map(async (workLog) => {
+      const jiraWorklogId = await addJiraWorkLog(
+        account,
+        task.jiraTaskId,
+        workLog.timeSpentMinutes,
+        workLog.logDate,
+        workLog.comment,
+      );
+      if (!jiraWorklogId) throw new Error(`Failed creating worklog for ${task.jiraTaskId}`);
+      await db.workLogs.put(toSyncedWorkLog(workLog, jiraWorklogId));
+    }),
+  );
 
-    if (!jiraWorklogId) {
-      throw new Error(`Failed creating worklog for ${task.jiraTaskId}`);
-    }
-
-    await db.workLogs.put(toSyncedWorkLog(workLog, jiraWorklogId));
-  }
-
-  for (const workLog of taskWorkLogs.filter(isPendingDeleteWorkLog)) {
-    if (workLog.jiraWorklogId) {
-      await deleteJiraWorkLog(account, task.jiraTaskId, workLog.jiraWorklogId);
-    }
-
-    await db.workLogs.delete(workLog.id);
-  }
+  await Promise.all(
+    taskWorkLogs.filter(isPendingDeleteWorkLog).map(async (workLog) => {
+      if (workLog.jiraWorklogId) {
+        await deleteJiraWorkLog(account, task.jiraTaskId, workLog.jiraWorklogId);
+      }
+      await db.workLogs.delete(workLog.id);
+    }),
+  );
 }
 
 async function syncDirtyTask(task: Task, accounts: JiraAccount[]): Promise<void> {
@@ -397,7 +389,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
   const updateTask = (taskId: string, updates: Partial<Task>) => {
     set((state) => {
       const tasks = state.tasks.map((task) =>
-        task.id === taskId ? markDirty(task, updates) : task,
+        task.id === taskId ? markDirtyAndPersist(task, updates) : task,
       );
       const normalizedSelection = getNormalizedSelectionState(
         tasks,
@@ -469,43 +461,38 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     addWorkLog: (log) => {
       const newLog: WorkLog = {
         ...log,
-        id: `wl-${Date.now()}`,
+        id: `wl-${crypto.randomUUID()}`,
         createdAt: new Date().toISOString(),
         jiraWorklogId: null,
         syncStatus: "pending_create",
       };
       persistWorkLogInBackground(newLog);
-      set((state) => ({ workLogs: [...state.workLogs, newLog] }));
-
-      // Mark parent task dirty so row turns yellow and sync button activates.
-      const task = get().tasks.find((candidate) => candidate.id === log.taskId);
-      if (!task) return;
-
-      const dirtyTask = markDirty(task, {});
-      set((state) => ({ tasks: replaceTask(state.tasks, dirtyTask) }));
+      set((state) => {
+        const task = state.tasks.find((t) => t.id === log.taskId);
+        return {
+          workLogs: [...state.workLogs, newLog],
+          tasks: task ? replaceTask(state.tasks, markDirtyAndPersist(task, {})) : state.tasks,
+        };
+      });
     },
 
     removeWorkLog: (logId) => {
       const log = get().workLogs.find((workLog) => workLog.id === logId);
       if (!log) return;
 
-      if (isPendingCreateWorkLog(log)) {
-        deleteWorkLogInBackground(logId);
-        set((state) => ({ workLogs: removeWorkLog(state.workLogs, logId) }));
-      } else {
+      set((state) => {
+        const task = state.tasks.find((t) => t.id === log.taskId);
+        const tasks = task ? replaceTask(state.tasks, markDirtyAndPersist(task, {})) : state.tasks;
+
+        if (isPendingCreateWorkLog(log)) {
+          deleteWorkLogInBackground(logId);
+          return { workLogs: removeWorkLog(state.workLogs, logId), tasks };
+        }
+
         const pendingDeletedWorkLog: WorkLog = { ...log, syncStatus: "pending_delete" };
         persistWorkLogInBackground(pendingDeletedWorkLog);
-        set((state) => ({
-          workLogs: replaceWorkLog(state.workLogs, pendingDeletedWorkLog),
-        }));
-      }
-
-      // Keep the parent task dirty so the delete waits for manual push sync.
-      const task = get().tasks.find((candidate) => candidate.id === log.taskId);
-      if (task) {
-        const dirtyTask = markDirty(task, {});
-        set((state) => ({ tasks: replaceTask(state.tasks, dirtyTask) }));
-      }
+        return { workLogs: replaceWorkLog(state.workLogs, pendingDeletedWorkLog), tasks };
+      });
     },
 
     syncTaskToJira: async (taskId) => {
@@ -550,7 +537,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     getFilteredTasks: () => {
       const { tasks, selectedProjectId, taskStatusFilter } = get();
       const filtered = getVisibleTasks(tasks, selectedProjectId, taskStatusFilter);
-      return [...filtered].sort(
+      return filtered.sort(
         (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
       );
     },

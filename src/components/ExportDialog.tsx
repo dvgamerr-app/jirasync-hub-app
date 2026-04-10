@@ -248,9 +248,11 @@ function calculateMandayMinutesForPeriod(tasks: Task[], rows: ExportRow[], perio
   );
 }
 
+const SPEED_RATE_OK = 0.8;
+
 export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: ExportDialogProps) {
-  const exportRows = createExportRows(tasks, workLogs, projects);
-  const exportPeriods = getExportPeriods(exportRows);
+  const exportRows = useMemo(() => createExportRows(tasks, workLogs, projects), [tasks, workLogs, projects]);
+  const exportPeriods = useMemo(() => getExportPeriods(exportRows), [exportRows]);
   const latestPeriod = exportPeriods[0] ?? null;
   const [selectedPeriodValue, setSelectedPeriodValue] = useState(latestPeriod?.value ?? "");
   const [exporting, setExporting] = useState(false);
@@ -260,10 +262,10 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
   useEffect(() => {
     if (!open) return;
 
-    setSelectedPeriodValue(getExportPeriods(exportRows)[0]?.value ?? "");
+    setSelectedPeriodValue(exportPeriods[0]?.value ?? "");
     setSavedFileName("");
     setSavedPeriodValue("");
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, exportPeriods]);
 
   const matchingRows = exportRows.filter((row) => row.periodValue === selectedPeriodValue);
   const totalMinutes = matchingRows.reduce((sum, row) => sum + row.timeSpentMinutes, 0);
@@ -386,7 +388,7 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
                   Speed rate:{" "}
                   <span
                     className={
-                      totalMinutes / capacityMinutes >= 0.8
+                      totalMinutes / capacityMinutes >= SPEED_RATE_OK
                         ? "text-green-600 dark:text-green-400"
                         : "text-amber-600 dark:text-amber-400"
                     }

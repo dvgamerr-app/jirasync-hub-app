@@ -2,11 +2,13 @@ import { db, getJiraAccounts } from "./jira-db";
 import { fetchAssignedJiraData, fetchJiraOrganization } from "./jira-api";
 import type { Task, WorkLog } from "@/types/jira";
 import { getOrganizationId } from "@/lib/jira-ids";
-import { isPendingCreateWorkLog, isPendingDeleteWorkLog } from "@/lib/worklog-sync";
+import { isPendingDeleteWorkLog } from "@/lib/worklog-sync";
 
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let isSyncing = false;
 let syncPending = false;
+
+const SYNC_INTERVAL_MS = 60 * 60 * 1000;
 
 export type SyncStatus = "idle" | "syncing" | "success" | "error";
 type SyncListener = (status: SyncStatus, message?: string) => void;
@@ -19,12 +21,15 @@ export function onSyncStatus(listener: SyncListener): () => void {
 }
 
 function notify(status: SyncStatus, message?: string) {
-  listeners.forEach((l) => l(status, message));
+  for (const l of listeners) {
+    try {
+      l(status, message);
+    } catch (e) {
+      console.warn("SyncListener error:", e);
+    }
+  }
 }
 
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Sync failed";
-}
 
 function mergeRemoteTaskWithLocalState(remoteTask: Task, localTask?: Task): Task {
   if (!localTask?.isDirty) {
@@ -58,18 +63,14 @@ async function replaceTaskWorklogs(taskId: string, freshLogs: WorkLog[]): Promis
     .filter((workLog) => Boolean(workLog.jiraWorklogId) && !isPendingDeleteWorkLog(workLog))
     .map((workLog) => workLog.id);
 
-  if (jiraSourcedIds.length > 0) {
-    await db.workLogs.bulkDelete(jiraSourcedIds);
-  }
-
   const visibleFreshLogs = freshLogs.filter(
-    (workLog) =>
-      !pendingDeletedJiraIds.has(workLog.jiraWorklogId ?? "") && !isPendingCreateWorkLog(workLog),
+    (workLog) => !pendingDeletedJiraIds.has(workLog.jiraWorklogId ?? ""),
   );
 
-  if (visibleFreshLogs.length > 0) {
-    await db.workLogs.bulkPut(visibleFreshLogs);
-  }
+  await db.transaction("rw", db.workLogs, async () => {
+    if (jiraSourcedIds.length > 0) await db.workLogs.bulkDelete(jiraSourcedIds);
+    if (visibleFreshLogs.length > 0) await db.workLogs.bulkPut(visibleFreshLogs);
+  });
 }
 
 async function removeStaleProjectsForAccount(
@@ -82,9 +83,20 @@ async function removeStaleProjectsForAccount(
     .map((project) => project.id)
     .filter((projectId) => !visibleProjectIds.has(projectId));
 
-  if (staleProjectIds.length > 0) {
+  if (staleProjectIds.length === 0) return;
+
+  const staleTaskIds = (await db.tasks
+    .where("projectId")
+    .anyOf(staleProjectIds)
+    .primaryKeys()) as string[];
+
+  await db.transaction("rw", db.projects, db.tasks, db.workLogs, async () => {
+    if (staleTaskIds.length > 0) {
+      await db.workLogs.where("taskId").anyOf(staleTaskIds).delete();
+      await db.tasks.where("projectId").anyOf(staleProjectIds).delete();
+    }
     await db.projects.bulkDelete(staleProjectIds);
-  }
+  });
 }
 
 export async function syncNow(): Promise<void> {
@@ -118,11 +130,13 @@ export async function syncNow(): Promise<void> {
       }
 
       // 3. Merge only tasks that belong to the configured Jira user
-      for (const task of tasks) {
-        const existing = await db.tasks.get(task.id);
-        await db.tasks.put(mergeRemoteTaskWithLocalState(task, existing));
+      const localTasks = await db.tasks.bulkGet(tasks.map((t) => t.id));
+      const localMap = new Map(localTasks.filter(Boolean).map((t) => [t!.id, t!]));
+      const mergedTasks = tasks.map((t) => mergeRemoteTaskWithLocalState(t, localMap.get(t.id)));
+      await db.tasks.bulkPut(mergedTasks);
 
-        // Sync work logs: replace Jira-sourced logs, keep locally-created ones
+      // Sync work logs: replace Jira-sourced logs, keep locally-created ones
+      for (const task of tasks) {
         const freshLogs = worklogsByTaskId[task.id] ?? [];
         await replaceTaskWorklogs(task.id, freshLogs);
       }
@@ -132,7 +146,7 @@ export async function syncNow(): Promise<void> {
     await db.syncMeta.put({
       id: "last-sync",
       lastSyncedAt: new Date().toISOString(),
-      nextSyncAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      nextSyncAt: null,
     });
 
     notify(
@@ -141,13 +155,16 @@ export async function syncNow(): Promise<void> {
     );
   } catch (err: unknown) {
     console.error("Sync failed:", err);
-    notify("error", getErrorMessage(err));
+    notify("error", err instanceof Error ? err.message : "Sync failed");
     throw err;
   } finally {
     isSyncing = false;
     if (syncPending) {
       syncPending = false;
-      syncNow().catch(() => {});
+      syncNow().catch((err: unknown) => {
+        console.error("Pending sync failed:", err);
+        notify("error", err instanceof Error ? err.message : "Sync failed");
+      });
     }
   }
 }
@@ -158,12 +175,12 @@ export function startBackgroundSync() {
   if (accounts.length === 0) return;
 
   // Sync immediately, then every hour
-  syncNow().catch(() => {});
+  syncNow().catch(() => { });
   syncInterval = setInterval(
     () => {
-      syncNow().catch(() => {});
+      syncNow().catch(() => { });
     },
-    60 * 60 * 1000,
+    SYNC_INTERVAL_MS,
   );
 }
 

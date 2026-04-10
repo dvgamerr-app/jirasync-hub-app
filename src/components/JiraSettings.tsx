@@ -207,8 +207,8 @@ function JiraSettingsDialogContent() {
     setMode("edit");
   };
 
-  const handleDelete = (id: string) => {
-    removeJiraAccount(id);
+  const handleDelete = async (id: string) => {
+    await removeJiraAccount(id);
     refresh();
     if (getJiraAccounts().length === 0) {
       stopBackgroundSync();

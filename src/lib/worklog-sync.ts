@@ -7,6 +7,8 @@ export function isPendingDeleteWorkLog(workLog: WorkLog): boolean {
 export function isPendingCreateWorkLog(workLog: WorkLog): boolean {
   return (
     workLog.syncStatus === "pending_create" ||
+    // Treat local-only logs (no jiraWorklogId) as pending_create,
+    // unless they are already marked for deletion.
     (workLog.jiraWorklogId == null && workLog.syncStatus !== "pending_delete")
   );
 }

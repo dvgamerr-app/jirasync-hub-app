@@ -30,6 +30,23 @@ const TASK_STATUS_FILTERS: Array<{ value: TaskStatusFilter; label: string }> = [
   { value: "all", label: "All" },
 ];
 
+const PUSH_DONE_RESET_MS = 1800;
+
+function getEmptyMessage(
+  hasAnyTasks: boolean,
+  taskStatusFilter: TaskStatusFilter,
+  hasJiraAccounts: boolean,
+): string {
+  if (!hasAnyTasks) {
+    if (!hasJiraAccounts)
+      return "Add a Jira instance in Jira Settings to start your first sync and load tasks into this workspace.";
+    return "This workspace is still empty. Run Sync to pull tasks from your connected Jira instance.";
+  }
+  if (taskStatusFilter === "done") return "No done tasks match the current project selection.";
+  if (taskStatusFilter === "active") return "No active tasks match the current project selection.";
+  return "No tasks match the current project selection.";
+}
+
 function EmptyTasksState({
   hasJiraAccounts,
   hasAnyTasks,
@@ -46,15 +63,7 @@ function EmptyTasksState({
   onSync: () => Promise<void>;
 }) {
   const title = hasAnyTasks ? "No matching tasks" : "No tasks yet";
-  const message = hasAnyTasks
-    ? taskStatusFilter === "done"
-      ? "No done tasks match the current project selection."
-      : taskStatusFilter === "active"
-        ? "No active tasks match the current project selection."
-        : "No tasks match the current project selection."
-    : hasJiraAccounts
-      ? "This workspace is still empty. Run Sync to pull tasks from your connected Jira instance."
-      : "Add a Jira instance in Jira Settings to start your first sync and load tasks into this workspace.";
+  const message = getEmptyMessage(hasAnyTasks, taskStatusFilter, hasJiraAccounts);
 
   return (
     <div className="flex flex-1 items-center justify-center p-6">
@@ -154,7 +163,30 @@ const Index = () => {
     try {
       await syncNow();
     } catch {
-      // handled by listener
+      // error is reported via the onSyncStatus listener; no additional handling needed here
+    }
+  };
+
+  const handlePushDirtyTasks = async () => {
+    if (pushing || pushDone) return;
+    setPushing(true);
+    const count = dirtyCount;
+    try {
+      await syncAllDirtyTasks();
+      setPushing(false);
+      setPushDone(true);
+      toast({
+        title: "Synced to Jira",
+        description: `${count} task(s) pushed to Jira`,
+      });
+      setTimeout(() => setPushDone(false), PUSH_DONE_RESET_MS);
+    } catch {
+      setPushing(false);
+      toast({
+        title: "Sync failed",
+        description: "Some tasks could not be synced",
+        variant: "destructive",
+      });
     }
   };
 
@@ -236,28 +268,7 @@ const Index = () => {
                       : ""
                 }`}
                 disabled={pushing || pushDone}
-                onClick={async () => {
-                  if (pushing || pushDone) return;
-                  setPushing(true);
-                  const count = dirtyCount;
-                  try {
-                    await syncAllDirtyTasks();
-                    setPushing(false);
-                    setPushDone(true);
-                    toast({
-                      title: "Synced to Jira",
-                      description: `${count} task(s) pushed to Jira`,
-                    });
-                    setTimeout(() => setPushDone(false), 1800);
-                  } catch {
-                    setPushing(false);
-                    toast({
-                      title: "Sync failed",
-                      description: "Some tasks could not be synced",
-                      variant: "destructive",
-                    });
-                  }
-                }}
+                onClick={() => void handlePushDirtyTasks()}
               >
                 {pushDone ? (
                   <CheckCircle2 className="animate-check-pop h-3.5 w-3.5 text-green-500" />

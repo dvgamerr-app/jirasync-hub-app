@@ -87,11 +87,10 @@
 ## Useful commands
 
 ```bash
-bun run dev
-bun run build
-bun run tauri
-bun run lint
-bun run format
+bun tauri dev
+bun tauri build
+bun lint
+bun format
 bun x vitest run
 cargo check --manifest-path src-tauri/Cargo.toml
 ```

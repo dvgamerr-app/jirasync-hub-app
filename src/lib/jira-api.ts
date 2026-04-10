@@ -3,6 +3,10 @@ import type { Organization, Project, Task, WorkLog } from "@/types/jira";
 import { fetch } from "@tauri-apps/plugin-http";
 import { getOrganizationId, getProjectId, getTaskId } from "@/lib/jira-ids";
 
+const DEFAULT_STORY_POINT_FIELD_ID = "customfield_10016";
+const SECONDS_PER_WORKDAY = 8 * 60 * 60; // 8 hours in seconds
+const LINKED_ISSUES_BATCH_SIZE = 50;
+
 const ISSUE_TYPE_MAP: Partial<Record<string, Task["type"]>> = {
   Bug: "Bug",
   Story: "Story",
@@ -315,7 +319,7 @@ function mapIssueToTask(
   issue: JiraIssue,
   account: JiraAccount,
   projectKey: string,
-  storyPointFieldId = "customfield_10016",
+  storyPointFieldId = DEFAULT_STORY_POINT_FIELD_ID,
 ): Task {
   const desc = issue.fields.description;
   // Preserve raw ADF as JSON string so the renderer can produce rich output.
@@ -343,7 +347,7 @@ function mapIssueToTask(
     storyLevel: normalizeStoryLevel(issue.fields[storyPointFieldId] as number | null | undefined),
     mandays:
       issue.fields.timetracking?.originalEstimateSeconds != null
-        ? Math.round((issue.fields.timetracking.originalEstimateSeconds / 28800) * 1000) / 1000
+        ? Math.round((issue.fields.timetracking.originalEstimateSeconds / SECONDS_PER_WORKDAY) * 1000) / 1000
         : null,
     assignee: issue.fields.assignee?.displayName ?? null,
     refUrl: `${getJiraBaseUrl(account)}/browse/${issue.key}`,
@@ -378,12 +382,10 @@ async function fetchProjectStatuses(account: JiraAccount, projectKey: string): P
   const res = await jiraFetch(`project/${encodeURIComponent(projectKey)}/statuses`, account);
   const data = (await res.json()) as JiraProjectIssueTypeStatuses[];
 
-  return mergeStatuses(
-    (data ?? []).flatMap((issueType) =>
-      (issueType.statuses ?? []).map((status) => status.name ?? "").filter(Boolean),
-    ),
-    [],
+  const names = (data ?? []).flatMap((issueType) =>
+    (issueType.statuses ?? []).map((status) => status.name ?? "").filter(Boolean),
   );
+  return [...new Set(names)];
 }
 
 // Fetch issues for a project using the new /search/jql endpoint
@@ -393,7 +395,7 @@ export async function fetchJiraIssues(
 ): Promise<{ tasks: Task[]; statuses: string[]; worklogsByTaskId: Record<string, WorkLog[]> }> {
   const projectId = getProjectId(account.id, projectKey);
   const storyPointFieldMap = getStoryPointFieldMap();
-  const storyPointFieldId = storyPointFieldMap[projectId] ?? "customfield_10016";
+  const storyPointFieldId = storyPointFieldMap[projectId] ?? DEFAULT_STORY_POINT_FIELD_ID;
 
   const jql = `project = "${projectKey}" AND (assignee = currentUser() OR assignee was currentUser()) ORDER BY updated DESC`;
   const fields = [
@@ -454,10 +456,34 @@ export async function fetchJiraIssues(
   };
 }
 
+function buildProjectEntry(
+  account: JiraAccount,
+  projectKey: string,
+  projectName: string | null | undefined,
+): Project {
+  return {
+    id: getProjectId(account.id, projectKey),
+    orgId: getOrganizationId(account.id),
+    name: projectName ?? projectKey,
+    jiraProjectKey: projectKey,
+    availableStatuses: [],
+  };
+}
+
+function addProjectStatus(
+  map: Map<string, Set<string>>,
+  projectId: string,
+  status: string,
+): void {
+  const set = map.get(projectId) ?? new Set<string>();
+  set.add(status);
+  map.set(projectId, set);
+}
+
 export async function fetchAssignedJiraData(account: JiraAccount): Promise<AssignedJiraData> {
   const storyPointFieldMap = getStoryPointFieldMap();
   // Collect all unique story-point field IDs configured for this account's projects.
-  const storyPointFieldIds = new Set(["customfield_10016"]);
+  const storyPointFieldIds = new Set([DEFAULT_STORY_POINT_FIELD_ID]);
   for (const fieldId of Object.values(storyPointFieldMap)) {
     if (fieldId) storyPointFieldIds.add(fieldId);
   }
@@ -505,28 +531,14 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
       fetchedKeys.add(issue.key);
 
       const projectId = getProjectId(account.id, projectKey);
-      const project =
-        projectMap.get(projectKey) ??
-        ({
-          id: projectId,
-          orgId: getOrganizationId(account.id),
-          name: issue.fields.project?.name ?? projectKey,
-          jiraProjectKey: projectKey,
-          availableStatuses: [],
-        } satisfies Project);
-
       if (!projectMap.has(projectKey)) {
-        projectMap.set(projectKey, project);
+        projectMap.set(projectKey, buildProjectEntry(account, projectKey, issue.fields.project?.name));
       }
 
       const status = issue.fields.status?.name ?? null;
-      if (status) {
-        const projectStatuses = statusSetByProjectId.get(projectId) ?? new Set<string>();
-        projectStatuses.add(status);
-        statusSetByProjectId.set(projectId, projectStatuses);
-      }
+      if (status) addProjectStatus(statusSetByProjectId, projectId, status);
 
-      const projectStoryPointFieldId = storyPointFieldMap[projectId] ?? "customfield_10016";
+      const projectStoryPointFieldId = storyPointFieldMap[projectId] ?? DEFAULT_STORY_POINT_FIELD_ID;
       const task = mapIssueToTask(issue, account, projectKey, projectStoryPointFieldId);
       tasks.push(task);
 
@@ -550,11 +562,10 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
   // Fetch linked issues that weren't already returned by the main query
   const unfetchedLinkedKeys = Array.from(linkedKeys).filter((k) => !fetchedKeys.has(k));
   if (unfetchedLinkedKeys.length > 0) {
-    const BATCH = 50;
-    for (let i = 0; i < unfetchedLinkedKeys.length; i += BATCH) {
-      const batch = unfetchedLinkedKeys.slice(i, i + BATCH);
+    for (let i = 0; i < unfetchedLinkedKeys.length; i += LINKED_ISSUES_BATCH_SIZE) {
+      const batch = unfetchedLinkedKeys.slice(i, i + LINKED_ISSUES_BATCH_SIZE);
       const linkedJql = `issueKey in (${batch.map((k) => `"${k}"`).join(",")})`;
-      const body: Record<string, unknown> = { jql: linkedJql, maxResults: BATCH, fields };
+      const body: Record<string, unknown> = { jql: linkedJql, maxResults: LINKED_ISSUES_BATCH_SIZE, fields };
 
       try {
         const res = await jiraFetch("search/jql", account, {
@@ -572,25 +583,13 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
 
           const projectId = getProjectId(account.id, projectKey);
           if (!projectMap.has(projectKey)) {
-            projectMap.set(projectKey, {
-              id: projectId,
-              orgId: getOrganizationId(account.id),
-              name: issue.fields.project?.name ?? projectKey,
-              jiraProjectKey: projectKey,
-              availableStatuses: [],
-            } satisfies Project);
+            projectMap.set(projectKey, buildProjectEntry(account, projectKey, issue.fields.project?.name));
           }
 
           const status = issue.fields.status?.name ?? null;
-          if (status) {
-            const projectStatuses = statusSetByProjectId.get(projectId) ?? new Set<string>();
-            projectStatuses.add(status);
-            statusSetByProjectId.set(projectId, projectStatuses);
-          }
+          if (status) addProjectStatus(statusSetByProjectId, projectId, status);
 
-          const linkedProjectId = getProjectId(account.id, projectKey);
-          const linkedStoryPointFieldId =
-            storyPointFieldMap[linkedProjectId] ?? "customfield_10016";
+          const linkedStoryPointFieldId = storyPointFieldMap[projectId] ?? DEFAULT_STORY_POINT_FIELD_ID;
           const task = mapIssueToTask(issue, account, projectKey, linkedStoryPointFieldId);
           tasks.push(task);
 
@@ -599,8 +598,8 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
             worklogsByTaskId[task.id] = worklogs;
           }
         }
-      } catch {
-        // Linked issues batch failed (e.g. permission denied) — skip silently
+      } catch (error: unknown) {
+        console.warn("Failed fetching linked issues batch:", error);
       }
     }
   }
@@ -696,12 +695,12 @@ export async function addJiraWorkLog(
       started: new Date(started).toISOString().replace("Z", "+0000"),
       ...(comment
         ? {
-            comment: {
-              type: "doc",
-              version: 1,
-              content: [{ type: "paragraph", content: [{ type: "text", text: comment }] }],
-            },
-          }
+          comment: {
+            type: "doc",
+            version: 1,
+            content: [{ type: "paragraph", content: [{ type: "text", text: comment }] }],
+          },
+        }
         : {}),
     }),
   });
