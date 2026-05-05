@@ -69,6 +69,8 @@ type JiraIssueFields = {
   updated: string;
   worklog?: {
     worklogs?: JiraWorklog[];
+    total?: number | null;
+    maxResults?: number | null;
   } | null;
   issuelinks?: JiraIssueLinkEntry[] | null;
 };
@@ -121,6 +123,13 @@ type JiraTransitionsResponse = {
 
 type JiraCreatedWorklogResponse = {
   id?: string | null;
+};
+
+type JiraWorklogListResponse = {
+  startAt?: number;
+  maxResults?: number;
+  total?: number;
+  worklogs?: JiraWorklog[];
 };
 
 export interface JiraField {
@@ -416,6 +425,7 @@ export async function fetchJiraIssues(
   const allTasks: Task[] = [];
   const statusSet = new Set<string>();
   const worklogsByTaskId: Record<string, WorkLog[]> = {};
+  const truncatedIssueKeys = new Map<string, string>();
   let nextPageToken: string | undefined;
 
   while (true) {
@@ -433,14 +443,15 @@ export async function fetchJiraIssues(
       if (status) statusSet.add(status);
       const task = mapIssueToTask(issue, account, projectKey, storyPointFieldId);
       allTasks.push(task);
-      const wls = mapWorklogsFromIssue(issue, task.id);
-      if (wls.length > 0) worklogsByTaskId[task.id] = wls;
+      resolveWorklogs(issue.key, task.id, issue, worklogsByTaskId, truncatedIssueKeys);
     }
 
     if (data.isLast) break;
     nextPageToken = data.nextPageToken;
     if (!nextPageToken) break;
   }
+
+  await fetchTruncatedWorklogs(account, truncatedIssueKeys, worklogsByTaskId);
 
   const projectStatuses = await fetchProjectStatuses(account, projectKey).catch(
     (error: unknown) => {
@@ -510,6 +521,7 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
   const statusSetByProjectId = new Map<string, Set<string>>();
   const tasks: Task[] = [];
   const worklogsByTaskId: Record<string, WorkLog[]> = {};
+  const truncatedIssueKeys = new Map<string, string>(); // issueKey -> taskId
   const fetchedKeys = new Set<string>();
   const linkedKeys = new Set<string>();
   let nextPageToken: string | undefined;
@@ -542,10 +554,7 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
       const task = mapIssueToTask(issue, account, projectKey, projectStoryPointFieldId);
       tasks.push(task);
 
-      const worklogs = mapWorklogsFromIssue(issue, task.id);
-      if (worklogs.length > 0) {
-        worklogsByTaskId[task.id] = worklogs;
-      }
+      resolveWorklogs(issue.key, task.id, issue, worklogsByTaskId, truncatedIssueKeys);
 
       // Collect linked issue keys for a follow-up fetch
       for (const link of issue.fields.issuelinks ?? []) {
@@ -593,16 +602,15 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
           const task = mapIssueToTask(issue, account, projectKey, linkedStoryPointFieldId);
           tasks.push(task);
 
-          const worklogs = mapWorklogsFromIssue(issue, task.id);
-          if (worklogs.length > 0) {
-            worklogsByTaskId[task.id] = worklogs;
-          }
+          resolveWorklogs(issue.key, task.id, issue, worklogsByTaskId, truncatedIssueKeys);
         }
       } catch (error: unknown) {
         console.warn("Failed fetching linked issues batch:", error);
       }
     }
   }
+
+  await fetchTruncatedWorklogs(account, truncatedIssueKeys, worklogsByTaskId);
 
   const collectedProjects = Array.from(projectMap.values());
   const projectStatusResults = await Promise.allSettled(
@@ -630,9 +638,14 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
   return { projects, tasks, worklogsByTaskId };
 }
 
-function mapWorklogsFromIssue(issue: JiraIssue, taskId: string): WorkLog[] {
-  const worklogs = issue.fields.worklog?.worklogs ?? [];
-  return worklogs.map((wl) => ({
+function isWorklogTruncated(issue: JiraIssue): boolean {
+  const wl = issue.fields.worklog;
+  if (!wl) return false;
+  return (wl.total ?? 0) > (wl.worklogs?.length ?? 0);
+}
+
+function mapJiraWorklog(wl: JiraWorklog, taskId: string): WorkLog {
+  return {
     id: `wl-jira-${wl.id}`,
     taskId,
     timeSpentMinutes: Math.round((wl.timeSpentSeconds ?? 0) / 60),
@@ -641,7 +654,66 @@ function mapWorklogsFromIssue(issue: JiraIssue, taskId: string): WorkLog[] {
     createdAt: wl.started,
     jiraWorklogId: wl.id,
     syncStatus: "synced",
-  }));
+  };
+}
+
+function mapWorklogsFromIssue(issue: JiraIssue, taskId: string): WorkLog[] {
+  return (issue.fields.worklog?.worklogs ?? []).map((wl) => mapJiraWorklog(wl, taskId));
+}
+
+async function fetchAllIssueWorklogs(account: JiraAccount, issueKey: string): Promise<JiraWorklog[]> {
+  const all: JiraWorklog[] = [];
+  const maxResults = 100;
+  let startAt = 0;
+
+  while (true) {
+    const res = await jiraFetch(
+      `issue/${issueKey}/worklog?startAt=${startAt}&maxResults=${maxResults}`,
+      account,
+    );
+    const data = (await res.json()) as JiraWorklogListResponse;
+    const page = data.worklogs ?? [];
+    all.push(...page);
+    const total = data.total ?? 0;
+    startAt += page.length;
+    if (startAt >= total || page.length === 0) break;
+  }
+
+  return all;
+}
+
+function resolveWorklogs(
+  issueKey: string,
+  taskId: string,
+  issue: JiraIssue,
+  worklogsByTaskId: Record<string, WorkLog[]>,
+  truncatedIssueKeys: Map<string, string>,
+): void {
+  if (isWorklogTruncated(issue)) {
+    truncatedIssueKeys.set(issueKey, taskId);
+    return;
+  }
+  const worklogs = mapWorklogsFromIssue(issue, taskId);
+  if (worklogs.length > 0) worklogsByTaskId[taskId] = worklogs;
+}
+
+async function fetchTruncatedWorklogs(
+  account: JiraAccount,
+  truncatedIssueKeys: Map<string, string>,
+  worklogsByTaskId: Record<string, WorkLog[]>,
+): Promise<void> {
+  if (truncatedIssueKeys.size === 0) return;
+  await Promise.all(
+    Array.from(truncatedIssueKeys.entries()).map(async ([issueKey, taskId]) => {
+      try {
+        const allWorklogs = await fetchAllIssueWorklogs(account, issueKey);
+        const mapped = allWorklogs.map((wl) => mapJiraWorklog(wl, taskId));
+        if (mapped.length > 0) worklogsByTaskId[taskId] = mapped;
+      } catch (error: unknown) {
+        console.warn(`Failed fetching full worklogs for ${issueKey}:`, error);
+      }
+    }),
+  );
 }
 
 function mapPriorityToSeverity(priority: string | null | undefined): Task["severity"] {
