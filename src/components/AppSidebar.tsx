@@ -3,7 +3,7 @@ import { useTaskStore } from "@/store/task-store";
 import { ChevronDown, FolderKanban, ListTodo, Settings, RefreshCw } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { getLastSyncTime } from "@/lib/sync-service";
+import { getLastSyncTime, onSyncStatus } from "@/lib/sync-service";
 import { formatDistanceToNow } from "date-fns";
 
 interface AppSidebarProps {
@@ -18,8 +18,11 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
 
   useEffect(() => {
     getLastSyncTime().then(setLastSync);
-    const interval = setInterval(() => getLastSyncTime().then(setLastSync), 30000);
-    return () => clearInterval(interval);
+    return onSyncStatus((status) => {
+      if (status === "success") {
+        getLastSyncTime().then(setLastSync);
+      }
+    });
   }, []);
 
   return (

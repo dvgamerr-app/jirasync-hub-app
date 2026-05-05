@@ -136,10 +136,9 @@ export async function syncNow(): Promise<void> {
       await db.tasks.bulkPut(mergedTasks);
 
       // Sync work logs: replace Jira-sourced logs, keep locally-created ones
-      for (const task of tasks) {
-        const freshLogs = worklogsByTaskId[task.id] ?? [];
-        await replaceTaskWorklogs(task.id, freshLogs);
-      }
+      await Promise.all(
+        tasks.map((task) => replaceTaskWorklogs(task.id, worklogsByTaskId[task.id] ?? [])),
+      );
     }
 
     // 4. Update sync meta

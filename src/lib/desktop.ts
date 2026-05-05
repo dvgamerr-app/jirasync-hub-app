@@ -32,7 +32,7 @@ export function isMacOS(): boolean {
 }
 
 export function usesNativeMacTitlebar(): boolean {
-  return isMacOS();
+  return isMacOS() && isTauriRuntime();
 }
 
 async function withCurrentWindow(

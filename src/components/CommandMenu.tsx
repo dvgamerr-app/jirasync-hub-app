@@ -9,15 +9,22 @@ import {
   CommandList,
 } from "@/components/ui/command";
 
-export function CommandMenu() {
-  const [open, setOpen] = useState(false);
+interface CommandMenuProps {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
+export function CommandMenu({ open: controlledOpen, onOpenChange: controlledOnOpenChange }: CommandMenuProps = {}) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = controlledOnOpenChange ?? setInternalOpen;
   const { tasks, setSelectedTask, setSelectedProject, projects } = useTaskStore();
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        setOpen((o) => !o);
+        setOpen(!open);
       }
     };
     document.addEventListener("keydown", down);

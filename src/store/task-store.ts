@@ -21,6 +21,7 @@ import {
   isVisibleWorkLog,
   toSyncedWorkLog,
 } from "@/lib/worklog-sync";
+import { formatMandayEstimate } from "@/lib/worklog-time";
 
 export type TaskStatusFilter = "active" | "done" | "all";
 
@@ -107,21 +108,8 @@ async function pushTaskToJira(task: Task, accounts: JiraAccount[]): Promise<void
   }
 
   // If mandays set, convert to Jira timetracking originalEstimate
-  // Internal store: mandays is a decimal where 1 = 1 manday = 8 hours
   if (typeof task.mandays === "number" && !isNaN(task.mandays)) {
-    const totalMinutes = Math.round(task.mandays * 8 * 60);
-    const seconds = totalMinutes * 60;
-
-    // Build human-readable string like "1d 4h 30m" (1d = 8h)
-    const days = Math.floor(totalMinutes / 480);
-    const hours = Math.floor((totalMinutes % 480) / 60);
-    const mins = totalMinutes % 60;
-    const parts: string[] = [];
-    if (days > 0) parts.push(`${days}d`);
-    if (hours > 0) parts.push(`${hours}h`);
-    if (mins > 0) parts.push(`${mins}m`);
-    const estimateStr = parts.join(" ") || "0m";
-
+    const { str: estimateStr, seconds } = formatMandayEstimate(task.mandays);
     fields.timetracking = {
       originalEstimate: estimateStr,
       originalEstimateSeconds: seconds,

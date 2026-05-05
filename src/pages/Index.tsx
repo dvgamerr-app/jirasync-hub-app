@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { TaskTable } from "@/components/TaskTable";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
@@ -123,7 +123,8 @@ const Index = () => {
   const [pushing, setPushing] = useState(false);
   const [pushDone, setPushDone] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const hasJiraAccounts = getJiraAccounts().length > 0;
+  const [commandMenuOpen, setCommandMenuOpen] = useState(false);
+  const hasJiraAccounts = useMemo(() => getJiraAccounts().length > 0, [settingsOpen]);
   const showEmptyState = isLoaded && filteredTasks.length === 0 && !selectedTaskId;
 
   // Load data from IndexedDB on mount
@@ -234,9 +235,7 @@ const Index = () => {
               variant="outline"
               size="sm"
               className="h-7 gap-1.5 text-[12px] text-muted-foreground md:hidden"
-              onClick={() => {
-                document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }));
-              }}
+              onClick={() => setCommandMenuOpen(true)}
             >
               <Search className="h-3 w-3" />
             </Button>
@@ -324,7 +323,7 @@ const Index = () => {
         </div>
       </div>
 
-      <CommandMenu />
+      <CommandMenu open={commandMenuOpen} onOpenChange={setCommandMenuOpen} />
       <ExportDialog
         open={exportDialogOpen}
         onOpenChange={setExportDialogOpen}
