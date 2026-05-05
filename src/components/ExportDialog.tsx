@@ -9,7 +9,7 @@ import {
   XAxis,
 } from "recharts";
 import { format } from "date-fns";
-import { Check, Download } from "lucide-react";
+import { Check, Clipboard, Download } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { fetchJiraMyselfDisplayName } from "@/lib/jira-api";
@@ -101,7 +101,7 @@ function escapeCsvValue(value: string): string {
     : value;
 }
 
-function buildCsv(rows: ExportRow[], fullNamesByAccountId: Record<string, string>): string {
+function buildTableRows(rows: ExportRow[], fullNamesByAccountId: Record<string, string>): string[][] {
   return [
     CSV_HEADER,
     ...rows.map((row) => [
@@ -116,10 +116,15 @@ function buildCsv(rows: ExportRow[], fullNamesByAccountId: Record<string, string
       row.refUrl,
       row.note,
     ]),
-  ]
+  ];
+}
+
+function buildCsv(rows: ExportRow[], fullNamesByAccountId: Record<string, string>): string {
+  return buildTableRows(rows, fullNamesByAccountId)
     .map((row) => row.map(escapeCsvValue).join(","))
     .join("\n");
 }
+
 
 async function getFullNamesByAccountId(rows: ExportRow[]): Promise<Record<string, string>> {
   const accountsById = new Map(getJiraAccounts().map((account) => [account.id, account]));
@@ -256,8 +261,10 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
   const latestPeriod = exportPeriods[0] ?? null;
   const [selectedPeriodValue, setSelectedPeriodValue] = useState(latestPeriod?.value ?? "");
   const [exporting, setExporting] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [savedFileName, setSavedFileName] = useState("");
   const [savedPeriodValue, setSavedPeriodValue] = useState("");
+  const [copiedPeriodValue, setCopiedPeriodValue] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -265,6 +272,7 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
     setSelectedPeriodValue(exportPeriods[0]?.value ?? "");
     setSavedFileName("");
     setSavedPeriodValue("");
+    setCopiedPeriodValue("");
   }, [open, exportPeriods]);
 
   const matchingRows = exportRows.filter((row) => row.periodValue === selectedPeriodValue);
@@ -278,6 +286,7 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
   const selectedPeriodLabel =
     exportPeriods.find((period) => period.value === selectedPeriodValue)?.label ?? "";
   const hasSavedCurrentPeriod = Boolean(savedFileName) && savedPeriodValue === selectedPeriodValue;
+  const hasCopiedCurrentPeriod = copiedPeriodValue === selectedPeriodValue;
 
   const chartData = useMemo(() => {
     const byMonth = new Map<string, { label: string; loggedMin: number }>();
@@ -300,6 +309,39 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
         ];
       });
   }, [exportRows]);
+
+  const handleCopy = async () => {
+    if (copying || matchingRows.length === 0) return;
+
+    setCopying(true);
+
+    try {
+      const fullNamesByAccountId = await getFullNamesByAccountId(matchingRows);
+      const [, ...dataRows] = buildTableRows(matchingRows, fullNamesByAccountId);
+      const tsvContent = dataRows.map((row) => row.map((v) => v.replace(/\t/g, " ")).join("\t")).join("\n");
+      const htmlContent = `<table>${dataRows.map((row) => `<tr>${row.map((v) => `<td>${v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</td>`).join("")}</tr>`).join("")}</table>`;
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/plain": new Blob([tsvContent], { type: "text/plain" }),
+          "text/html": new Blob([htmlContent], { type: "text/html" }),
+        }),
+      ]);
+
+      setCopiedPeriodValue(selectedPeriodValue);
+      toast({
+        title: "Copied to clipboard",
+        description: `${matchingRows.length} worklog(s) copied as CSV`,
+      });
+    } catch (error) {
+      toast({
+        title: "Copy failed",
+        description: error instanceof Error ? error.message : "Could not copy to clipboard",
+        variant: "destructive",
+      });
+    } finally {
+      setCopying(false);
+    }
+  };
 
   const handleExport = async () => {
     if (exporting || matchingRows.length === 0) return;
@@ -477,12 +519,24 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={exporting}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={exporting || copying}>
             Cancel
           </Button>
           <Button
+            variant="outline"
+            onClick={() => void handleCopy()}
+            disabled={copying || exporting || matchingRows.length === 0}
+          >
+            {hasCopiedCurrentPeriod && !copying ? (
+              <Check className="h-4 w-4 text-green-500" />
+            ) : (
+              <Clipboard className="h-4 w-4" />
+            )}
+            {copying ? "Copying..." : "Copy CSV"}
+          </Button>
+          <Button
             onClick={() => void handleExport()}
-            disabled={exporting || matchingRows.length === 0}
+            disabled={exporting || copying || matchingRows.length === 0}
           >
             {hasSavedCurrentPeriod && !exporting ? (
               <Check className="animate-check-pop h-4 w-4 text-green-500" />
