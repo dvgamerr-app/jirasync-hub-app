@@ -1,6 +1,6 @@
 [package]
 name = "jirasync-hub-app"
-version = "0.1.0"
+version = "0.4.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -27,4 +27,5 @@ tauri-plugin-window-state = "2"
 
 [target."cfg(target_os = \"macos\")".dependencies]
 objc2-app-kit = { version = "0.3", features = ["NSColor", "NSWindow", "objc2-core-foundation"] }
+
 

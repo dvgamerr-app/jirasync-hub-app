@@ -12,6 +12,7 @@ vi.mock("@/store/task-store", () => ({
 
 vi.mock("@/lib/sync-service", () => ({
   getLastSyncTime: () => getLastSyncTimeMock(),
+  onSyncStatus: () => () => {},
 }));
 
 function buildStoreState(overrides: Record<string, unknown> = {}) {
