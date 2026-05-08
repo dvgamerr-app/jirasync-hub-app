@@ -17,6 +17,10 @@
     "dialog:default",
     "fs:allow-write-text-file",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [{ "path": "**" }]
+    },
     "window-state:default",
     "http:default"
   ]

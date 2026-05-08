@@ -74,6 +74,7 @@
 
 ## Rules / gotchas
 
+- `createExportRows()` ใน `ExportDialog.tsx` ต้อง group worklogs ที่ task เดียวกัน + เดือนเดียวกันเข้าด้วยกัน (key = `taskId::periodValue`) และ sum `timeSpentMinutes` ก่อน build rows — ห้ามสร้าง 1 row ต่อ 1 worklog ตรงๆ เพราะจะทำให้ ticket id ซ้ำใน CSV และ clipboard
 - อย่า hardcode story point field ใหม่ตรงๆ; ใช้ `getStoryPointFieldMap()[projectId] ?? "customfield_10016"`
 - `JiraIssueFields` ต้องมี `[key: string]: unknown` เพื่อรองรับ dynamic custom fields
 - `detectStoryPointCandidates()` ต้อง fail เงียบและ return `[]`

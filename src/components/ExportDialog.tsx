@@ -12,6 +12,7 @@ import { format } from "date-fns";
 import { Check, Clipboard, Download } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { fetchJiraMyselfDisplayName } from "@/lib/jira-api";
 import { getJiraAccounts, type JiraAccount } from "@/lib/jira-db";
 import { getAccountIdFromTask } from "@/lib/jira-ids";
@@ -162,22 +163,29 @@ function createExportRows(tasks: Task[], workLogs: WorkLog[], projects: Project[
   const taskById = new Map(tasks.map((task) => [task.id, task]));
   const projectById = new Map(projects.map((project) => [project.id, project]));
 
-  return workLogs.filter(isVisibleWorkLog).flatMap((log) => {
+  const rowMap = new Map<string, ExportRow>();
+
+  for (const log of workLogs.filter(isVisibleWorkLog)) {
     const task = taskById.get(log.taskId);
-    if (!task) return [];
+    if (!task) continue;
 
     const date = new Date(log.logDate);
-    if (Number.isNaN(date.getTime())) return [];
+    if (Number.isNaN(date.getTime())) continue;
 
-    const project = projectById.get(task.projectId);
+    const periodValue = format(date, "yyyy-MM");
+    const key = `${task.id}::${periodValue}`;
 
-    return [
-      {
+    const existing = rowMap.get(key);
+    if (existing) {
+      existing.timeSpentMinutes += log.timeSpentMinutes;
+    } else {
+      const project = projectById.get(task.projectId);
+      rowMap.set(key, {
         accountId: getAccountIdFromTask(task),
         periodLabel: format(date, "yyyy-MMM"),
         periodMonth: format(date, "MMM"),
         periodYear: format(date, "yyyy"),
-        periodValue: format(date, "yyyy-MM"),
+        periodValue,
         projectName: project?.name ?? "",
         taskId: task.id,
         note: task.note ?? "",
@@ -186,9 +194,11 @@ function createExportRows(tasks: Task[], workLogs: WorkLog[], projects: Project[
         storyPoint: task.storyLevel?.toString() ?? "",
         timeSpentMinutes: log.timeSpentMinutes,
         type: task.type ?? "",
-      },
-    ];
-  });
+      });
+    }
+  }
+
+  return Array.from(rowMap.values());
 }
 
 function comparePeriodValuesDescending(left: string, right: string): number {
@@ -263,6 +273,7 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
   const [exporting, setExporting] = useState(false);
   const [copying, setCopying] = useState(false);
   const [savedFileName, setSavedFileName] = useState("");
+  const [savedFilePath, setSavedFilePath] = useState("");
   const [savedPeriodValue, setSavedPeriodValue] = useState("");
   const [copiedPeriodValue, setCopiedPeriodValue] = useState("");
 
@@ -271,6 +282,7 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
 
     setSelectedPeriodValue(exportPeriods[0]?.value ?? "");
     setSavedFileName("");
+    setSavedFilePath("");
     setSavedPeriodValue("");
     setCopiedPeriodValue("");
   }, [open, exportPeriods]);
@@ -362,10 +374,22 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
       await writeTextFile(filePath, csvContent);
 
       setSavedFileName(fileName);
+      setSavedFilePath(filePath);
       setSavedPeriodValue(selectedPeriodValue);
       toast({
         title: "Export complete",
-        description: `${matchingRows.length} worklog(s) saved to ${fileName}`,
+        description: (
+          <span>
+            {matchingRows.length} worklog(s) saved to{" "}
+            <button
+              type="button"
+              className="underline hover:no-underline"
+              onClick={() => openPath(filePath)}
+            >
+              {fileName}
+            </button>
+          </span>
+        ),
       });
     } catch (error) {
       toast({
@@ -447,7 +471,14 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
             )}
             {hasSavedCurrentPeriod && (
               <p className="mt-2 text-xs font-medium text-green-700 dark:text-green-400">
-                Saved to {savedFileName}
+                Saved to{" "}
+                <button
+                  type="button"
+                  className="underline hover:no-underline"
+                  onClick={() => openPath(savedFilePath)}
+                >
+                  {savedFileName}
+                </button>
               </p>
             )}
           </div>

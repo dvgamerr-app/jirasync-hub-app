@@ -183,6 +183,72 @@ describe("ExportDialog", () => {
     expect(onOpenChange).not.toHaveBeenCalled();
   });
 
+  it("merges multiple worklogs for the same task in the same month into one export row", async () => {
+    const multiLogTask: Task = {
+      ...task,
+      id: "task-account-1-ALPHA-2",
+      jiraTaskId: "ALPHA-2",
+      title: "Task with multiple logs",
+      refUrl: "https://acme.atlassian.net/browse/ALPHA-2",
+    };
+    const multiWorkLogs: WorkLog[] = [
+      {
+        id: "wl-multi-1",
+        taskId: multiLogTask.id,
+        timeSpentMinutes: 90,
+        logDate: "2026-03-05",
+        comment: null,
+        createdAt: "2026-03-05T08:00:00.000Z",
+        jiraWorklogId: "10",
+      },
+      {
+        id: "wl-multi-2",
+        taskId: multiLogTask.id,
+        timeSpentMinutes: 60,
+        logDate: "2026-03-12",
+        comment: null,
+        createdAt: "2026-03-12T08:00:00.000Z",
+        jiraWorklogId: "11",
+      },
+      {
+        id: "wl-multi-3",
+        taskId: multiLogTask.id,
+        timeSpentMinutes: 30,
+        logDate: "2026-03-20",
+        comment: null,
+        createdAt: "2026-03-20T08:00:00.000Z",
+        jiraWorklogId: "12",
+      },
+    ];
+
+    await act(async () => {
+      root.render(
+        <ExportDialog
+          open
+          onOpenChange={onOpenChange}
+          projects={[project]}
+          tasks={[multiLogTask]}
+          workLogs={multiWorkLogs}
+        />,
+      );
+    });
+
+    const saveButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Save CSV"),
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const csvArg: string = writeTextFileMock.mock.calls[0][1];
+    const dataRows = csvArg.split("\n").slice(1); // skip header
+    const matchingRows = dataRows.filter((r) => r.includes("ALPHA-2") || r.includes("180"));
+
+    // should produce exactly 1 row with summed time (90+60+30 = 180 min)
+    expect(matchingRows).toHaveLength(1);
+    expect(matchingRows[0]).toContain("180");
+  });
+
   it("shows total manday prorated to the selected month from time tracking", async () => {
     await act(async () => {
       root.render(

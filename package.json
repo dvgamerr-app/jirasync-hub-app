@@ -1,7 +1,7 @@
 {
   "name": "jirasync-hub",
   "description": "Cross-platform Jira desktop hub for syncing tasks, worklogs, and offline edits.",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "type": "module",
   "scripts": {
     "cg:check": "cd ./src-tauri && cargo check",
