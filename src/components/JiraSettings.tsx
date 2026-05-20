@@ -84,6 +84,7 @@ function JiraSettingsDialogContent() {
 
   // Story-point field mapping
   const [spFieldMap, setSpFieldMap] = useState<Record<string, string>>({});
+  const [spSavedMap, setSpSavedMap] = useState<Record<string, string>>({}); // snapshot of persisted selections
   const [spProjects, setSpProjects] = useState<{ account: JiraAccount; projects: Project[] }[]>([]);
   const [spFields, setSpFields] = useState<Record<string, JiraField[]>>({}); // accountId → fields
   const [spDetected, setSpDetected] = useState<Record<string, StoryPointCandidate[]>>({}); // projectId → detected candidates
@@ -118,6 +119,7 @@ function JiraSettingsDialogContent() {
     const currentAccounts = getJiraAccounts();
     const savedMap = getStoryPointFieldMap();
     setSpFieldMap(savedMap);
+    setSpSavedMap(savedMap);
     setSpDetected({});
 
     // Load projects from Dexie grouped by account
@@ -184,6 +186,7 @@ function JiraSettingsDialogContent() {
 
   const saveStoryPoints = () => {
     saveStoryPointFieldMap(spFieldMap);
+    setSpSavedMap(spFieldMap);
     setMode("list");
     toast({ title: "Story point fields saved" });
   };
@@ -413,6 +416,7 @@ function JiraSettingsDialogContent() {
                     {projects.map((project) => {
                       const currentFieldId = spFieldMap[project.id] ?? "";
                       const detected = spDetected[project.id];
+                      const isSaved = !!spSavedMap[project.id];
                       const dropdownFields: Array<JiraField & { occurrences?: number }> =
                         detected && detected.length > 0 ? detected : fallbackFields;
 
@@ -426,11 +430,15 @@ function JiraSettingsDialogContent() {
                             <span className="shrink-0 text-[11px] text-muted-foreground">
                               {project.jiraProjectKey}
                             </span>
-                            {detected && detected.length > 0 && (
+                            {isSaved ? (
+                              <span className="ml-auto shrink-0 rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-400">
+                                saved
+                              </span>
+                            ) : detected && detected.length > 0 ? (
                               <span className="ml-auto shrink-0 rounded bg-green-500/15 px-1.5 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-400">
                                 auto-detected
                               </span>
-                            )}
+                            ) : null}
                             {spLoading && !detected && (
                               <Loader2 className="ml-auto h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
                             )}
