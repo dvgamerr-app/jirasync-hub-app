@@ -1,11 +1,11 @@
-import { memo, useRef, useState, useMemo, useCallback, type Ref } from "react";
+import { memo, useRef, useState, useMemo, useCallback, type Ref, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTaskStore } from "@/store/task-store";
 import { Task, TaskType, Severity } from "@/types/jira";
 import { StatusBadge } from "@/components/StatusBadge";
 import { AdfRenderer } from "@/components/AdfRenderer";
 import { cn } from "@/lib/utils";
-import { ExternalLink, Bug, BookOpen, ClipboardList, Info, Zap, FileText } from "lucide-react";
+import { ExternalLink, Bug, BookOpen, ClipboardList, Info, Zap, FileText, ChevronsUp, ChevronUp, Equal, ChevronDown } from "lucide-react";
 import { openExternal } from "@/lib/desktop";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -56,21 +56,20 @@ function TypeIcon({ type }: { type: TaskType | null }) {
 function SeverityBadge({ severity }: { severity: Severity | null }) {
   if (!severity || severity === "NA")
     return <span className="text-[12px] text-muted-foreground">—</span>;
-  const colors: Record<string, string> = {
-    Critical: "bg-destructive/15 text-destructive",
-    High: "bg-warning/15 text-warning",
-    Medium: "bg-accent text-accent-foreground",
-    Low: "bg-muted text-muted-foreground",
+  const config: Record<string, { icon: ReactNode; label: string }> = {
+    Critical: { icon: <ChevronsUp className="h-4 w-4 text-destructive" />, label: "Critical" },
+    High:     { icon: <ChevronUp  className="h-4 w-4 text-orange-500" />,  label: "High" },
+    Medium:   { icon: <Equal      className="h-4 w-4 text-yellow-500" />,  label: "Medium" },
+    Low:      { icon: <ChevronDown className="h-4 w-4 text-blue-400" />,   label: "Low" },
   };
+  const { icon, label } = config[severity] ?? { icon: null, label: severity };
   return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium",
-        colors[severity],
-      )}
-    >
-      {severity}
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex items-center justify-center">{icon}</span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="text-[11px]">{label}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -300,8 +299,8 @@ export function TaskTable() {
                 Status
               </TableHead>
               {showExtendedColumns && (
-                <TableHead className="w-[90px] text-center text-[11px] font-semibold uppercase tracking-wider">
-                  Severity
+                <TableHead className="w-[44px] text-center text-[11px] font-semibold uppercase tracking-wider">
+                  Sev
                 </TableHead>
               )}
               {showExtendedColumns && (
