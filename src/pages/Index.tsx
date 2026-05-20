@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { TaskTable } from "@/components/TaskTable";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
@@ -10,6 +10,7 @@ import { JiraSettingsDialog } from "@/components/JiraSettings";
 import { type TaskStatusFilter, useTaskStore } from "@/store/task-store";
 import {
   Search,
+  X,
   CloudUpload,
   RefreshCw,
   Download,
@@ -18,6 +19,7 @@ import {
   Settings,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "@/hooks/use-toast";
 import { onSyncStatus, startBackgroundSync, stopBackgroundSync, syncNow } from "@/lib/sync-service";
@@ -112,6 +114,8 @@ const Index = () => {
     loadFromDB,
     reloadFromDB,
     setTaskStatusFilter,
+    searchQuery,
+    setSearchQuery,
     isLoaded,
   } = useTaskStore();
   const filteredTasks = getFilteredTasks();
@@ -124,8 +128,28 @@ const Index = () => {
   const [pushDone, setPushDone] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
+  const [searchFocused, setSearchFocused] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const hasJiraAccounts = useMemo(() => getJiraAccounts().length > 0, [settingsOpen]);
   const showEmptyState = isLoaded && filteredTasks.length === 0 && !selectedTaskId;
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === "f") {
+        e.preventDefault();
+        e.stopPropagation();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+      if (e.key === "Escape" && searchFocused) {
+        setSearchQuery("");
+        searchInputRef.current?.blur();
+      }
+    };
+    // capture: true fires before WebView2 processes browser accelerator keys (Ctrl+F find bar)
+    document.addEventListener("keydown", handleKeyDown, { capture: true });
+    return () => document.removeEventListener("keydown", handleKeyDown, { capture: true });
+  }, [searchFocused, setSearchQuery]);
 
   // Load data from IndexedDB on mount
   useEffect(() => {
@@ -230,6 +254,31 @@ const Index = () => {
                   {filter.label}
                 </button>
               ))}
+            </div>
+            <div className="relative hidden items-center md:flex">
+              <Search className="text-muted-foreground pointer-events-none absolute left-2 h-3 w-3" />
+              <Input
+                ref={searchInputRef}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={() => setSearchFocused(true)}
+                onBlur={() => setSearchFocused(false)}
+                placeholder="Search… (Ctrl+F)"
+                className={cn(
+                  "h-8 w-40 rounded-md border-border pl-6 text-[12px] text-muted-foreground shadow-none transition-[width] duration-200 placeholder:text-muted-foreground/60 focus-visible:ring-1",
+                  searchQuery ? "pr-6" : "pr-2",
+                  searchFocused && "w-52",
+                )}
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-foreground absolute right-1.5"
+                  onClick={() => { setSearchQuery(""); searchInputRef.current?.focus(); }}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
             </div>
             <Button
               variant="outline"

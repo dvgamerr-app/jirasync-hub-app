@@ -36,11 +36,13 @@ interface TaskStore {
   selectedTaskId: string | null;
   taskStatusFilter: TaskStatusFilter;
   taskDetailViewMode: "details" | "description";
+  searchQuery: string;
 
   setSelectedProject: (projectId: string | null) => void;
   setSelectedTask: (taskId: string | null) => void;
   setTaskStatusFilter: (filter: TaskStatusFilter) => void;
   setTaskDetailViewMode: (mode: "details" | "description") => void;
+  setSearchQuery: (query: string) => void;
 
   loadFromDB: () => Promise<void>;
   reloadFromDB: () => Promise<void>;
@@ -405,6 +407,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     selectedTaskId: null,
     taskStatusFilter: "active",
     taskDetailViewMode: "details",
+    searchQuery: "",
 
     setSelectedProject: (projectId) => set({ selectedProjectId: projectId, selectedTaskId: null }),
     setSelectedTask: (taskId) => set({ selectedTaskId: taskId }),
@@ -424,6 +427,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         };
       }),
     setTaskDetailViewMode: (mode) => set({ taskDetailViewMode: mode }),
+    setSearchQuery: (query) => set({ searchQuery: query }),
 
     loadFromDB: async () => {
       await refreshStoreFromDB(true);
@@ -523,8 +527,16 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     getDirtyTaskCount: () => get().tasks.filter((task) => task.isDirty).length,
 
     getFilteredTasks: () => {
-      const { tasks, selectedProjectId, taskStatusFilter } = get();
-      const filtered = getVisibleTasks(tasks, selectedProjectId, taskStatusFilter);
+      const { tasks, selectedProjectId, taskStatusFilter, searchQuery } = get();
+      let filtered = getVisibleTasks(tasks, selectedProjectId, taskStatusFilter);
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        filtered = filtered.filter(
+          (task) =>
+            task.title.toLowerCase().includes(q) ||
+            (task.description && task.description.toLowerCase().includes(q)),
+        );
+      }
       return filtered.sort(
         (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
       );
