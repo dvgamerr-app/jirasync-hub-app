@@ -1,9 +1,9 @@
 import { cn } from "@/lib/utils";
 
 const statusColorMap: Record<string, string> = {
-  "To Do": "text-muted-foreground",
-  Backlog: "text-muted-foreground",
-  Open: "text-muted-foreground",
+  "To Do": "bg-zinc-300 text-zinc-700 dark:bg-zinc-500 dark:text-zinc-100",
+  Backlog: "bg-zinc-300 text-zinc-700 dark:bg-zinc-500 dark:text-zinc-100",
+  Open: "bg-zinc-300 text-zinc-700 dark:bg-zinc-500 dark:text-zinc-100",
   "In Progress": "bg-primary/15 text-primary",
   "In Review": "bg-warning/15 text-warning",
   Review: "bg-warning/15 text-warning",
@@ -30,7 +30,7 @@ export function StatusBadge({
     <span
       className={cn(
         "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium leading-tight",
-        truncate && "min-w-0 max-w-[7em]",
+        truncate && "min-w-0 max-w-[10em]",
         colorClass,
         className,
       )}

@@ -4,7 +4,7 @@ import { Task, TaskType, Severity } from "@/types/jira";
 import { StatusBadge } from "@/components/StatusBadge";
 import { AdfRenderer } from "@/components/AdfRenderer";
 import { cn } from "@/lib/utils";
-import { CloudOff, ExternalLink, Bug, BookOpen, ClipboardList, Info, Zap, FileText } from "lucide-react";
+import { ExternalLink, Bug, BookOpen, ClipboardList, Info, Zap, FileText } from "lucide-react";
 import { openExternal } from "@/lib/desktop";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -416,6 +416,7 @@ function TaskRow({
           <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
             {task.jiraTaskId}
           </span>
+
         </div>
       </TableCell>
       <TableCell className="py-1.5" onClick={onSelect}>

@@ -76,7 +76,7 @@ const SEVERITY_TO_PRIORITY: Record<string, string> = {
   Low: "Low",
 };
 
-const DONE_STATUS = "done";
+const INACTIVE_STATUSES = new Set(["done", "closed", "cancelled", "cancel", "canceled"]);
 
 type ScopedTaskCollections = Pick<TaskStore, "organizations" | "projects" | "tasks" | "workLogs">;
 
@@ -234,7 +234,7 @@ function removeWorkLog(workLogs: WorkLog[], workLogId: string): WorkLog[] {
 }
 
 function isDoneTask(task: Pick<Task, "status">): boolean {
-  return task.status?.trim().toLowerCase() === DONE_STATUS;
+  return INACTIVE_STATUSES.has(task.status?.trim().toLowerCase() ?? "");
 }
 
 function matchesTaskStatusFilter(
