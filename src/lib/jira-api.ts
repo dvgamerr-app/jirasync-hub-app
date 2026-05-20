@@ -64,6 +64,7 @@ type JiraIssueFields = {
   timetracking?: {
     originalEstimateSeconds?: number | null;
   } | null;
+  parent?: { key?: string | null } | null;
   project?: JiraProjectField | null;
   created: string;
   updated: string;
@@ -341,8 +342,9 @@ function mapIssueToTask(
         : adfToText(desc).trim() || null
     : null;
 
-  const issueType = issue.fields.issuetype?.name ?? undefined;
-  const type: Task["type"] = issueType ? (ISSUE_TYPE_MAP[issueType] ?? "Task") : null;
+  const issueTypeName = issue.fields.issuetype?.name ?? "";
+  const isEpic = issueTypeName === "Epic";
+  const type: Task["type"] = isEpic ? null : (issueTypeName ? (ISSUE_TYPE_MAP[issueTypeName] ?? "Task") : null);
 
   return {
     id: getTaskId(account.id, issue.key),
@@ -352,6 +354,8 @@ function mapIssueToTask(
     description,
     status: issue.fields.status?.name ?? null,
     type,
+    isEpic,
+    parentKey: issue.fields.parent?.key ?? null,
     severity: mapPriorityToSeverity(issue.fields.priority?.name),
     storyLevel: normalizeStoryLevel(issue.fields[storyPointFieldId] as number | null | undefined),
     mandays:
@@ -536,6 +540,42 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
         }
       } catch (error: unknown) {
         console.warn("Failed fetching linked issues batch:", error);
+      }
+    }
+  }
+
+  // Fetch parent epics not returned by the main JQL (they may not be assigned to the user)
+  const parentEpicKeys = new Set<string>();
+  for (const task of tasks) {
+    if (task.parentKey) parentEpicKeys.add(task.parentKey);
+  }
+  const unfetchedParentKeys = Array.from(parentEpicKeys).filter((k) => !fetchedKeys.has(k));
+  if (unfetchedParentKeys.length > 0) {
+    for (let i = 0; i < unfetchedParentKeys.length; i += LINKED_ISSUES_BATCH_SIZE) {
+      const batch = unfetchedParentKeys.slice(i, i + LINKED_ISSUES_BATCH_SIZE);
+      const epicJql = `issueKey in (${batch.map((k) => `"${k}"`).join(",")})`;
+      try {
+        const res = await jiraFetch("search/jql", account, {
+          method: "POST",
+          body: JSON.stringify({ jql: epicJql, maxResults: LINKED_ISSUES_BATCH_SIZE, fields }),
+        });
+        const data = (await res.json()) as JiraSearchResponse;
+        for (const issue of data.issues ?? []) {
+          if (fetchedKeys.has(issue.key)) continue;
+          fetchedKeys.add(issue.key);
+          const projectKey = issue.fields.project?.key;
+          if (!projectKey) continue;
+          const projectId = getProjectId(account.id, projectKey);
+          if (!projectMap.has(projectKey)) {
+            projectMap.set(projectKey, buildProjectEntry(account, projectKey, issue.fields.project?.name));
+          }
+          const status = issue.fields.status?.name ?? null;
+          if (status) addProjectStatus(statusSetByProjectId, projectId, status);
+          const epicStoryPointFieldId = storyPointFieldMap[projectId] ?? DEFAULT_STORY_POINT_FIELD_ID;
+          tasks.push(mapIssueToTask(issue, account, projectKey, epicStoryPointFieldId));
+        }
+      } catch (error: unknown) {
+        console.warn("Failed fetching parent epics batch:", error);
       }
     }
   }

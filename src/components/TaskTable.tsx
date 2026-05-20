@@ -2,9 +2,11 @@ import { useRef, useState } from "react";
 import { useTaskStore } from "@/store/task-store";
 import { Task, TaskType, Severity } from "@/types/jira";
 import { StatusBadge } from "@/components/StatusBadge";
+import { AdfRenderer } from "@/components/AdfRenderer";
 import { cn } from "@/lib/utils";
-import { CloudOff, ExternalLink, Bug, BookOpen, ClipboardList, Info } from "lucide-react";
+import { CloudOff, ExternalLink, Bug, BookOpen, ClipboardList, Info, Zap, FileText } from "lucide-react";
 import { openExternal } from "@/lib/desktop";
+import { Progress } from "@/components/ui/progress";
 import {
   Table,
   TableBody,
@@ -70,9 +72,150 @@ function SeverityBadge({ severity }: { severity: Severity | null }) {
   );
 }
 
+function isDoneTask(status: string | null | undefined): boolean {
+  return status?.trim().toLowerCase() === "done" || status?.trim().toLowerCase() === "closed";
+}
+
+function EpicGroupRow({
+  epic,
+  subtasks,
+  totalMinutesByTaskId,
+  showExtendedColumns,
+  selectedTaskId,
+  onSelectTask,
+  statusesByProjectId,
+}: {
+  epic: Task;
+  subtasks: Task[];
+  totalMinutesByTaskId: Record<string, number>;
+  showExtendedColumns: boolean;
+  selectedTaskId: string | null;
+  onSelectTask: (taskId: string | null) => void;
+  statusesByProjectId: Map<string, string[]>;
+}) {
+  const [showDesc, setShowDesc] = useState(false);
+
+  const colSpanAll = showExtendedColumns ? FULL_COLUMN_COUNT : COMPACT_COLUMN_COUNT;
+  const doneCount = subtasks.filter((t) => isDoneTask(t.status)).length;
+  const pct = subtasks.length > 0 ? Math.round((doneCount / subtasks.length) * 100) : 0;
+  const totalManday = subtasks.reduce((sum, t) => sum + (t.mandays ?? 0), 0);
+  const epicTotalMinutes = subtasks.reduce((sum, t) => sum + (totalMinutesByTaskId[t.id] ?? 0), 0);
+  const hasDescription = !!epic.description;
+
+  return (
+    <>
+      <TableRow className="border-l-2 border-l-purple-400 bg-purple-50/40 hover:bg-purple-50/60 dark:bg-purple-950/20 dark:hover:bg-purple-950/30">
+        {/* ID */}
+        <TableCell className="py-2">
+          <div className="flex items-center gap-1.5">
+            <Zap className="h-3.5 w-3.5 shrink-0 text-purple-500" />
+            <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
+              {epic.jiraTaskId}
+            </span>
+          </div>
+        </TableCell>
+        {/* Title */}
+        <TableCell className="py-2">
+          <div className="flex items-center gap-1.5">
+            <span className="line-clamp-1 text-[13px] font-semibold">{epic.title}</span>
+            {epic.refUrl && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void openExternal(epic.refUrl!);
+                }}
+              >
+                <ExternalLink className="h-3 w-3 text-muted-foreground hover:text-primary" />
+              </button>
+            )}
+            {hasDescription && (
+              <button
+                type="button"
+                onClick={() => setShowDesc(!showDesc)}
+                title={showDesc ? "Hide description" : "Show description"}
+              >
+                <FileText
+                  className={cn(
+                    "h-3 w-3 transition-colors",
+                    showDesc ? "text-purple-500" : "text-muted-foreground hover:text-primary",
+                  )}
+                />
+              </button>
+            )}
+          </div>
+        </TableCell>
+        {/* Type */}
+        <TableCell className="py-2 text-center">
+          <Zap className="mx-auto h-3.5 w-3.5 text-purple-500" />
+        </TableCell>
+        {/* Status */}
+        <TableCell className="py-2">
+          <StatusBadge status={epic.status} />
+        </TableCell>
+        {showExtendedColumns && (
+          <>
+            {/* Severity */}
+            <TableCell className="py-2 text-center">
+              <span className="text-[12px] text-muted-foreground">—</span>
+            </TableCell>
+            {/* Story */}
+            <TableCell className="py-2 text-center">
+              <span className="text-[12px] text-muted-foreground">—</span>
+            </TableCell>
+            {/* Mandays — aggregated */}
+            <TableCell className="py-2 text-center">
+              <span className="text-[13px] tabular-nums">
+                {totalManday > 0 ? formatMandayValue(totalManday) : "—"}
+              </span>
+            </TableCell>
+            {/* Time — aggregated */}
+            <TableCell className="py-2">
+              <span className="text-[12px] tabular-nums text-muted-foreground">
+                {epicTotalMinutes > 0 ? formatMinutes(epicTotalMinutes) : "—"}
+              </span>
+            </TableCell>
+            {/* Progress (Note column) */}
+            <TableCell className="py-2">
+              {subtasks.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <Progress value={pct} className="h-1.5 w-16 shrink-0" />
+                  <span className="whitespace-nowrap text-[11px] tabular-nums text-muted-foreground">
+                    {pct}% Done
+                  </span>
+                </div>
+              )}
+            </TableCell>
+          </>
+        )}
+      </TableRow>
+      {showDesc && hasDescription && (
+        <TableRow className="bg-purple-50/20 hover:bg-purple-50/20 dark:bg-purple-950/10">
+          <TableCell colSpan={colSpanAll} className="px-10 py-3">
+            <AdfRenderer content={epic.description!} />
+          </TableCell>
+        </TableRow>
+      )}
+      {subtasks.map((task, idx) => (
+        <TaskRow
+          key={task.id}
+          task={task}
+          isSelected={task.id === selectedTaskId}
+          showExtendedColumns={showExtendedColumns}
+          statuses={statusesByProjectId.get(task.projectId) ?? []}
+          totalMinutes={totalMinutesByTaskId[task.id] ?? 0}
+          onSelect={() => onSelectTask(task.id === selectedTaskId ? null : task.id)}
+          isSubtask
+          isLastSubtask={idx === subtasks.length - 1}
+        />
+      ))}
+    </>
+  );
+}
+
 export function TaskTable() {
   const { selectedTaskId, setSelectedTask, getFilteredTasks, workLogs, projects } = useTaskStore();
-  const tasks = getFilteredTasks();
+  const allTasks = getFilteredTasks();
   const showExtendedColumns = !selectedTaskId;
   const totalMinutesByTaskId = workLogs
     .filter(isVisibleWorkLog)
@@ -84,13 +227,31 @@ export function TaskTable() {
     projects.map((project) => [project.id, project.availableStatuses] as const),
   );
 
+  const epics = allTasks.filter((t) => t.isEpic === true);
+  const nonEpics = allTasks.filter((t) => t.isEpic !== true);
+  const epicKeySet = new Set(epics.map((e) => e.jiraTaskId));
+  const subtasksByEpicKey: Record<string, Task[]> = {};
+  const orphanTasks: Task[] = [];
+  for (const task of nonEpics) {
+    if (task.parentKey && epicKeySet.has(task.parentKey)) {
+      subtasksByEpicKey[task.parentKey] ??= [];
+      subtasksByEpicKey[task.parentKey].push(task);
+    } else {
+      orphanTasks.push(task);
+    }
+  }
+  const epicGroups = epics
+    .map((epic) => ({ epic, subtasks: subtasksByEpicKey[epic.jiraTaskId] ?? [] }))
+    .filter(({ subtasks }) => subtasks.length > 0);
+  const isEmpty = epicGroups.length === 0 && orphanTasks.length === 0;
+
   return (
     <TooltipProvider delayDuration={200}>
       <div className="flex-1 overflow-auto">
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="w-[100px] text-[11px] font-semibold uppercase tracking-wider">
+              <TableHead className="w-[108px] text-[11px] font-semibold uppercase tracking-wider">
                 ID
               </TableHead>
               <TableHead className="text-[11px] font-semibold uppercase tracking-wider">
@@ -156,7 +317,7 @@ export function TaskTable() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {tasks.length === 0 ? (
+            {isEmpty ? (
               <TableRow>
                 <TableCell
                   colSpan={showExtendedColumns ? FULL_COLUMN_COUNT : COMPACT_COLUMN_COUNT}
@@ -166,17 +327,31 @@ export function TaskTable() {
                 </TableCell>
               </TableRow>
             ) : (
-              tasks.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  isSelected={task.id === selectedTaskId}
-                  showExtendedColumns={showExtendedColumns}
-                  statuses={statusesByProjectId.get(task.projectId) ?? []}
-                  totalMinutes={totalMinutesByTaskId[task.id] ?? 0}
-                  onSelect={() => setSelectedTask(task.id === selectedTaskId ? null : task.id)}
-                />
-              ))
+              <>
+                {epicGroups.map(({ epic, subtasks }) => (
+                  <EpicGroupRow
+                    key={epic.id}
+                    epic={epic}
+                    subtasks={subtasks}
+                    totalMinutesByTaskId={totalMinutesByTaskId}
+                    showExtendedColumns={showExtendedColumns}
+                    selectedTaskId={selectedTaskId}
+                    onSelectTask={setSelectedTask}
+                    statusesByProjectId={statusesByProjectId}
+                  />
+                ))}
+                {orphanTasks.map((task) => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    isSelected={task.id === selectedTaskId}
+                    showExtendedColumns={showExtendedColumns}
+                    statuses={statusesByProjectId.get(task.projectId) ?? []}
+                    totalMinutes={totalMinutesByTaskId[task.id] ?? 0}
+                    onSelect={() => setSelectedTask(task.id === selectedTaskId ? null : task.id)}
+                  />
+                ))}
+              </>
             )}
           </TableBody>
         </Table>
@@ -192,6 +367,8 @@ function TaskRow({
   statuses,
   totalMinutes,
   onSelect,
+  isSubtask,
+  isLastSubtask,
 }: {
   task: Task;
   isSelected: boolean;
@@ -199,6 +376,8 @@ function TaskRow({
   statuses: string[];
   totalMinutes: number;
   onSelect: () => void;
+  isSubtask?: boolean;
+  isLastSubtask?: boolean;
 }) {
   const {
     updateTaskStatus,
@@ -220,12 +399,23 @@ function TaskRow({
         isSelected && "border-l-2 border-l-primary bg-primary/5",
       )}
     >
-      <TableCell className="py-1.5" onClick={onSelect}>
+      <TableCell className={cn("relative py-1.5", isSubtask ? "pl-8" : "")} onClick={onSelect}>
+        {isSubtask && (
+          <>
+            <span
+              className="pointer-events-none absolute left-[13px] w-px bg-border"
+              style={{ top: 0, bottom: isLastSubtask ? "50%" : 0 }}
+            />
+            <span
+              className="pointer-events-none absolute h-px w-3 bg-border"
+              style={{ left: "13px", top: "50%" }}
+            />
+          </>
+        )}
         <div className="flex items-center gap-1.5">
           <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
             {task.jiraTaskId}
           </span>
-          {!task.isSynced && <CloudOff className="text-warning h-3 w-3" />}
         </div>
       </TableCell>
       <TableCell className="py-1.5" onClick={onSelect}>

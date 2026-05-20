@@ -24,6 +24,8 @@ export interface Task {
   description: string | null;
   status: string | null;
   type: TaskType | null;
+  isEpic?: boolean;
+  parentKey?: string | null;
   severity: Severity | null;
   storyLevel: StoryLevel | null;
   mandays: number | null;
