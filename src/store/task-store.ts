@@ -263,7 +263,9 @@ function getVisibleTasks(
     ? tasks.filter((task) => task.projectId === selectedProjectId)
     : tasks;
 
-  return filteredByProject.filter((task) => matchesTaskStatusFilter(task, taskStatusFilter));
+  return filteredByProject.filter(
+    (task) => task.isEpic === true || matchesTaskStatusFilter(task, taskStatusFilter),
+  );
 }
 
 function getVisibleProjectIds(

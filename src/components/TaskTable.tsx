@@ -77,10 +77,21 @@ function isDoneTask(status: string | null | undefined): boolean {
   return status?.trim().toLowerCase() === "done" || status?.trim().toLowerCase() === "closed";
 }
 
+function bfsDescendants(rootKey: string, childrenMap: Record<string, Task[]>): Task[] {
+  const result: Task[] = [];
+  const queue = [...(childrenMap[rootKey] ?? [])];
+  while (queue.length > 0) {
+    const t = queue.shift()!;
+    result.push(t);
+    queue.push(...(childrenMap[t.jiraTaskId] ?? []));
+  }
+  return result;
+}
+
 type FlatRow =
   | { kind: "epic-header"; epic: Task; subtasks: Task[]; pct: number; totalManday: number; epicTotalMinutes: number }
   | { kind: "epic-desc"; epic: Task }
-  | { kind: "task"; task: Task; isSubtask: boolean; isLastSubtask: boolean };
+  | { kind: "task"; task: Task; depth: number; isLastSibling: boolean };
 
 const EpicHeaderRow = memo(function EpicHeaderRow({
   epic,
@@ -185,7 +196,16 @@ const EpicHeaderRow = memo(function EpicHeaderRow({
 });
 
 export function TaskTable() {
-  const { selectedTaskId, getFilteredTasks, workLogs, projects } = useTaskStore();
+  const { selectedTaskId, getFilteredTasks, workLogs, projects, tasks: rawTasks, selectedProjectId } = useTaskStore(
+    useShallow((s) => ({
+      selectedTaskId: s.selectedTaskId,
+      getFilteredTasks: s.getFilteredTasks,
+      workLogs: s.workLogs,
+      projects: s.projects,
+      tasks: s.tasks,
+      selectedProjectId: s.selectedProjectId,
+    })),
+  );
   const allTasks = getFilteredTasks();
   const showExtendedColumns = !selectedTaskId;
   const colSpanAll = showExtendedColumns ? FULL_COLUMN_COUNT : COMPACT_COLUMN_COUNT;
@@ -204,27 +224,52 @@ export function TaskTable() {
     [projects],
   );
 
-  const { epicGroups, orphanTasks } = useMemo(() => {
-    const epics = allTasks.filter((t) => t.isEpic === true);
-    const nonEpics = allTasks.filter((t) => t.isEpic !== true);
-    const epicKeySet = new Set(epics.map((e) => e.jiraTaskId));
-    const subtasksByEpicKey: Record<string, Task[]> = {};
-    const orphans: Task[] = [];
-    for (const task of nonEpics) {
-      if (task.parentKey && epicKeySet.has(task.parentKey)) {
-        subtasksByEpicKey[task.parentKey] ??= [];
-        subtasksByEpicKey[task.parentKey].push(task);
-      } else {
-        orphans.push(task);
+  // children map จาก raw tasks (unfiltered) — ใช้คำนวณ pct เท่านั้น
+  const rawChildrenByParentKey = useMemo(() => {
+    const src = (selectedProjectId
+      ? rawTasks.filter((t) => t.projectId === selectedProjectId)
+      : rawTasks
+    ).filter((t) => t.isEpic !== true);
+    const map: Record<string, Task[]> = {};
+    for (const t of src) {
+      if (t.parentKey) { map[t.parentKey] ??= []; map[t.parentKey].push(t); }
+    }
+    return map;
+  }, [rawTasks, selectedProjectId]);
+
+  // children map จาก filtered tasks — ใช้สร้าง hierarchy สำหรับแสดงผล
+  const filteredChildrenByParentKey = useMemo(() => {
+    const map: Record<string, Task[]> = {};
+    for (const t of allTasks) {
+      if (t.isEpic !== true && t.parentKey) {
+        map[t.parentKey] ??= [];
+        map[t.parentKey].push(t);
       }
     }
-    return {
-      epicGroups: epics
-        .map((epic) => ({ epic, subtasks: subtasksByEpicKey[epic.jiraTaskId] ?? [] }))
-        .filter(({ subtasks }) => subtasks.length > 0),
-      orphanTasks: orphans,
-    };
+    return map;
   }, [allTasks]);
+
+  const { epicGroups, orphanRoots } = useMemo(() => {
+    const epics = allTasks.filter((t) => t.isEpic === true);
+    const nonEpics = allTasks.filter((t) => t.isEpic !== true);
+
+    // BFS จาก epic แต่ละตัว เก็บ filtered descendants ทั้งหมด (ทุก level)
+    const claimedIds = new Set<string>();
+    const groups = epics
+      .map((epic) => {
+        const subtasks = bfsDescendants(epic.jiraTaskId, filteredChildrenByParentKey);
+        for (const t of subtasks) claimedIds.add(t.jiraTaskId);
+        return { epic, subtasks };
+      })
+      .filter(({ subtasks }) => subtasks.length > 0);
+
+    // orphan roots = ไม่ถูก epic claim และไม่มี parent ใน unclaimed set
+    const unclaimed = nonEpics.filter((t) => !claimedIds.has(t.jiraTaskId));
+    const unclaimedIds = new Set(unclaimed.map((t) => t.jiraTaskId));
+    const roots = unclaimed.filter((t) => !t.parentKey || !unclaimedIds.has(t.parentKey));
+
+    return { epicGroups: groups, orphanRoots: roots };
+  }, [allTasks, filteredChildrenByParentKey]);
 
   const [openDescEpics, setOpenDescEpics] = useState<Set<string>>(new Set());
   const toggleDesc = useCallback(
@@ -239,9 +284,19 @@ export function TaskTable() {
 
   const flatRows = useMemo<FlatRow[]>(() => {
     const rows: FlatRow[] = [];
+
+    function emitChildren(parentKey: string, depth: number) {
+      const children = filteredChildrenByParentKey[parentKey] ?? [];
+      children.forEach((task, idx) => {
+        rows.push({ kind: "task", task, depth, isLastSibling: idx === children.length - 1 });
+        emitChildren(task.jiraTaskId, depth + 1);
+      });
+    }
+
     for (const { epic, subtasks } of epicGroups) {
-      const doneCount = subtasks.filter((t) => isDoneTask(t.status)).length;
-      const pct = subtasks.length > 0 ? Math.round((doneCount / subtasks.length) * 100) : 0;
+      const rawDesc = bfsDescendants(epic.jiraTaskId, rawChildrenByParentKey);
+      const doneCount = rawDesc.filter((t) => isDoneTask(t.status)).length;
+      const pct = rawDesc.length > 0 ? Math.round((doneCount / rawDesc.length) * 100) : 0;
       const totalManday = subtasks.reduce((sum, t) => sum + (t.mandays ?? 0), 0);
       const epicTotalMinutes = subtasks.reduce(
         (sum, t) => sum + (totalMinutesByTaskId[t.id] ?? 0),
@@ -251,15 +306,16 @@ export function TaskTable() {
       if (openDescEpics.has(epic.id) && epic.description) {
         rows.push({ kind: "epic-desc", epic });
       }
-      subtasks.forEach((task, idx) =>
-        rows.push({ kind: "task", task, isSubtask: true, isLastSubtask: idx === subtasks.length - 1 }),
-      );
+      emitChildren(epic.jiraTaskId, 1);
     }
-    for (const task of orphanTasks) {
-      rows.push({ kind: "task", task, isSubtask: false, isLastSubtask: false });
+
+    for (const task of orphanRoots) {
+      rows.push({ kind: "task", task, depth: 0, isLastSibling: false });
+      emitChildren(task.jiraTaskId, 1);
     }
+
     return rows;
-  }, [epicGroups, orphanTasks, openDescEpics, totalMinutesByTaskId]);
+  }, [epicGroups, orphanRoots, openDescEpics, totalMinutesByTaskId, rawChildrenByParentKey, filteredChildrenByParentKey]);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const handleSelectTask = useCallback((taskId: string) => {
@@ -406,8 +462,8 @@ export function TaskTable() {
                       statuses={statusesByProjectId.get(row.task.projectId) ?? []}
                       totalMinutes={totalMinutesByTaskId[row.task.id] ?? 0}
                       onSelect={handleSelectTask}
-                      isSubtask={row.isSubtask}
-                      isLastSubtask={row.isLastSubtask}
+                      depth={row.depth}
+                      isLastSibling={row.isLastSibling}
                       dataIndex={vRow.index}
                     />
                   );
@@ -433,8 +489,8 @@ const TaskRow = memo(function TaskRow({
   statuses,
   totalMinutes,
   onSelect,
-  isSubtask,
-  isLastSubtask,
+  depth,
+  isLastSibling,
   dataIndex,
 }: {
   task: Task;
@@ -443,8 +499,8 @@ const TaskRow = memo(function TaskRow({
   statuses: string[];
   totalMinutes: number;
   onSelect: (taskId: string) => void;
-  isSubtask?: boolean;
-  isLastSubtask?: boolean;
+  depth?: number;
+  isLastSibling?: boolean;
   dataIndex: number;
 }) {
   const {
@@ -477,16 +533,20 @@ const TaskRow = memo(function TaskRow({
         isSelected && "border-l-2 border-l-primary bg-primary/5",
       )}
     >
-      <TableCell className={cn("relative py-1.5", isSubtask ? "pl-8" : "")} onClick={() => onSelect(task.id)}>
-        {isSubtask && (
+      <TableCell
+        className="relative py-1.5"
+        style={depth ? { paddingLeft: `${depth * 14 + 8}px` } : undefined}
+        onClick={() => onSelect(task.id)}
+      >
+        {!!depth && (
           <>
             <span
-              className="pointer-events-none absolute left-[13px] w-px bg-border"
-              style={{ top: 0, bottom: isLastSubtask ? "50%" : 0 }}
+              className="pointer-events-none absolute w-px bg-border"
+              style={{ left: `${(depth - 1) * 13 + 12}px`, top: 0, bottom: isLastSibling ? "50%" : 0 }}
             />
             <span
-              className="pointer-events-none absolute h-px w-3 bg-border"
-              style={{ left: "13px", top: "50%" }}
+              className="pointer-events-none absolute h-px w-2 bg-border"
+              style={{ left: `${(depth - 1) * 13 + 12}px`, top: "50%" }}
             />
           </>
         )}
