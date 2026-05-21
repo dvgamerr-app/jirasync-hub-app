@@ -105,7 +105,6 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
                   setDate(d);
                   setDatePickerOpen(false);
                 }}
-                initialFocus
                 className="pointer-events-auto p-3"
               />
             </PopoverContent>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTaskStore } from "@/store/task-store";
-import { ChevronDown, FolderKanban, ListTodo, Settings, RefreshCw } from "lucide-react";
+import { ChevronDown, Eye, EyeOff, FolderKanban, ListTodo, Settings, RefreshCw } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { getLastSyncTime, onSyncStatus } from "@/lib/sync-service";
@@ -11,7 +11,7 @@ interface AppSidebarProps {
 }
 
 export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
-  const { organizations, selectedProjectId, setSelectedProject, getVisibleProjects } =
+  const { organizations, selectedProjectId, setSelectedProject, getVisibleProjects, hiddenProjectIds, toggleProjectVisibility } =
     useTaskStore();
   const projects = getVisibleProjects();
   const [lastSync, setLastSync] = useState<string | null>(null);
@@ -58,24 +58,43 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
                   {org.name}
                 </CollapsibleTrigger>
                 <CollapsibleContent className="mt-1 space-y-0.5">
-                  {orgProjects.map((project) => (
-                    <button
-                      key={project.id}
-                      onClick={() => setSelectedProject(project.id)}
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] transition-colors duration-150",
-                        selectedProjectId === project.id
-                          ? "bg-primary/10 font-medium text-primary"
-                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                      )}
-                    >
-                      <FolderKanban className="h-3.5 w-3.5" />
-                      <span className="truncate">{project.name}</span>
-                      <span className="ml-auto font-mono text-[10px] text-muted-foreground">
-                        {project.jiraProjectKey}
-                      </span>
-                    </button>
-                  ))}
+                  {orgProjects.map((project) => {
+                    const isHidden = hiddenProjectIds.has(project.id);
+                    return (
+                      <button
+                        key={project.id}
+                        onClick={() => setSelectedProject(project.id)}
+                        className={cn(
+                          "group flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] transition-colors duration-150",
+                          selectedProjectId === project.id
+                            ? "bg-primary/10 font-medium text-primary"
+                            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                          isHidden && "opacity-50",
+                        )}
+                      >
+                        <span
+                          className="shrink-0"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleProjectVisibility(project.id);
+                          }}
+                        >
+                          {isHidden ? (
+                            <EyeOff className="h-3.5 w-3.5" />
+                          ) : (
+                            <>
+                              <FolderKanban className="h-3.5 w-3.5 group-hover:hidden" />
+                              <Eye className="hidden h-3.5 w-3.5 group-hover:inline-block" />
+                            </>
+                          )}
+                        </span>
+                        <span className="truncate">{project.name}</span>
+                        <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+                          {project.jiraProjectKey}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </CollapsibleContent>
               </Collapsible>
             );

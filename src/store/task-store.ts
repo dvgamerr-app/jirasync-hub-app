@@ -37,12 +37,14 @@ interface TaskStore {
   taskStatusFilter: TaskStatusFilter;
   taskDetailViewMode: "details" | "description";
   searchQuery: string;
+  hiddenProjectIds: Set<string>;
 
   setSelectedProject: (projectId: string | null) => void;
   setSelectedTask: (taskId: string | null) => void;
   setTaskStatusFilter: (filter: TaskStatusFilter) => void;
   setTaskDetailViewMode: (mode: "details" | "description") => void;
   setSearchQuery: (query: string) => void;
+  toggleProjectVisibility: (projectId: string) => void;
 
   loadFromDB: () => Promise<void>;
   reloadFromDB: () => Promise<void>;
@@ -359,6 +361,22 @@ async function syncDirtyTask(task: Task, accounts: JiraAccount[]): Promise<void>
   await persistSyncedTask(task);
 }
 
+const HIDDEN_PROJECTS_KEY = "jirasync-hidden-projects";
+
+function loadHiddenProjectIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(HIDDEN_PROJECTS_KEY);
+    if (!raw) return new Set();
+    return new Set(JSON.parse(raw) as string[]);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveHiddenProjectIds(ids: Set<string>): void {
+  localStorage.setItem(HIDDEN_PROJECTS_KEY, JSON.stringify([...ids]));
+}
+
 export const useTaskStore = create<TaskStore>((set, get) => {
   const refreshStoreFromDB = async (markAsLoaded: boolean): Promise<void> => {
     const collections = await loadScopedCollections(getJiraAccounts().map((account) => account.id));
@@ -410,6 +428,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     taskStatusFilter: "active",
     taskDetailViewMode: "details",
     searchQuery: "",
+    hiddenProjectIds: loadHiddenProjectIds(),
 
     setSelectedProject: (projectId) => set({ selectedProjectId: projectId, selectedTaskId: null }),
     setSelectedTask: (taskId) => set({ selectedTaskId: taskId }),
@@ -430,6 +449,13 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       }),
     setTaskDetailViewMode: (mode) => set({ taskDetailViewMode: mode }),
     setSearchQuery: (query) => set({ searchQuery: query }),
+    toggleProjectVisibility: (projectId) =>
+      set((state) => {
+        const next = new Set(state.hiddenProjectIds);
+        next.has(projectId) ? next.delete(projectId) : next.add(projectId);
+        saveHiddenProjectIds(next);
+        return { hiddenProjectIds: next };
+      }),
 
     loadFromDB: async () => {
       await refreshStoreFromDB(true);
@@ -529,8 +555,11 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     getDirtyTaskCount: () => get().tasks.filter((task) => task.isDirty).length,
 
     getFilteredTasks: () => {
-      const { tasks, selectedProjectId, taskStatusFilter, searchQuery } = get();
+      const { tasks, selectedProjectId, taskStatusFilter, searchQuery, hiddenProjectIds } = get();
       let filtered = getVisibleTasks(tasks, selectedProjectId, taskStatusFilter);
+      if (!selectedProjectId && hiddenProjectIds.size > 0) {
+        filtered = filtered.filter((task) => !hiddenProjectIds.has(task.projectId));
+      }
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
         filtered = filtered.filter(
