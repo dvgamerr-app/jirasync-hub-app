@@ -66,12 +66,12 @@ const emptyForm = { name: "", instanceUrl: "", email: "", apiToken: "" };
 export function JiraSettingsDialog({ open, onOpenChange }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {open ? <JiraSettingsDialogContent /> : null}
+      <JiraSettingsDialogContent open={open} />
     </Dialog>
   );
 }
 
-function JiraSettingsDialogContent() {
+function JiraSettingsDialogContent({ open }: { open: boolean }) {
   const [accounts, setAccounts] = useState<JiraAccount[]>(() => getJiraAccounts());
   const [mode, setMode] = useState<FormMode>("list");
   const [editing, setEditing] = useState<JiraAccount | null>(null);
@@ -81,6 +81,16 @@ function JiraSettingsDialogContent() {
   const [status, setStatus] = useState<"idle" | "ok" | "fail">("idle");
   const [draggingAccountId, setDraggingAccountId] = useState<string | null>(null);
   const [dragOverAccountId, setDragOverAccountId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setAccounts(getJiraAccounts());
+      setMode("list");
+      setEditing(null);
+      setForm(emptyForm);
+      setStatus("idle");
+    }
+  }, [open]);
 
   // Story-point field mapping
   const [spFieldMap, setSpFieldMap] = useState<Record<string, string>>({});
@@ -325,7 +335,7 @@ function JiraSettingsDialogContent() {
                       }
                     }}
                     className={cn(
-                      "flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 transition-colors",
+                      "flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2",
                       draggingAccountId === acc.id && "opacity-60",
                       dragOverAccountId === acc.id &&
                         draggingAccountId !== acc.id &&
@@ -341,7 +351,7 @@ function JiraSettingsDialogContent() {
                         setDragOverAccountId(acc.id);
                       }}
                       className={cn(
-                        "shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
+                        "shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                         draggingAccountId ? "cursor-grabbing" : "cursor-grab",
                       )}
                     >
@@ -355,13 +365,13 @@ function JiraSettingsDialogContent() {
                     </div>
                     <button
                       onClick={() => startEdit(acc)}
-                      className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                      className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
                     <button
                       onClick={() => handleDelete(acc.id)}
-                      className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                      className="shrink-0 rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>

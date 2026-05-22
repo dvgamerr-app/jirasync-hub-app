@@ -147,7 +147,7 @@ const EpicHeaderRow = memo(function EpicHeaderRow({
             <button type="button" onClick={onDescToggle} title={descOpen ? "Hide description" : "Show description"}>
               <FileText
                 className={cn(
-                  "h-3 w-3 transition-colors",
+                  "h-3 w-3",
                   descOpen ? "text-purple-500" : "text-muted-foreground hover:text-primary",
                 )}
               />
@@ -526,7 +526,7 @@ const TaskRow = memo(function TaskRow({
     <TableRow
       data-index={dataIndex}
       className={cn(
-        "group h-10 cursor-pointer transition-colors duration-150",
+        "group h-10 cursor-pointer",
         hasStoryPointViolation &&
           "bg-red-50/80 hover:bg-red-50 dark:bg-red-950/20 dark:hover:bg-red-950/30",
         task.isDirty && "bg-yellow-50 dark:bg-yellow-900/20",

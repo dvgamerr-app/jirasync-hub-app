@@ -31,7 +31,7 @@ export function TitleBar() {
         <button
           type="button"
           onClick={() => void minimizeWindow()}
-          className="flex h-full w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          className="flex h-full w-11 items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           title="Minimize"
           aria-label="Minimize window"
         >
@@ -40,7 +40,7 @@ export function TitleBar() {
         <button
           type="button"
           onClick={() => void toggleWindowMaximize()}
-          className="flex h-full w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          className="flex h-full w-11 items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           title="Maximize"
           aria-label="Toggle maximize window"
         >
@@ -49,7 +49,7 @@ export function TitleBar() {
         <button
           type="button"
           onClick={() => void closeWindow()}
-          className="flex h-full w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground"
+          className="flex h-full w-11 items-center justify-center text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
           title="Close"
           aria-label="Close window"
         >

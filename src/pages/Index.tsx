@@ -245,7 +245,7 @@ const Index = () => {
                   type="button"
                   onClick={() => setTaskStatusFilter(filter.value)}
                   className={cn(
-                    "rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors sm:text-[12px]",
+                    "rounded-md px-2.5 py-1 text-[11px] font-medium sm:text-[12px]",
                     taskStatusFilter === filter.value
                       ? "bg-background text-foreground shadow-sm"
                       : "text-muted-foreground hover:text-foreground",
@@ -294,7 +294,7 @@ const Index = () => {
             <Button
               variant="outline"
               size="sm"
-              className={`h-7 gap-1.5 text-[12px] transition-all duration-300 ${syncing ? "animate-pulse border-primary ring-2 ring-primary/30" : ""}`}
+              className={`h-7 gap-1.5 text-[12px] ${syncing ? "animate-pulse border-primary ring-2 ring-primary/30" : ""}`}
               onClick={handleManualSync}
               disabled={syncing || !hasJiraAccounts}
             >
@@ -308,7 +308,7 @@ const Index = () => {
               <Button
                 variant="outline"
                 size="sm"
-                className={`h-7 gap-1.5 text-[12px] transition-all duration-300 ${
+                className={`h-7 gap-1.5 text-[12px] ${
                   pushDone
                     ? "border-green-500 text-green-600 dark:text-green-400"
                     : pushing
@@ -333,7 +333,7 @@ const Index = () => {
             <Button
               variant="outline"
               size="sm"
-              className="h-7 gap-1.5 text-[12px] transition-all duration-300"
+              className="h-7 gap-1.5 text-[12px]"
               disabled={allTasks.length === 0}
               onClick={() => {
                 setExportDialogOpen(true);

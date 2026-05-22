@@ -274,7 +274,7 @@ export function TaskDetailPanel() {
                   </div>
                   <button
                     type="button"
-                    className="mt-0.5 text-muted-foreground transition-colors hover:text-destructive"
+                    className="mt-0.5 text-muted-foreground hover:text-destructive"
                     onClick={() => removeWorkLog(wl.id)}
                     title="Delete work log"
                   >
@@ -412,7 +412,7 @@ function MandayInput({
 
   return (
     <Input
-      className={`h-8 text-[13px] transition-colors ${dirty ? "border-warning ring-warning/50 ring-1" : ""}`}
+      className={`h-8 text-[13px] ${dirty ? "border-warning ring-warning/50 ring-1" : ""}`}
       placeholder="e.g. 1d 4h 30m"
       value={editing ? raw : display}
       onFocus={() => {

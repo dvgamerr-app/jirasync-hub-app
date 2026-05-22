@@ -38,7 +38,7 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
           <button
             onClick={() => setSelectedProject(null)}
             className={cn(
-              "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] transition-colors duration-150",
+              "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]",
               !selectedProjectId
                 ? "bg-primary/10 font-medium text-primary"
                 : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
@@ -65,7 +65,7 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
                         key={project.id}
                         onClick={() => setSelectedProject(project.id)}
                         className={cn(
-                          "group flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] transition-colors duration-150",
+                          "group flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]",
                           selectedProjectId === project.id
                             ? "bg-primary/10 font-medium text-primary"
                             : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
@@ -111,7 +111,7 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
           )}
           <button
             onClick={onOpenSettings}
-            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           >
             <Settings className="h-3.5 w-3.5" />
             Jira Settings
