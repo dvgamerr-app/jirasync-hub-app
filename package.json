@@ -15,7 +15,8 @@
     "lint:fix": "eslint ./src --fix",
     "format": "prettier --check .",
     "format:fix": "prettier --write .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:bun": "bun test --isolate"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.12",
