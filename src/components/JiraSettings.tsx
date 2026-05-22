@@ -84,6 +84,7 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
 
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setAccounts(getJiraAccounts());
       setMode("list");
       setEditing(null);
@@ -313,9 +314,9 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
       {mode === "list" ? (
         <div className="space-y-3 pt-1">
           {accounts.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border py-8 text-center">
-              <Server className="h-8 w-8 text-muted-foreground" />
-              <p className="text-[13px] text-muted-foreground">No Jira accounts configured yet.</p>
+            <div className="border-border flex flex-col items-center gap-3 rounded-lg border border-dashed py-8 text-center">
+              <Server className="text-muted-foreground h-8 w-8" />
+              <p className="text-muted-foreground text-[13px]">No Jira accounts configured yet.</p>
               <Button size="sm" className="h-8 text-[13px]" onClick={startAdd}>
                 <Plus className="mr-1.5 h-3.5 w-3.5" />
                 Add Account
@@ -335,11 +336,11 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
                       }
                     }}
                     className={cn(
-                      "flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2",
+                      "border-border bg-muted/30 flex items-center gap-2 rounded-md border px-3 py-2",
                       draggingAccountId === acc.id && "opacity-60",
                       dragOverAccountId === acc.id &&
                         draggingAccountId !== acc.id &&
-                      "border-primary bg-primary/5",
+                        "border-primary bg-primary/5",
                     )}
                   >
                     <button
@@ -351,7 +352,7 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
                         setDragOverAccountId(acc.id);
                       }}
                       className={cn(
-                        "shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                        "text-muted-foreground hover:bg-accent hover:text-accent-foreground shrink-0 rounded p-1",
                         draggingAccountId ? "cursor-grabbing" : "cursor-grab",
                       )}
                     >
@@ -361,17 +362,17 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
                       <p className="truncate text-[13px] font-medium">
                         {acc.name || acc.instanceUrl}
                       </p>
-                      <p className="truncate text-[11px] text-muted-foreground">{acc.email}</p>
+                      <p className="text-muted-foreground truncate text-[11px]">{acc.email}</p>
                     </div>
                     <button
                       onClick={() => startEdit(acc)}
-                      className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                      className="text-muted-foreground hover:bg-accent hover:text-accent-foreground shrink-0 rounded p-1"
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
                     <button
                       onClick={() => handleDelete(acc.id)}
-                      className="shrink-0 rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive shrink-0 rounded p-1"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -402,14 +403,14 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
       ) : mode === "story-points" ? (
         <div className="space-y-3 pt-1">
           {spLoading && (
-            <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+            <div className="text-muted-foreground flex items-center gap-1.5 text-[12px]">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               Detecting story point fields from issues…
             </div>
           )}
           <div className="max-h-[340px] space-y-4 overflow-y-auto">
             {spProjects.length === 0 ? (
-              <p className="py-6 text-center text-[12px] text-muted-foreground">
+              <p className="text-muted-foreground py-6 text-center text-[12px]">
                 No projects found. Run a sync first to populate projects.
               </p>
             ) : (
@@ -420,7 +421,7 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
 
                 return (
                   <div key={account.id} className="space-y-1.5">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    <p className="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
                       {account.name || account.instanceUrl}
                     </p>
                     {projects.map((project) => {
@@ -433,11 +434,11 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
                       return (
                         <div
                           key={project.id}
-                          className="rounded-md border border-border bg-muted/30 px-3 py-2"
+                          className="border-border bg-muted/30 rounded-md border px-3 py-2"
                         >
                           <div className="mb-1.5 flex items-baseline gap-2">
                             <p className="truncate text-[13px] font-medium">{project.name}</p>
-                            <span className="shrink-0 text-[11px] text-muted-foreground">
+                            <span className="text-muted-foreground shrink-0 text-[11px]">
                               {project.jiraProjectKey}
                             </span>
                             {isSaved ? (
@@ -450,7 +451,7 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
                               </span>
                             ) : null}
                             {spLoading && !detected && (
-                              <Loader2 className="ml-auto h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
+                              <Loader2 className="text-muted-foreground ml-auto h-3 w-3 shrink-0 animate-spin" />
                             )}
                           </div>
                           {dropdownFields.length > 0 ? (
@@ -467,7 +468,7 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
                                 {dropdownFields.map((f) => (
                                   <SelectItem key={f.id} value={f.id} className="text-[12px]">
                                     <span className="font-medium">{f.name}</span>
-                                    <span className="ml-1 text-muted-foreground">({f.id})</span>
+                                    <span className="text-muted-foreground ml-1">({f.id})</span>
                                     {"occurrences" in f && f.occurrences != null && (
                                       <span className="ml-1.5 text-green-600 dark:text-green-400">
                                         {f.occurrences} issues
@@ -539,7 +540,7 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
                 setStatus("idle");
               }}
             />
-            <p className="text-[11px] text-muted-foreground">Subdomain or full URL</p>
+            <p className="text-muted-foreground text-[11px]">Subdomain or full URL</p>
           </div>
 
           <div className="space-y-1.5">
@@ -575,13 +576,13 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
               />
               <button
                 type="button"
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
                 onClick={() => setShowToken(!showToken)}
               >
                 {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-muted-foreground text-[11px]">
               Generate at{" "}
               <button
                 type="button"

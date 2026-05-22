@@ -79,7 +79,7 @@ export function TaskDetailPanel() {
       <div className="grid grid-cols-2 gap-3">
         {/* Type */}
         <div className="space-y-1.5">
-          <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <label className="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
             Type
           </label>
           <Select
@@ -89,10 +89,10 @@ export function TaskDetailPanel() {
             <SelectTrigger className="h-8 text-[13px]">
               <SelectValue placeholder="—">
                 <div className="flex items-center gap-1.5">
-                  {task.type === "Bug" && <Bug className="h-3.5 w-3.5 text-destructive" />}
-                  {task.type === "Story" && <BookOpen className="h-3.5 w-3.5 text-primary" />}
+                  {task.type === "Bug" && <Bug className="text-destructive h-3.5 w-3.5" />}
+                  {task.type === "Story" && <BookOpen className="text-primary h-3.5 w-3.5" />}
                   {task.type === "Task" && (
-                    <ClipboardList className="h-3.5 w-3.5 text-muted-foreground" />
+                    <ClipboardList className="text-muted-foreground h-3.5 w-3.5" />
                   )}
                   {task.type}
                 </div>
@@ -110,7 +110,7 @@ export function TaskDetailPanel() {
 
         {/* Severity */}
         <div className="space-y-1.5">
-          <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <label className="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
             Severity
           </label>
           <Select
@@ -132,7 +132,7 @@ export function TaskDetailPanel() {
 
         {/* Status */}
         <div className="space-y-1.5">
-          <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <label className="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
             Status
           </label>
           <Select value={task.status ?? ""} onValueChange={(v) => updateTaskStatus(task.id, v)}>
@@ -153,7 +153,7 @@ export function TaskDetailPanel() {
 
         {/* Story Level */}
         <div className="space-y-1.5">
-          <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <label className="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
             Story Level
           </label>
           <Select
@@ -176,13 +176,13 @@ export function TaskDetailPanel() {
               <SelectValue placeholder="—" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="__none__" className="text-[13px] text-muted-foreground">
+              <SelectItem value="__none__" className="text-muted-foreground text-[13px]">
                 —
               </SelectItem>
               {hasInvalidStoryLevel && (
                 <SelectItem
                   value={task.storyLevel!.toString()}
-                  className="text-[13px] text-destructive"
+                  className="text-destructive text-[13px]"
                 >
                   {task.storyLevel}
                 </SelectItem>
@@ -198,7 +198,7 @@ export function TaskDetailPanel() {
           {!canAssignStoryLevel && (
             <p
               className={cn(
-                "text-[11px] text-muted-foreground",
+                "text-muted-foreground text-[11px]",
                 hasInvalidStoryLevel && "text-destructive",
               )}
             >
@@ -211,7 +211,7 @@ export function TaskDetailPanel() {
 
         {/* Mandays */}
         <div className="space-y-1.5">
-          <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <label className="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
             Mandays
           </label>
           <MandayInput value={task.mandays} onSave={(v) => updateTaskMandays(task.id, v)} />
@@ -219,10 +219,10 @@ export function TaskDetailPanel() {
 
         {/* Assignee */}
         <div className="space-y-1.5">
-          <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <label className="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
             Assignee
           </label>
-          <div className="flex h-8 items-center rounded-md border border-input bg-background px-3 text-[13px] text-muted-foreground">
+          <div className="border-input bg-background text-muted-foreground flex h-8 items-center rounded-md border px-3 text-[13px]">
             {task.assignee ?? "—"}
           </div>
         </div>
@@ -232,34 +232,34 @@ export function TaskDetailPanel() {
       <NoteField value={task.note} onSave={(v) => updateTaskNote(task.id, v)} />
 
       {/* Timestamps */}
-      <div className="flex gap-4 text-[11px] text-muted-foreground">
+      <div className="text-muted-foreground flex gap-4 text-[11px]">
         <span>Created {formatDistanceToNow(new Date(task.createdAt), { addSuffix: true })}</span>
         <span>Updated {formatDistanceToNow(new Date(task.updatedAt), { addSuffix: true })}</span>
       </div>
 
       {/* Time Tracking */}
-      <div className="space-y-3 border-t border-border pt-4">
+      <div className="border-border space-y-3 border-t pt-4">
         <div className="flex items-center justify-between">
           <h3 className="flex items-center gap-1.5 text-[13px] font-semibold">
-            <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+            <Clock className="text-muted-foreground h-3.5 w-3.5" />
             Time Tracking
           </h3>
           <LogWorkModal taskId={task.id} onLog={addWorkLog} variant="button" />
         </div>
 
         {workLogs.length > 0 && (
-          <div className="text-[12px] text-muted-foreground">
+          <div className="text-muted-foreground text-[12px]">
             Total: {formatMinutes(workLogs.reduce((sum, wl) => sum + wl.timeSpentMinutes, 0))}
           </div>
         )}
 
         <div className="space-y-2">
           {workLogs.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">No work logged yet</p>
+            <p className="text-muted-foreground text-[12px]">No work logged yet</p>
           ) : (
             workLogs.map((wl) => (
-              <div key={wl.id} className="rounded-md border border-border bg-muted/20 px-3 py-2">
-                <div className="mb-2 text-[11px] text-muted-foreground">
+              <div key={wl.id} className="border-border bg-muted/20 rounded-md border px-3 py-2">
+                <div className="text-muted-foreground mb-2 text-[11px]">
                   {formatWorkLogDate(wl.logDate)}
                 </div>
 
@@ -269,12 +269,12 @@ export function TaskDetailPanel() {
                       {formatMinutes(wl.timeSpentMinutes)}
                     </span>
                     {wl.comment && (
-                      <p className="text-[12px] text-muted-foreground">{wl.comment}</p>
+                      <p className="text-muted-foreground text-[12px]">{wl.comment}</p>
                     )}
                   </div>
                   <button
                     type="button"
-                    className="mt-0.5 text-muted-foreground hover:text-destructive"
+                    className="text-muted-foreground hover:text-destructive mt-0.5"
                     onClick={() => removeWorkLog(wl.id)}
                     title="Delete work log"
                   >
@@ -294,21 +294,21 @@ export function TaskDetailPanel() {
   ) : null;
 
   return (
-    <div className="animate-slide-in-right flex h-full w-full flex-col border-l border-border bg-card md:w-[45vw] md:min-w-[360px] md:max-w-[600px]">
+    <div className="animate-slide-in-right border-border bg-card flex h-full w-full flex-col border-l md:w-[45vw] md:max-w-[600px] md:min-w-[360px]">
       {/* Header — sticky by flex-col layout */}
-      <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
+      <div className="border-border flex shrink-0 items-center justify-between border-b px-4 py-3">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {/* Task ID as clickable link with project name */}
           <button
             type="button"
-            className="flex min-w-0 items-center gap-1 rounded text-muted-foreground hover:text-primary"
+            className="text-muted-foreground hover:text-primary flex min-w-0 items-center gap-1 rounded"
             onClick={() => {
               if (task.refUrl) void openExternal(task.refUrl);
             }}
             title={task.refUrl ?? undefined}
           >
             {project && (
-              <span className="shrink-0 text-[11px] text-muted-foreground/70">
+              <span className="text-muted-foreground/70 shrink-0 text-[11px]">
                 {project.name}&nbsp;·&nbsp;
               </span>
             )}
@@ -352,8 +352,8 @@ export function TaskDetailPanel() {
         </Button>
       </div>
 
-      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-4 py-3">
-        <h2 className="min-w-0 flex-1 text-base font-semibold leading-snug">{task.title}</h2>
+      <div className="border-border flex shrink-0 items-start justify-between gap-3 border-b px-4 py-3">
+        <h2 className="min-w-0 flex-1 text-base leading-snug font-semibold">{task.title}</h2>
         {hasDescription && (
           <Button
             type="button"
@@ -466,7 +466,7 @@ function NoteFieldEditor({
 
   return (
     <div className="space-y-1.5">
-      <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <label className="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
         Note
       </label>
       <Textarea

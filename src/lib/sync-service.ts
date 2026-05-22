@@ -30,7 +30,6 @@ function notify(status: SyncStatus, message?: string) {
   }
 }
 
-
 function mergeRemoteTaskWithLocalState(remoteTask: Task, localTask?: Task): Task {
   if (!localTask?.isDirty) {
     return remoteTask;
@@ -174,13 +173,10 @@ export function startBackgroundSync() {
   if (accounts.length === 0) return;
 
   // Sync immediately, then every hour
-  syncNow().catch(() => { });
-  syncInterval = setInterval(
-    () => {
-      syncNow().catch(() => { });
-    },
-    SYNC_INTERVAL_MS,
-  );
+  syncNow().catch(() => {});
+  syncInterval = setInterval(() => {
+    syncNow().catch(() => {});
+  }, SYNC_INTERVAL_MS);
 }
 
 export function stopBackgroundSync() {

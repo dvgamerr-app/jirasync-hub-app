@@ -69,12 +69,12 @@ function EmptyTasksState({
 
   return (
     <div className="flex flex-1 items-center justify-center p-6">
-      <div className="w-full max-w-md rounded-2xl border border-dashed border-border bg-card/70 p-8 text-center shadow-sm">
-        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-muted">
-          <Server className="h-6 w-6 text-muted-foreground" />
+      <div className="border-border bg-card/70 w-full max-w-md rounded-2xl border border-dashed p-8 text-center shadow-sm">
+        <div className="bg-muted mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl">
+          <Server className="text-muted-foreground h-6 w-6" />
         </div>
         <h2 className="text-lg font-semibold">{title}</h2>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">{message}</p>
+        <p className="text-muted-foreground mt-2 text-sm leading-6">{message}</p>
 
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           {hasJiraAccounts ? (
@@ -130,7 +130,7 @@ const Index = () => {
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const hasJiraAccounts = useMemo(() => getJiraAccounts().length > 0, [settingsOpen]);
+  const hasJiraAccounts = getJiraAccounts().length > 0;
   const showEmptyState = isLoaded && filteredTasks.length === 0 && !selectedTaskId;
 
   useEffect(() => {
@@ -224,21 +224,21 @@ const Index = () => {
   };
 
   return (
-    <div className="flex h-full w-full overflow-hidden bg-background">
+    <div className="bg-background flex h-full w-full overflow-hidden">
       <div className="hidden md:block">
         <AppSidebar onOpenSettings={() => setSettingsOpen(true)} />
       </div>
 
       <div className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex min-h-11 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2">
+        <header className="border-border flex min-h-11 flex-wrap items-center justify-between gap-2 border-b px-4 py-2">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-[13px] font-semibold">
               {currentProject ? currentProject.name : "All Tasks"}
             </h1>
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground">
+            <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-[11px] tabular-nums">
               {filteredTasks.length}
             </span>
-            <div className="flex items-center rounded-md border border-border bg-muted/30 p-0.5">
+            <div className="border-border bg-muted/30 flex items-center rounded-md border p-0.5">
               {TASK_STATUS_FILTERS.map((filter) => (
                 <button
                   key={filter.value}
@@ -265,7 +265,7 @@ const Index = () => {
                 onBlur={() => setSearchFocused(false)}
                 placeholder="Search… (Ctrl+F)"
                 className={cn(
-                  "h-8 w-40 rounded-md border-border pl-6 text-[12px] text-muted-foreground shadow-none transition-[width] duration-200 placeholder:text-muted-foreground/60 focus-visible:ring-1",
+                  "border-border text-muted-foreground placeholder:text-muted-foreground/60 h-8 w-40 rounded-md pl-6 text-[12px] shadow-none transition-[width] duration-200 focus-visible:ring-1",
                   searchQuery ? "pr-6" : "pr-2",
                   searchFocused && "w-52",
                 )}
@@ -274,7 +274,10 @@ const Index = () => {
                 <button
                   type="button"
                   className="text-muted-foreground hover:text-foreground absolute right-1.5"
-                  onClick={() => { setSearchQuery(""); searchInputRef.current?.focus(); }}
+                  onClick={() => {
+                    setSearchQuery("");
+                    searchInputRef.current?.focus();
+                  }}
                 >
                   <X className="h-3 w-3" />
                 </button>
@@ -283,7 +286,7 @@ const Index = () => {
             <Button
               variant="outline"
               size="sm"
-              className="h-7 gap-1.5 text-[12px] text-muted-foreground md:hidden"
+              className="text-muted-foreground h-7 gap-1.5 text-[12px] md:hidden"
               onClick={() => setCommandMenuOpen(true)}
             >
               <Search className="h-3 w-3" />
@@ -294,7 +297,7 @@ const Index = () => {
             <Button
               variant="outline"
               size="sm"
-              className={`h-7 gap-1.5 text-[12px] ${syncing ? "animate-pulse border-primary ring-2 ring-primary/30" : ""}`}
+              className={`h-7 gap-1.5 text-[12px] ${syncing ? "border-primary ring-primary/30 animate-pulse ring-2" : ""}`}
               onClick={handleManualSync}
               disabled={syncing || !hasJiraAccounts}
             >
@@ -312,7 +315,7 @@ const Index = () => {
                   pushDone
                     ? "border-green-500 text-green-600 dark:text-green-400"
                     : pushing
-                      ? "border-primary ring-2 ring-primary/30"
+                      ? "border-primary ring-primary/30 ring-2"
                       : ""
                 }`}
                 disabled={pushing || pushDone}

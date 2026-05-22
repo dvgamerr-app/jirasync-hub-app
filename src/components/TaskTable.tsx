@@ -5,7 +5,19 @@ import { Task, TaskType, Severity } from "@/types/jira";
 import { StatusBadge } from "@/components/StatusBadge";
 import { AdfRenderer } from "@/components/AdfRenderer";
 import { cn } from "@/lib/utils";
-import { ExternalLink, Bug, BookOpen, ClipboardList, Info, Zap, FileText, ChevronsUp, ChevronUp, Equal, ChevronDown } from "lucide-react";
+import {
+  ExternalLink,
+  Bug,
+  BookOpen,
+  ClipboardList,
+  Info,
+  Zap,
+  FileText,
+  ChevronsUp,
+  ChevronUp,
+  Equal,
+  ChevronDown,
+} from "lucide-react";
 import { openExternal } from "@/lib/desktop";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -43,24 +55,24 @@ function hasStoryPointRuleViolation(task: Pick<Task, "type" | "storyLevel">): bo
 function TypeIcon({ type }: { type: TaskType | null }) {
   switch (type) {
     case "Bug":
-      return <Bug className="h-3.5 w-3.5 text-destructive" />;
+      return <Bug className="text-destructive h-3.5 w-3.5" />;
     case "Story":
-      return <BookOpen className="h-3.5 w-3.5 text-primary" />;
+      return <BookOpen className="text-primary h-3.5 w-3.5" />;
     case "Task":
-      return <ClipboardList className="h-3.5 w-3.5 text-muted-foreground" />;
+      return <ClipboardList className="text-muted-foreground h-3.5 w-3.5" />;
     default:
-      return <span className="text-[12px] text-muted-foreground">—</span>;
+      return <span className="text-muted-foreground text-[12px]">—</span>;
   }
 }
 
 function SeverityBadge({ severity }: { severity: Severity | null }) {
   if (!severity || severity === "NA")
-    return <span className="text-[12px] text-muted-foreground">—</span>;
+    return <span className="text-muted-foreground text-[12px]">—</span>;
   const config: Record<string, { icon: ReactNode; label: string }> = {
-    Critical: { icon: <ChevronsUp className="h-4 w-4 text-destructive" />, label: "Critical" },
-    High:     { icon: <ChevronUp  className="h-4 w-4 text-orange-500" />,  label: "High" },
-    Medium:   { icon: <Equal      className="h-4 w-4 text-yellow-500" />,  label: "Medium" },
-    Low:      { icon: <ChevronDown className="h-4 w-4 text-blue-400" />,   label: "Low" },
+    Critical: { icon: <ChevronsUp className="text-destructive h-4 w-4" />, label: "Critical" },
+    High: { icon: <ChevronUp className="h-4 w-4 text-orange-500" />, label: "High" },
+    Medium: { icon: <Equal className="h-4 w-4 text-yellow-500" />, label: "Medium" },
+    Low: { icon: <ChevronDown className="h-4 w-4 text-blue-400" />, label: "Low" },
   };
   const { icon, label } = config[severity] ?? { icon: null, label: severity };
   return (
@@ -68,7 +80,9 @@ function SeverityBadge({ severity }: { severity: Severity | null }) {
       <TooltipTrigger asChild>
         <span className="inline-flex items-center justify-center">{icon}</span>
       </TooltipTrigger>
-      <TooltipContent side="top" className="text-[11px]">{label}</TooltipContent>
+      <TooltipContent side="top" className="text-[11px]">
+        {label}
+      </TooltipContent>
     </Tooltip>
   );
 }
@@ -89,7 +103,14 @@ function bfsDescendants(rootKey: string, childrenMap: Record<string, Task[]>): T
 }
 
 type FlatRow =
-  | { kind: "epic-header"; epic: Task; subtasks: Task[]; pct: number; totalManday: number; epicTotalMinutes: number }
+  | {
+      kind: "epic-header";
+      epic: Task;
+      subtasks: Task[];
+      pct: number;
+      totalManday: number;
+      epicTotalMinutes: number;
+    }
   | { kind: "epic-desc"; epic: Task }
   | { kind: "task"; task: Task; depth: number; isLastSibling: boolean };
 
@@ -124,7 +145,7 @@ const EpicHeaderRow = memo(function EpicHeaderRow({
       <TableCell className="py-2">
         <div className="flex items-center gap-1.5">
           <Zap className="h-3.5 w-3.5 shrink-0 text-purple-500" />
-          <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
+          <span className="text-muted-foreground font-mono text-[12px] tabular-nums">
             {epic.jiraTaskId}
           </span>
         </div>
@@ -140,11 +161,15 @@ const EpicHeaderRow = memo(function EpicHeaderRow({
                 void openExternal(epic.refUrl!);
               }}
             >
-              <ExternalLink className="h-3 w-3 text-muted-foreground hover:text-primary" />
+              <ExternalLink className="text-muted-foreground hover:text-primary h-3 w-3" />
             </button>
           )}
           {hasDescription && (
-            <button type="button" onClick={onDescToggle} title={descOpen ? "Hide description" : "Show description"}>
+            <button
+              type="button"
+              onClick={onDescToggle}
+              title={descOpen ? "Hide description" : "Show description"}
+            >
               <FileText
                 className={cn(
                   "h-3 w-3",
@@ -164,10 +189,10 @@ const EpicHeaderRow = memo(function EpicHeaderRow({
       {showExtendedColumns && (
         <>
           <TableCell className="py-2 text-center">
-            <span className="text-[12px] text-muted-foreground">—</span>
+            <span className="text-muted-foreground text-[12px]">—</span>
           </TableCell>
           <TableCell className="py-2 text-center">
-            <span className="text-[12px] text-muted-foreground">—</span>
+            <span className="text-muted-foreground text-[12px]">—</span>
           </TableCell>
           <TableCell className="py-2 text-center">
             <span className="text-[13px] tabular-nums">
@@ -175,7 +200,7 @@ const EpicHeaderRow = memo(function EpicHeaderRow({
             </span>
           </TableCell>
           <TableCell className="py-2">
-            <span className="text-[12px] tabular-nums text-muted-foreground">
+            <span className="text-muted-foreground text-[12px] tabular-nums">
               {epicTotalMinutes > 0 ? formatMinutes(epicTotalMinutes) : "—"}
             </span>
           </TableCell>
@@ -183,7 +208,7 @@ const EpicHeaderRow = memo(function EpicHeaderRow({
             {subtasks.length > 0 && (
               <div className="flex items-center gap-2">
                 <Progress value={pct} className="h-1.5 w-16 shrink-0" />
-                <span className="whitespace-nowrap text-[11px] tabular-nums text-muted-foreground">
+                <span className="text-muted-foreground text-[11px] whitespace-nowrap tabular-nums">
                   {pct}% Done
                 </span>
               </div>
@@ -196,7 +221,14 @@ const EpicHeaderRow = memo(function EpicHeaderRow({
 });
 
 export function TaskTable() {
-  const { selectedTaskId, getFilteredTasks, workLogs, projects, tasks: rawTasks, selectedProjectId } = useTaskStore(
+  const {
+    selectedTaskId,
+    getFilteredTasks,
+    workLogs,
+    projects,
+    tasks: rawTasks,
+    selectedProjectId,
+  } = useTaskStore(
     useShallow((s) => ({
       selectedTaskId: s.selectedTaskId,
       getFilteredTasks: s.getFilteredTasks,
@@ -226,13 +258,15 @@ export function TaskTable() {
 
   // children map จาก raw tasks (unfiltered) — ใช้คำนวณ pct เท่านั้น
   const rawChildrenByParentKey = useMemo(() => {
-    const src = (selectedProjectId
-      ? rawTasks.filter((t) => t.projectId === selectedProjectId)
-      : rawTasks
+    const src = (
+      selectedProjectId ? rawTasks.filter((t) => t.projectId === selectedProjectId) : rawTasks
     ).filter((t) => t.isEpic !== true);
     const map: Record<string, Task[]> = {};
     for (const t of src) {
-      if (t.parentKey) { map[t.parentKey] ??= []; map[t.parentKey].push(t); }
+      if (t.parentKey) {
+        map[t.parentKey] ??= [];
+        map[t.parentKey].push(t);
+      }
     }
     return map;
   }, [rawTasks, selectedProjectId]);
@@ -276,7 +310,8 @@ export function TaskTable() {
     (epicId: string) =>
       setOpenDescEpics((prev) => {
         const next = new Set(prev);
-        next.has(epicId) ? next.delete(epicId) : next.add(epicId);
+        if (next.has(epicId)) next.delete(epicId);
+        else next.add(epicId);
         return next;
       }),
     [],
@@ -315,7 +350,14 @@ export function TaskTable() {
     }
 
     return rows;
-  }, [epicGroups, orphanRoots, openDescEpics, totalMinutesByTaskId, rawChildrenByParentKey, filteredChildrenByParentKey]);
+  }, [
+    epicGroups,
+    orphanRoots,
+    openDescEpics,
+    totalMinutesByTaskId,
+    rawChildrenByParentKey,
+    filteredChildrenByParentKey,
+  ]);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const handleSelectTask = useCallback((taskId: string) => {
@@ -323,6 +365,7 @@ export function TaskTable() {
     set(cur === taskId ? null : taskId);
   }, []);
 
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: flatRows.length,
     getScrollElement: () => parentRef.current,
@@ -340,32 +383,32 @@ export function TaskTable() {
     <TooltipProvider delayDuration={200}>
       <div ref={parentRef} className="flex-1 overflow-auto">
         <Table>
-          <TableHeader className="sticky top-0 z-10 bg-background">
+          <TableHeader className="bg-background sticky top-0 z-10">
             <TableRow className="hover:bg-transparent">
-              <TableHead className="w-[108px] text-[11px] font-semibold uppercase tracking-wider">
+              <TableHead className="w-[108px] text-[11px] font-semibold tracking-wider uppercase">
                 ID
               </TableHead>
-              <TableHead className="text-[11px] font-semibold uppercase tracking-wider">
+              <TableHead className="text-[11px] font-semibold tracking-wider uppercase">
                 Title
               </TableHead>
-              <TableHead className="w-[60px] text-center text-[11px] font-semibold uppercase tracking-wider">
+              <TableHead className="w-[60px] text-center text-[11px] font-semibold tracking-wider uppercase">
                 Type
               </TableHead>
-              <TableHead className="w-[160px] text-[11px] font-semibold uppercase tracking-wider">
+              <TableHead className="w-[160px] text-[11px] font-semibold tracking-wider uppercase">
                 Status
               </TableHead>
               {showExtendedColumns && (
-                <TableHead className="w-[44px] text-center text-[11px] font-semibold uppercase tracking-wider">
+                <TableHead className="w-[44px] text-center text-[11px] font-semibold tracking-wider uppercase">
                   Sev
                 </TableHead>
               )}
               {showExtendedColumns && (
-                <TableHead className="w-[70px] text-center text-[11px] font-semibold uppercase tracking-wider">
+                <TableHead className="w-[70px] text-center text-[11px] font-semibold tracking-wider uppercase">
                   <div className="flex items-center justify-center gap-1">
                     Story
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <Info className="h-3 w-3 shrink-0 cursor-help text-muted-foreground/60" />
+                        <Info className="text-muted-foreground/60 h-3 w-3 shrink-0 cursor-help" />
                       </TooltipTrigger>
                       <TooltipContent
                         side="bottom"
@@ -373,14 +416,14 @@ export function TaskTable() {
                         className="max-w-[210px] p-2 text-left text-[11px] leading-snug"
                       >
                         <p className="mb-1 font-semibold">Estimation Rule</p>
-                        <ul className="space-y-1 text-muted-foreground">
+                        <ul className="text-muted-foreground space-y-1">
                           <li>
                             • Story Point ให้ estimate เฉพาะ{" "}
-                            <span className="font-medium text-foreground">Story</span> เท่านั้น
+                            <span className="text-foreground font-medium">Story</span> เท่านั้น
                           </li>
                           <li>
                             • Track effort รายคน ให้ใช้{" "}
-                            <span className="font-medium text-foreground">Time (Log Work)</span> ใน
+                            <span className="text-foreground font-medium">Time (Log Work)</span> ใน
                             Task
                           </li>
                           <li>• ห้าม Story Point ซ้ำหลายระดับ — velocity จะเปรียบเทียบกันไม่ได้</li>
@@ -391,17 +434,17 @@ export function TaskTable() {
                 </TableHead>
               )}
               {showExtendedColumns && (
-                <TableHead className="w-[80px] text-center text-[11px] font-semibold uppercase tracking-wider">
+                <TableHead className="w-[80px] text-center text-[11px] font-semibold tracking-wider uppercase">
                   Mandays
                 </TableHead>
               )}
               {showExtendedColumns && (
-                <TableHead className="w-[120px] text-[11px] font-semibold uppercase tracking-wider">
+                <TableHead className="w-[120px] text-[11px] font-semibold tracking-wider uppercase">
                   Time
                 </TableHead>
               )}
               {showExtendedColumns && (
-                <TableHead className="w-[140px] text-[11px] font-semibold uppercase tracking-wider">
+                <TableHead className="w-[140px] text-[11px] font-semibold tracking-wider uppercase">
                   Note
                 </TableHead>
               )}
@@ -410,7 +453,7 @@ export function TaskTable() {
           <TableBody>
             {flatRows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={colSpanAll} className="h-32 text-center text-muted-foreground">
+                <TableCell colSpan={colSpanAll} className="text-muted-foreground h-32 text-center">
                   No tasks found
                 </TableCell>
               </TableRow>
@@ -530,7 +573,7 @@ const TaskRow = memo(function TaskRow({
         hasStoryPointViolation &&
           "bg-red-50/80 hover:bg-red-50 dark:bg-red-950/20 dark:hover:bg-red-950/30",
         task.isDirty && "bg-yellow-50 dark:bg-yellow-900/20",
-        isSelected && "border-l-2 border-l-primary bg-primary/5",
+        isSelected && "border-l-primary bg-primary/5 border-l-2",
       )}
     >
       <TableCell
@@ -541,25 +584,28 @@ const TaskRow = memo(function TaskRow({
         {!!depth && (
           <>
             <span
-              className="pointer-events-none absolute w-px bg-border"
-              style={{ left: `${(depth - 1) * 13 + 12}px`, top: 0, bottom: isLastSibling ? "50%" : 0 }}
+              className="bg-border pointer-events-none absolute w-px"
+              style={{
+                left: `${(depth - 1) * 13 + 12}px`,
+                top: 0,
+                bottom: isLastSibling ? "50%" : 0,
+              }}
             />
             <span
-              className="pointer-events-none absolute h-px w-2 bg-border"
+              className="bg-border pointer-events-none absolute h-px w-2"
               style={{ left: `${(depth - 1) * 13 + 12}px`, top: "50%" }}
             />
           </>
         )}
         <div className="flex items-center gap-1.5">
-          <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
+          <span className="text-muted-foreground font-mono text-[12px] tabular-nums">
             {task.jiraTaskId}
           </span>
-
         </div>
       </TableCell>
       <TableCell className="py-1.5" onClick={() => onSelect(task.id)}>
         <div className="flex items-center gap-1.5">
-          <span className="line-clamp-1 text-[13px] font-medium leading-tight">{task.title}</span>
+          <span className="line-clamp-1 text-[13px] leading-tight font-medium">{task.title}</span>
           {task.refUrl && (
             <button
               type="button"
@@ -568,7 +614,7 @@ const TaskRow = memo(function TaskRow({
                 if (task.refUrl) void openExternal(task.refUrl);
               }}
             >
-              <ExternalLink className="h-3 w-3 text-muted-foreground hover:text-primary" />
+              <ExternalLink className="text-muted-foreground hover:text-primary h-3 w-3" />
             </button>
           )}
         </div>
@@ -640,7 +686,7 @@ const TaskRow = memo(function TaskRow({
           <span
             className={cn(
               "text-[13px] tabular-nums",
-              hasStoryPointViolation && "font-medium text-destructive",
+              hasStoryPointViolation && "text-destructive font-medium",
             )}
           >
             {task.storyLevel ?? "—"}
@@ -655,7 +701,7 @@ const TaskRow = memo(function TaskRow({
       {showExtendedColumns && (
         <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center gap-1">
-            <span className="text-[12px] tabular-nums text-muted-foreground">
+            <span className="text-muted-foreground text-[12px] tabular-nums">
               {totalMinutes > 0 ? formatMinutes(totalMinutes) : "—"}
             </span>
             <LogWorkModal taskId={task.id} onLog={addWorkLog} variant="inline" />
@@ -757,7 +803,7 @@ function InlineManday({
 
   return (
     <span
-      className="cursor-text text-[13px] tabular-nums hover:text-foreground"
+      className="hover:text-foreground cursor-text text-[13px] tabular-nums"
       onClick={() => {
         setPendingSourceValue(NO_PENDING_MANDAY);
         setRaw(display);
@@ -849,7 +895,7 @@ function InlineNoteEditor({
 
   return (
     <span
-      className="line-clamp-1 cursor-text text-[12px] text-muted-foreground hover:text-foreground"
+      className="text-muted-foreground hover:text-foreground line-clamp-1 cursor-text text-[12px]"
       onClick={() => {
         setValue(initialValue);
         setEditing(true);

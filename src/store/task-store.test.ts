@@ -575,11 +575,10 @@ describe("task-store task status filters", () => {
         .getVisibleProjects()
         .map((project) => project.id),
     ).toEqual(["proj-account-1-ALPHA", "proj-account-2-BETA"]);
-    expect(
-      useTaskStore
-        .getState()
-        .organizations.map((organization) => organization.id),
-    ).toEqual(["org-account-1", "org-account-2"]);
+    expect(useTaskStore.getState().organizations.map((organization) => organization.id)).toEqual([
+      "org-account-1",
+      "org-account-2",
+    ]);
   });
 });
 

@@ -1,6 +1,14 @@
 import { useState, useEffect } from "react";
 import { useTaskStore } from "@/store/task-store";
-import { ChevronDown, Eye, EyeOff, FolderKanban, ListTodo, Settings, RefreshCw } from "lucide-react";
+import {
+  ChevronDown,
+  Eye,
+  EyeOff,
+  FolderKanban,
+  ListTodo,
+  Settings,
+  RefreshCw,
+} from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { getLastSyncTime, onSyncStatus } from "@/lib/sync-service";
@@ -11,8 +19,14 @@ interface AppSidebarProps {
 }
 
 export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
-  const { organizations, selectedProjectId, setSelectedProject, getVisibleProjects, hiddenProjectIds, toggleProjectVisibility } =
-    useTaskStore();
+  const {
+    organizations,
+    selectedProjectId,
+    setSelectedProject,
+    getVisibleProjects,
+    hiddenProjectIds,
+    toggleProjectVisibility,
+  } = useTaskStore();
   const projects = getVisibleProjects();
   const [lastSync, setLastSync] = useState<string | null>(null);
 
@@ -27,9 +41,9 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
 
   return (
     <>
-      <aside className="flex h-full w-[280px] flex-col border-r border-border bg-card">
+      <aside className="border-border bg-card flex h-full w-[280px] flex-col border-r">
         {/* Header */}
-        <div className="border-b border-border px-3 py-3">
+        <div className="border-border border-b px-3 py-3">
           <h2 className="text-[13px] font-semibold">Task Manager</h2>
         </div>
 
@@ -40,7 +54,7 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
             className={cn(
               "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]",
               !selectedProjectId
-                ? "bg-primary/10 font-medium text-primary"
+                ? "bg-primary/10 text-primary font-medium"
                 : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
             )}
           >
@@ -53,7 +67,7 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
             if (orgProjects.length === 0) return null;
             return (
               <Collapsible key={org.id} defaultOpen className="mt-3">
-                <CollapsibleTrigger className="flex w-full items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <CollapsibleTrigger className="text-muted-foreground flex w-full items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold tracking-wider uppercase">
                   <ChevronDown className="h-3 w-3" />
                   {org.name}
                 </CollapsibleTrigger>
@@ -67,7 +81,7 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
                         className={cn(
                           "group flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]",
                           selectedProjectId === project.id
-                            ? "bg-primary/10 font-medium text-primary"
+                            ? "bg-primary/10 text-primary font-medium"
                             : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                           isHidden && "opacity-50",
                         )}
@@ -89,7 +103,7 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
                           )}
                         </span>
                         <span className="truncate">{project.name}</span>
-                        <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+                        <span className="text-muted-foreground ml-auto font-mono text-[10px]">
                           {project.jiraProjectKey}
                         </span>
                       </button>
@@ -102,16 +116,16 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
         </div>
 
         {/* Footer */}
-        <div className="space-y-1 border-t border-border px-3 py-2">
+        <div className="border-border space-y-1 border-t px-3 py-2">
           {lastSync && (
-            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <div className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
               <RefreshCw className="h-3 w-3" />
               <span>Synced {formatDistanceToNow(new Date(lastSync), { addSuffix: true })}</span>
             </div>
           )}
           <button
             onClick={onOpenSettings}
-            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            className="text-muted-foreground hover:bg-accent hover:text-accent-foreground flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]"
           >
             <Settings className="h-3.5 w-3.5" />
             Jira Settings

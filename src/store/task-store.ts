@@ -452,7 +452,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     toggleProjectVisibility: (projectId) =>
       set((state) => {
         const next = new Set(state.hiddenProjectIds);
-        next.has(projectId) ? next.delete(projectId) : next.add(projectId);
+        if (next.has(projectId)) next.delete(projectId);
+        else next.add(projectId);
         saveHiddenProjectIds(next);
         return { hiddenProjectIds: next };
       }),

@@ -102,7 +102,10 @@ function escapeCsvValue(value: string): string {
     : value;
 }
 
-function buildTableRows(rows: ExportRow[], fullNamesByAccountId: Record<string, string>): string[][] {
+function buildTableRows(
+  rows: ExportRow[],
+  fullNamesByAccountId: Record<string, string>,
+): string[][] {
   return [
     CSV_HEADER,
     ...rows.map((row) => [
@@ -125,7 +128,6 @@ function buildCsv(rows: ExportRow[], fullNamesByAccountId: Record<string, string
     .map((row) => row.map(escapeCsvValue).join(","))
     .join("\n");
 }
-
 
 async function getFullNamesByAccountId(rows: ExportRow[]): Promise<Record<string, string>> {
   const accountsById = new Map(getJiraAccounts().map((account) => [account.id, account]));
@@ -241,7 +243,11 @@ function workingDaysInMonth(yearMonth: string): number {
   return count;
 }
 
-function calculateMandayMinutesForPeriod(tasks: Task[], rows: ExportRow[], periodValue: string): number {
+function calculateMandayMinutesForPeriod(
+  tasks: Task[],
+  rows: ExportRow[],
+  periodValue: string,
+): number {
   const taskById = new Map(tasks.map((task) => [task.id, task]));
   const taskMinutes = new Map<string, { total: number; inPeriod: number }>();
 
@@ -266,7 +272,10 @@ function calculateMandayMinutesForPeriod(tasks: Task[], rows: ExportRow[], perio
 const SPEED_RATE_OK = 0.8;
 
 export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: ExportDialogProps) {
-  const exportRows = useMemo(() => createExportRows(tasks, workLogs, projects), [tasks, workLogs, projects]);
+  const exportRows = useMemo(
+    () => createExportRows(tasks, workLogs, projects),
+    [tasks, workLogs, projects],
+  );
   const exportPeriods = useMemo(() => getExportPeriods(exportRows), [exportRows]);
   const latestPeriod = exportPeriods[0] ?? null;
   const [selectedPeriodValue, setSelectedPeriodValue] = useState(latestPeriod?.value ?? "");
@@ -280,6 +289,7 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
   useEffect(() => {
     if (!open) return;
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedPeriodValue(exportPeriods[0]?.value ?? "");
     setSavedFileName("");
     setSavedFilePath("");
@@ -330,7 +340,9 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
     try {
       const fullNamesByAccountId = await getFullNamesByAccountId(matchingRows);
       const [, ...dataRows] = buildTableRows(matchingRows, fullNamesByAccountId);
-      const tsvContent = dataRows.map((row) => row.map((v) => v.replace(/\t/g, " ")).join("\t")).join("\n");
+      const tsvContent = dataRows
+        .map((row) => row.map((v) => v.replace(/\t/g, " ")).join("\t"))
+        .join("\n");
       const htmlContent = `<table>${dataRows.map((row) => `<tr>${row.map((v) => `<td>${v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</td>`).join("")}</tr>`).join("")}</table>`;
       await navigator.clipboard.write([
         new ClipboardItem({
@@ -439,15 +451,15 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
             </p>
             {matchingRows.length > 0 && (
               <>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="text-muted-foreground mt-1 text-xs">
                   Total logged time: {formatMinutesLong(totalMinutes)}
                 </p>
                 {totalMandayMinutes > 0 && (
-                  <p className="mt-0.5 text-xs text-muted-foreground">
+                  <p className="text-muted-foreground mt-0.5 text-xs">
                     Total manday: {formatMinutesLong(totalMandayMinutes)}
                   </p>
                 )}
-                <p className="mt-0.5 text-xs text-muted-foreground">
+                <p className="text-muted-foreground mt-0.5 text-xs">
                   Capacity: {workingDaysInMonth(selectedPeriodValue)} working days
                 </p>
                 <p className="mt-0.5 text-xs font-medium">
@@ -465,7 +477,7 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
               </>
             )}
             {matchingRows.length === 0 && (
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="text-muted-foreground mt-1 text-xs">
                 Select another month from Time Tracking to export.
               </p>
             )}
@@ -485,7 +497,7 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
 
           {chartData.length > 1 && (
             <div>
-              <p className="mb-1 text-[11px] text-muted-foreground">Speed rate % / month</p>
+              <p className="text-muted-foreground mb-1 text-[11px]">Speed rate % / month</p>
               <ResponsiveContainer width="100%" height={80}>
                 <LineChart data={chartData} margin={{ top: 4, right: 4, left: -28, bottom: 0 }}>
                   <CartesianGrid
@@ -542,7 +554,7 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
                   />
                 </LineChart>
               </ResponsiveContainer>
-              <p className="mt-1 text-[10px] text-muted-foreground/60">
+              <p className="text-muted-foreground/60 mt-1 text-[10px]">
                 Speed rate = logged ÷ (working days × 8h) × 100
               </p>
             </div>
@@ -550,7 +562,11 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={exporting || copying}>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={exporting || copying}
+          >
             Cancel
           </Button>
           <Button

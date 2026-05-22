@@ -344,7 +344,11 @@ function mapIssueToTask(
 
   const issueTypeName = issue.fields.issuetype?.name ?? "";
   const isEpic = issueTypeName === "Epic";
-  const type: Task["type"] = isEpic ? null : (issueTypeName ? (ISSUE_TYPE_MAP[issueTypeName] ?? "Task") : null);
+  const type: Task["type"] = isEpic
+    ? null
+    : issueTypeName
+      ? (ISSUE_TYPE_MAP[issueTypeName] ?? "Task")
+      : null;
 
   return {
     id: getTaskId(account.id, issue.key),
@@ -360,7 +364,9 @@ function mapIssueToTask(
     storyLevel: normalizeStoryLevel(issue.fields[storyPointFieldId] as number | null | undefined),
     mandays:
       issue.fields.timetracking?.originalEstimateSeconds != null
-        ? Math.round((issue.fields.timetracking.originalEstimateSeconds / SECONDS_PER_WORKDAY) * 1000) / 1000
+        ? Math.round(
+            (issue.fields.timetracking.originalEstimateSeconds / SECONDS_PER_WORKDAY) * 1000,
+          ) / 1000
         : null,
     assignee: issue.fields.assignee?.displayName ?? null,
     refUrl: `${getJiraBaseUrl(account)}/browse/${issue.key}`,
@@ -415,11 +421,7 @@ function buildProjectEntry(
   };
 }
 
-function addProjectStatus(
-  map: Map<string, Set<string>>,
-  projectId: string,
-  status: string,
-): void {
+function addProjectStatus(map: Map<string, Set<string>>, projectId: string, status: string): void {
   const set = map.get(projectId) ?? new Set<string>();
   set.add(status);
   map.set(projectId, set);
@@ -478,13 +480,17 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
 
       const projectId = getProjectId(account.id, projectKey);
       if (!projectMap.has(projectKey)) {
-        projectMap.set(projectKey, buildProjectEntry(account, projectKey, issue.fields.project?.name));
+        projectMap.set(
+          projectKey,
+          buildProjectEntry(account, projectKey, issue.fields.project?.name),
+        );
       }
 
       const status = issue.fields.status?.name ?? null;
       if (status) addProjectStatus(statusSetByProjectId, projectId, status);
 
-      const projectStoryPointFieldId = storyPointFieldMap[projectId] ?? DEFAULT_STORY_POINT_FIELD_ID;
+      const projectStoryPointFieldId =
+        storyPointFieldMap[projectId] ?? DEFAULT_STORY_POINT_FIELD_ID;
       const task = mapIssueToTask(issue, account, projectKey, projectStoryPointFieldId);
       tasks.push(task);
 
@@ -508,7 +514,11 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
     for (let i = 0; i < unfetchedLinkedKeys.length; i += LINKED_ISSUES_BATCH_SIZE) {
       const batch = unfetchedLinkedKeys.slice(i, i + LINKED_ISSUES_BATCH_SIZE);
       const linkedJql = `issueKey in (${batch.map((k) => `"${k}"`).join(",")})`;
-      const body: Record<string, unknown> = { jql: linkedJql, maxResults: LINKED_ISSUES_BATCH_SIZE, fields };
+      const body: Record<string, unknown> = {
+        jql: linkedJql,
+        maxResults: LINKED_ISSUES_BATCH_SIZE,
+        fields,
+      };
 
       try {
         const res = await jiraFetch("search/jql", account, {
@@ -526,13 +536,17 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
 
           const projectId = getProjectId(account.id, projectKey);
           if (!projectMap.has(projectKey)) {
-            projectMap.set(projectKey, buildProjectEntry(account, projectKey, issue.fields.project?.name));
+            projectMap.set(
+              projectKey,
+              buildProjectEntry(account, projectKey, issue.fields.project?.name),
+            );
           }
 
           const status = issue.fields.status?.name ?? null;
           if (status) addProjectStatus(statusSetByProjectId, projectId, status);
 
-          const linkedStoryPointFieldId = storyPointFieldMap[projectId] ?? DEFAULT_STORY_POINT_FIELD_ID;
+          const linkedStoryPointFieldId =
+            storyPointFieldMap[projectId] ?? DEFAULT_STORY_POINT_FIELD_ID;
           const task = mapIssueToTask(issue, account, projectKey, linkedStoryPointFieldId);
           tasks.push(task);
 
@@ -567,11 +581,15 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
           if (!projectKey) continue;
           const projectId = getProjectId(account.id, projectKey);
           if (!projectMap.has(projectKey)) {
-            projectMap.set(projectKey, buildProjectEntry(account, projectKey, issue.fields.project?.name));
+            projectMap.set(
+              projectKey,
+              buildProjectEntry(account, projectKey, issue.fields.project?.name),
+            );
           }
           const status = issue.fields.status?.name ?? null;
           if (status) addProjectStatus(statusSetByProjectId, projectId, status);
-          const epicStoryPointFieldId = storyPointFieldMap[projectId] ?? DEFAULT_STORY_POINT_FIELD_ID;
+          const epicStoryPointFieldId =
+            storyPointFieldMap[projectId] ?? DEFAULT_STORY_POINT_FIELD_ID;
           tasks.push(mapIssueToTask(issue, account, projectKey, epicStoryPointFieldId));
         }
       } catch (error: unknown) {
@@ -631,7 +649,10 @@ function mapWorklogsFromIssue(issue: JiraIssue, taskId: string): WorkLog[] {
   return (issue.fields.worklog?.worklogs ?? []).map((wl) => mapJiraWorklog(wl, taskId));
 }
 
-async function fetchAllIssueWorklogs(account: JiraAccount, issueKey: string): Promise<JiraWorklog[]> {
+async function fetchAllIssueWorklogs(
+  account: JiraAccount,
+  issueKey: string,
+): Promise<JiraWorklog[]> {
   const all: JiraWorklog[] = [];
   const maxResults = 100;
   let startAt = 0;
@@ -737,12 +758,12 @@ export async function addJiraWorkLog(
       started: new Date(started).toISOString().replace("Z", "+0000"),
       ...(comment
         ? {
-          comment: {
-            type: "doc",
-            version: 1,
-            content: [{ type: "paragraph", content: [{ type: "text", text: comment }] }],
-          },
-        }
+            comment: {
+              type: "doc",
+              version: 1,
+              content: [{ type: "paragraph", content: [{ type: "text", text: comment }] }],
+            },
+          }
         : {}),
     }),
   });

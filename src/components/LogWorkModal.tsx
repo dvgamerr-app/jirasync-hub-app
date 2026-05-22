@@ -56,7 +56,7 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
   const trigger =
     variant === "inline" ? (
       <button
-        className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover:opacity-100"
+        className="text-muted-foreground hover:bg-accent hover:text-accent-foreground inline-flex h-5 w-5 items-center justify-center rounded opacity-0 transition-opacity group-hover:opacity-100"
         title="Log work"
       >
         <Plus className="h-3 w-3" />
@@ -85,7 +85,7 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
         <h4 className="text-[13px] font-semibold">Log Work</h4>
 
         <div className="space-y-1.5">
-          <label className="text-[11px] font-medium text-muted-foreground">Date</label>
+          <label className="text-muted-foreground text-[11px] font-medium">Date</label>
           <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
             <PopoverTrigger asChild>
               <Button
@@ -112,7 +112,7 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
         </div>
 
         <div className="space-y-1.5">
-          <label className="text-[11px] font-medium text-muted-foreground">Time Spent</label>
+          <label className="text-muted-foreground text-[11px] font-medium">Time Spent</label>
           <Input
             autoFocus
             placeholder="e.g. 1d 2h 30m"
@@ -126,7 +126,7 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
         </div>
 
         <div className="space-y-1.5">
-          <label className="text-[11px] font-medium text-muted-foreground">Comment</label>
+          <label className="text-muted-foreground text-[11px] font-medium">Comment</label>
           <Textarea
             placeholder="What did you work on?"
             className="min-h-[50px] text-[13px]"

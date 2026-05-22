@@ -18,19 +18,42 @@ export default defineConfig(async () => ({
     rollupOptions: {
       output: {
         manualChunks: (id) => {
-          if (id.includes("node_modules/recharts") || id.includes("node_modules/d3-") || id.includes("node_modules/victory-vendor")) {
+          if (
+            id.includes("node_modules/recharts") ||
+            id.includes("node_modules/d3-") ||
+            id.includes("node_modules/victory-vendor")
+          ) {
             return "vendor-charts";
           }
           if (id.includes("node_modules/react-dom")) {
             return "vendor-react-dom";
           }
-          if (id.includes("node_modules/react") && !id.includes("node_modules/recharts") && !id.includes("node_modules/react-resizable-panels") && !id.includes("node_modules/react-day-picker")) {
+          if (
+            id.includes("node_modules/react") &&
+            !id.includes("node_modules/recharts") &&
+            !id.includes("node_modules/react-resizable-panels") &&
+            !id.includes("node_modules/react-day-picker")
+          ) {
             return "vendor-react";
           }
-          if (id.includes("node_modules/@radix-ui") || id.includes("node_modules/lucide-react") || id.includes("node_modules/cmdk") || id.includes("node_modules/vaul") || id.includes("node_modules/sonner") || id.includes("node_modules/react-resizable-panels") || id.includes("node_modules/react-day-picker") || id.includes("node_modules/embla-carousel") || id.includes("node_modules/input-otp")) {
+          if (
+            id.includes("node_modules/@radix-ui") ||
+            id.includes("node_modules/lucide-react") ||
+            id.includes("node_modules/cmdk") ||
+            id.includes("node_modules/vaul") ||
+            id.includes("node_modules/sonner") ||
+            id.includes("node_modules/react-resizable-panels") ||
+            id.includes("node_modules/react-day-picker") ||
+            id.includes("node_modules/embla-carousel") ||
+            id.includes("node_modules/input-otp")
+          ) {
             return "vendor-ui";
           }
-          if (id.includes("node_modules/dexie") || id.includes("node_modules/zustand") || id.includes("node_modules/immer")) {
+          if (
+            id.includes("node_modules/dexie") ||
+            id.includes("node_modules/zustand") ||
+            id.includes("node_modules/immer")
+          ) {
             return "vendor-data";
           }
           if (id.includes("node_modules/@tauri-apps")) {
@@ -52,10 +75,10 @@ export default defineConfig(async () => ({
     host: host || false,
     hmr: host
       ? {
-        protocol: "ws",
-        host,
-        port: 1421,
-      }
+          protocol: "ws",
+          host,
+          port: 1421,
+        }
       : undefined,
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`

@@ -50,7 +50,7 @@ function applyMarks(text: string, marks?: AdfMark[]): React.ReactNode {
         break;
       case "code":
         node = (
-          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.9em] text-foreground">
+          <code className="bg-muted text-foreground rounded px-1 py-0.5 font-mono text-[0.9em]">
             {node}
           </code>
         );
@@ -226,7 +226,7 @@ function renderNode(node: AdfNode, key: number): React.ReactNode {
       return (
         <blockquote
           key={key}
-          className="border-l-[3px] border-border pl-3 text-[13px] italic text-muted-foreground [&>p]:m-0"
+          className="border-border text-muted-foreground border-l-[3px] pl-3 text-[13px] italic [&>p]:m-0"
         >
           {node.content?.map((child, i) => renderNode(child, i))}
         </blockquote>
@@ -239,10 +239,10 @@ function renderNode(node: AdfNode, key: number): React.ReactNode {
       return (
         <pre
           key={key}
-          className="my-2 overflow-x-auto rounded-md bg-muted p-3 font-mono text-[12px] leading-relaxed"
+          className="bg-muted my-2 overflow-x-auto rounded-md p-3 font-mono text-[12px] leading-relaxed"
         >
           {lang && (
-            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+            <div className="text-muted-foreground/70 mb-1.5 text-[10px] font-semibold tracking-wider uppercase">
               {lang}
             </div>
           )}
@@ -253,7 +253,7 @@ function renderNode(node: AdfNode, key: number): React.ReactNode {
 
     // ── Block: horizontal rule ────────────────────────────────────────────────
     case "rule":
-      return <hr key={key} className="my-3 border-border" />;
+      return <hr key={key} className="border-border my-3" />;
 
     // ── Block: panel (info / note / warning / error / success) ───────────────
     case "panel": {
@@ -281,7 +281,7 @@ function renderNode(node: AdfNode, key: number): React.ReactNode {
       return (
         <span
           key={key}
-          className="rounded bg-primary/10 px-1 py-0.5 text-[12px] font-medium text-primary"
+          className="bg-primary/10 text-primary rounded px-1 py-0.5 text-[12px] font-medium"
         >
           @{(node.attrs?.text as string) ?? (node.attrs?.id as string)}
         </span>
@@ -300,7 +300,7 @@ function renderNode(node: AdfNode, key: number): React.ReactNode {
       return (
         <span
           key={key}
-          className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide"
+          className="bg-muted inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium tracking-wide uppercase"
         >
           {node.attrs?.text as string}
         </span>
@@ -314,7 +314,7 @@ function renderNode(node: AdfNode, key: number): React.ReactNode {
         <a
           key={key}
           href={url}
-          className="break-all text-[13px] text-primary underline hover:opacity-80"
+          className="text-primary text-[13px] break-all underline hover:opacity-80"
           target="_blank"
           rel="noopener noreferrer"
           onClick={(e) => e.stopPropagation()}
@@ -341,7 +341,7 @@ function renderNode(node: AdfNode, key: number): React.ReactNode {
       return (
         <th
           key={key}
-          className="border border-border bg-muted/70 px-2 py-1.5 text-left text-[12px] font-semibold"
+          className="border-border bg-muted/70 border px-2 py-1.5 text-left text-[12px] font-semibold"
           colSpan={node.attrs?.colspan as number | undefined}
           rowSpan={node.attrs?.rowspan as number | undefined}
         >
@@ -353,7 +353,7 @@ function renderNode(node: AdfNode, key: number): React.ReactNode {
       return (
         <td
           key={key}
-          className="border border-border px-2 py-1.5 align-top [&>p]:m-0"
+          className="border-border border px-2 py-1.5 align-top [&>p]:m-0"
           colSpan={node.attrs?.colspan as number | undefined}
           rowSpan={node.attrs?.rowspan as number | undefined}
         >
@@ -374,7 +374,7 @@ function renderNode(node: AdfNode, key: number): React.ReactNode {
       return (
         <div
           key={key}
-          className="flex h-10 items-center gap-2 rounded-md border border-dashed border-border bg-muted/40 px-3 text-[12px] text-muted-foreground"
+          className="border-border bg-muted/40 text-muted-foreground flex h-10 items-center gap-2 rounded-md border border-dashed px-3 text-[12px]"
         >
           📎 {node.attrs?.type === "file" ? "File attachment" : "Media"}
         </div>
@@ -385,11 +385,11 @@ function renderNode(node: AdfNode, key: number): React.ReactNode {
     case "nestedExpand": {
       const title = node.attrs?.title as string | undefined;
       return (
-        <details key={key} className="my-1.5 rounded-md border border-border">
-          <summary className="cursor-pointer px-3 py-2 text-[13px] font-medium hover:bg-muted/40">
+        <details key={key} className="border-border my-1.5 rounded-md border">
+          <summary className="hover:bg-muted/40 cursor-pointer px-3 py-2 text-[13px] font-medium">
             {title || "Details"}
           </summary>
-          <div className="px-3 pb-2 pt-1">
+          <div className="px-3 pt-1 pb-2">
             {node.content?.map((child, i) => renderNode(child, i))}
           </div>
         </details>
@@ -424,7 +424,7 @@ export function AdfRenderer({ content, className }: AdfRendererProps) {
 
   if (adf) {
     return (
-      <div className={cn("text-[13px] leading-relaxed text-foreground", className)}>
+      <div className={cn("text-foreground text-[13px] leading-relaxed", className)}>
         {adf.content?.map((child, i) => renderNode(child, i))}
       </div>
     );
@@ -433,7 +433,7 @@ export function AdfRenderer({ content, className }: AdfRendererProps) {
   // ── Plain-text fallback ───────────────────────────────────────────────────
   const paragraphs = normalizedContent.split(/\n{2,}/).filter(Boolean);
   return (
-    <div className={cn("space-y-2 text-[13px] leading-relaxed text-muted-foreground", className)}>
+    <div className={cn("text-muted-foreground space-y-2 text-[13px] leading-relaxed", className)}>
       {paragraphs.map((para, i) => (
         <p key={i}>
           {para.split("\n").map((line, j) => (

@@ -29,8 +29,8 @@ export function StatusBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium leading-tight",
-        truncate && "min-w-0 max-w-[10em]",
+        "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] leading-tight font-medium",
+        truncate && "max-w-[10em] min-w-0",
         colorClass,
         className,
       )}

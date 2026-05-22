@@ -29,7 +29,7 @@ export function MobileSidebar({ onOpenSettings }: MobileSidebarProps) {
         </Button>
       </SheetTrigger>
       <SheetContent side="right" className="flex w-[280px] flex-col p-0">
-        <SheetTitle className="border-b border-border px-3 py-3 text-[13px] font-semibold">
+        <SheetTitle className="border-border border-b px-3 py-3 text-[13px] font-semibold">
           Task Manager
         </SheetTitle>
         <div className="flex-1 overflow-y-auto p-2">
@@ -38,7 +38,7 @@ export function MobileSidebar({ onOpenSettings }: MobileSidebarProps) {
             className={cn(
               "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]",
               !selectedProjectId
-                ? "bg-primary/10 font-medium text-primary"
+                ? "bg-primary/10 text-primary font-medium"
                 : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
             )}
           >
@@ -51,7 +51,7 @@ export function MobileSidebar({ onOpenSettings }: MobileSidebarProps) {
             if (orgProjects.length === 0) return null;
             return (
               <Collapsible key={org.id} defaultOpen className="mt-3">
-                <CollapsibleTrigger className="flex w-full items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <CollapsibleTrigger className="text-muted-foreground flex w-full items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold tracking-wider uppercase">
                   <ChevronDown className="h-3 w-3" />
                   {org.name}
                 </CollapsibleTrigger>
@@ -63,13 +63,13 @@ export function MobileSidebar({ onOpenSettings }: MobileSidebarProps) {
                       className={cn(
                         "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]",
                         selectedProjectId === project.id
-                          ? "bg-primary/10 font-medium text-primary"
+                          ? "bg-primary/10 text-primary font-medium"
                           : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                       )}
                     >
                       <FolderKanban className="h-3.5 w-3.5" />
                       <span className="truncate">{project.name}</span>
-                      <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+                      <span className="text-muted-foreground ml-auto font-mono text-[10px]">
                         {project.jiraProjectKey}
                       </span>
                     </button>
@@ -79,10 +79,10 @@ export function MobileSidebar({ onOpenSettings }: MobileSidebarProps) {
             );
           })}
         </div>
-        <div className="border-t border-border p-2">
+        <div className="border-border border-t p-2">
           <Button
             variant="ghost"
-            className="h-9 w-full justify-start gap-2 text-[13px] text-muted-foreground"
+            className="text-muted-foreground h-9 w-full justify-start gap-2 text-[13px]"
             onClick={() => {
               setOpen(false);
               onOpenSettings();

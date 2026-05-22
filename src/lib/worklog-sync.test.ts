@@ -45,15 +45,13 @@ describe("isPendingCreateWorkLog", () => {
   });
 
   it("returns true when jiraWorklogId is null and syncStatus is not pending_delete", () => {
-    expect(
-      isPendingCreateWorkLog(makeLog({ jiraWorklogId: null, syncStatus: "synced" })),
-    ).toBe(true);
+    expect(isPendingCreateWorkLog(makeLog({ jiraWorklogId: null, syncStatus: "synced" }))).toBe(
+      true,
+    );
   });
 
   it("returns true when jiraWorklogId is null and syncStatus is null", () => {
-    expect(
-      isPendingCreateWorkLog(makeLog({ jiraWorklogId: null, syncStatus: null })),
-    ).toBe(true);
+    expect(isPendingCreateWorkLog(makeLog({ jiraWorklogId: null, syncStatus: null }))).toBe(true);
   });
 
   it("returns false when jiraWorklogId is null but syncStatus is pending_delete", () => {

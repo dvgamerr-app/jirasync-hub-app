@@ -20,18 +20,18 @@ export function TitleBar() {
   };
 
   return (
-    <div className="flex h-10 shrink-0 select-none items-center justify-between border-b border-border bg-card/85 backdrop-blur">
+    <div className="border-border bg-card/85 flex h-10 shrink-0 items-center justify-between border-b backdrop-blur select-none">
       <div className="flex h-full min-w-0 flex-1 items-center px-3" onMouseDown={onDragMouseDown}>
-        <span className="truncate text-[13px] font-semibold tracking-wide text-foreground">
+        <span className="text-foreground truncate text-[13px] font-semibold tracking-wide">
           JiraSync Hub
         </span>
       </div>
 
-      <div className="flex h-full items-center border-l border-border/70">
+      <div className="border-border/70 flex h-full items-center border-l">
         <button
           type="button"
           onClick={() => void minimizeWindow()}
-          className="flex h-full w-11 items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          className="text-muted-foreground hover:bg-accent hover:text-accent-foreground flex h-full w-11 items-center justify-center"
           title="Minimize"
           aria-label="Minimize window"
         >
@@ -40,7 +40,7 @@ export function TitleBar() {
         <button
           type="button"
           onClick={() => void toggleWindowMaximize()}
-          className="flex h-full w-11 items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          className="text-muted-foreground hover:bg-accent hover:text-accent-foreground flex h-full w-11 items-center justify-center"
           title="Maximize"
           aria-label="Toggle maximize window"
         >
@@ -49,7 +49,7 @@ export function TitleBar() {
         <button
           type="button"
           onClick={() => void closeWindow()}
-          className="flex h-full w-11 items-center justify-center text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
+          className="text-muted-foreground hover:bg-destructive hover:text-destructive-foreground flex h-full w-11 items-center justify-center"
           title="Close"
           aria-label="Close window"
         >

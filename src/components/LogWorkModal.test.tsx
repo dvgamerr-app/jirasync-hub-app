@@ -48,10 +48,7 @@ vi.mock("@/components/ui/popover", () => ({
     onOpenChange?: (open: boolean) => void;
     children: ReactNode;
   }) => (
-    <div
-      data-open={String(open ?? false)}
-      onClick={() => onOpenChange?.(!open)}
-    >
+    <div data-open={String(open ?? false)} onClick={() => onOpenChange?.(!open)}>
       {children}
     </div>
   ),
@@ -153,9 +150,7 @@ describe("LogWorkModal — button variant (default)", () => {
     });
 
     expect(onLog).not.toHaveBeenCalled();
-    expect(toastMock).toHaveBeenCalledWith(
-      expect.objectContaining({ variant: "destructive" }),
-    );
+    expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({ variant: "destructive" }));
   });
 
   it("submits on Enter keydown in the time input", async () => {
@@ -182,9 +177,7 @@ describe("LogWorkModal — button variant (default)", () => {
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     });
 
-    expect(onLog).toHaveBeenCalledWith(
-      expect.objectContaining({ timeSpentMinutes: 120 }),
-    );
+    expect(onLog).toHaveBeenCalledWith(expect.objectContaining({ timeSpentMinutes: 120 }));
   });
 });
 

@@ -58,7 +58,7 @@ const App = () => {
         <Toaster />
         <Sonner />
         <ResizeHandles />
-        <div className="flex h-screen flex-col overflow-hidden bg-background">
+        <div className="bg-background flex h-screen flex-col overflow-hidden">
           {showCustomTitlebar && <TitleBar />}
           <div className="flex-1 overflow-hidden">
             <HashRouter>

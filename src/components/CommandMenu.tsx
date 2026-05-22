@@ -14,7 +14,10 @@ interface CommandMenuProps {
   onOpenChange?: (open: boolean) => void;
 }
 
-export function CommandMenu({ open: controlledOpen, onOpenChange: controlledOnOpenChange }: CommandMenuProps = {}) {
+export function CommandMenu({
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
+}: CommandMenuProps = {}) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
   const setOpen = controlledOnOpenChange ?? setInternalOpen;
@@ -24,12 +27,12 @@ export function CommandMenu({ open: controlledOpen, onOpenChange: controlledOnOp
     const down = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        setOpen(!open);
+        setOpen((prev) => !prev);
       }
     };
     document.addEventListener("keydown", down);
     return () => document.removeEventListener("keydown", down);
-  }, []);
+  }, [setOpen]);
 
   const handleSelectTask = (taskId: string) => {
     const task = tasks.find((t) => t.id === taskId);
@@ -53,7 +56,7 @@ export function CommandMenu({ open: controlledOpen, onOpenChange: controlledOnOp
               onSelect={() => handleSelectTask(task.id)}
               className="text-[13px]"
             >
-              <span className="mr-2 font-mono text-[11px] text-muted-foreground">
+              <span className="text-muted-foreground mr-2 font-mono text-[11px]">
                 {task.jiraTaskId}
               </span>
               {task.title}
@@ -72,7 +75,7 @@ export function CommandMenu({ open: controlledOpen, onOpenChange: controlledOnOp
               }}
               className="text-[13px]"
             >
-              <span className="mr-2 font-mono text-[11px] text-muted-foreground">
+              <span className="text-muted-foreground mr-2 font-mono text-[11px]">
                 {project.jiraProjectKey}
               </span>
               {project.name}

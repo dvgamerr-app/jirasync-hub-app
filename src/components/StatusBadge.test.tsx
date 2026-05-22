@@ -87,10 +87,16 @@ describe("StatusBadge", () => {
 
   it("works for all known statuses without throwing", async () => {
     const statuses = [
-      "To Do", "Backlog", "Open",
-      "In Progress", "In Review", "Review",
-      "QA", "Testing",
-      "Done", "Closed",
+      "To Do",
+      "Backlog",
+      "Open",
+      "In Progress",
+      "In Review",
+      "Review",
+      "QA",
+      "Testing",
+      "Done",
+      "Closed",
     ];
     for (const status of statuses) {
       await act(async () => {

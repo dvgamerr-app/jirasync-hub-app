@@ -81,9 +81,7 @@ describe("TitleBar", () => {
     expect(dragArea).not.toBeNull();
 
     await act(async () => {
-      dragArea?.dispatchEvent(
-        new MouseEvent("mousedown", { bubbles: true, button: 0, detail: 2 }),
-      );
+      dragArea?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0, detail: 2 }));
     });
 
     expect(toggleWindowMaximizeMock).toHaveBeenCalledOnce();
@@ -94,9 +92,7 @@ describe("TitleBar", () => {
     const dragArea = container.querySelector("div.flex-1") as HTMLElement | null;
 
     await act(async () => {
-      dragArea?.dispatchEvent(
-        new MouseEvent("mousedown", { bubbles: true, button: 0, detail: 1 }),
-      );
+      dragArea?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0, detail: 1 }));
     });
 
     expect(startWindowDraggingMock).toHaveBeenCalledOnce();
@@ -107,9 +103,7 @@ describe("TitleBar", () => {
     const dragArea = container.querySelector("div.flex-1") as HTMLElement | null;
 
     await act(async () => {
-      dragArea?.dispatchEvent(
-        new MouseEvent("mousedown", { bubbles: true, button: 2, detail: 1 }),
-      );
+      dragArea?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 2, detail: 1 }));
     });
 
     expect(startWindowDraggingMock).not.toHaveBeenCalled();
