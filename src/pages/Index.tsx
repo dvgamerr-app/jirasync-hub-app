@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { TaskTable } from "@/components/TaskTable";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
