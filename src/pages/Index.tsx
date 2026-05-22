@@ -230,7 +230,7 @@ const Index = () => {
       </div>
 
       <div className="flex flex-1 flex-col overflow-hidden">
-        <header className="border-border flex min-h-11 flex-wrap items-center justify-between gap-2 border-b px-4 py-2">
+        <header className="border-border flex h-11 shrink-0 items-center justify-between gap-2 border-b px-4">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-[13px] font-semibold">
               {currentProject ? currentProject.name : "All Tasks"}

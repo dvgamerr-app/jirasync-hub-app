@@ -1877,7 +1877,7 @@ dependencies = [
 
 [[package]]
 name = "jirasync-hub-app"
-version = "0.4.0"
+version = "0.0.0"
 dependencies = [
  "objc2-app-kit",
  "tauri",
