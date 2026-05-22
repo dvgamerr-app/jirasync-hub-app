@@ -36,8 +36,8 @@ jobs:
       matrix:
         include:
           # macOS universal binary (Apple Silicon + Intel in one file)
-          # - platform: macos-latest
-          #   args: --target universal-apple-darwin
+          - platform: macos-latest
+            args: --target universal-apple-darwin
 
           # Linux (AppImage + deb)
           - platform: ubuntu-22.04
@@ -93,13 +93,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-          # ── macOS code signing (optional, set in repo secrets) ──────────
-          # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          # APPLE_ID: ${{ secrets.APPLE_ID }}
-          # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # ── macOS ad-hoc signing (no Apple Developer cert required) ─────
+          APPLE_SIGNING_IDENTITY: "-"
 
           # ── Tauri updater signing (optional) ────────────────────────────
           # TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -108,6 +103,6 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "JiraSync Hub ${{ github.ref_name }}"
           releaseBody: ${{ needs.changelog.outputs.body }}
-          releaseDraft: true # set false if you want immediate publish
+          releaseDraft: false
           prerelease: ${{ contains(github.ref_name, '-') }} # e.g. v1.0.0-beta → prerelease
           args: ${{ matrix.args }}
