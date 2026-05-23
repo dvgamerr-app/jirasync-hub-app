@@ -1,14 +1,15 @@
+import "@/test/jsdom-setup";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, jest, mock } from "bun:test";
 import { TitleBar } from "@/components/TitleBar";
 
-const minimizeWindowMock = vi.fn();
-const toggleWindowMaximizeMock = vi.fn();
-const closeWindowMock = vi.fn();
-const startWindowDraggingMock = vi.fn();
+const minimizeWindowMock = mock();
+const toggleWindowMaximizeMock = mock();
+const closeWindowMock = mock();
+const startWindowDraggingMock = mock();
 
-vi.mock("@/lib/desktop", () => ({
+mock.module("@/lib/desktop", () => ({
   minimizeWindow: () => minimizeWindowMock(),
   toggleWindowMaximize: () => toggleWindowMaximizeMock(),
   closeWindow: () => closeWindowMock(),
@@ -34,7 +35,7 @@ describe("TitleBar", () => {
       root.unmount();
     });
     container.remove();
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   it("renders all three window control buttons", () => {

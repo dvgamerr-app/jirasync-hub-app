@@ -1,16 +1,12 @@
+import "@/test/jsdom-setup";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, mock, jest, spyOn } from "bun:test";
 import { MobileSidebar } from "@/components/MobileSidebar";
-import type { Organization, Project } from "@/types/jira";
+import { useTaskStore, type TaskStore } from "@/store/task-store";
+import type { Organization, Project, Task } from "@/types/jira";
 
-const useTaskStoreMock = vi.fn();
-
-vi.mock("@/store/task-store", () => ({
-  useTaskStore: () => useTaskStoreMock(),
-}));
-
-vi.mock("@/components/ui/button", () => ({
+mock.module("@/components/ui/button", () => ({
   Button: ({
     children,
     onClick,
@@ -21,8 +17,7 @@ vi.mock("@/components/ui/button", () => ({
     </button>
   ),
 }));
-
-vi.mock("@/components/ui/sheet", () => ({
+mock.module("@/components/ui/sheet", () => ({
   Sheet: ({
     open,
     onOpenChange,
@@ -44,8 +39,7 @@ vi.mock("@/components/ui/sheet", () => ({
   ),
   SheetTitle: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
-
-vi.mock("@/components/ui/collapsible", () => ({
+mock.module("@/components/ui/collapsible", () => ({
   Collapsible: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CollapsibleTrigger: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CollapsibleContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -57,7 +51,6 @@ const org: Organization = {
   jiraInstanceUrl: "https://acme.atlassian.net",
   lastSyncedAt: null,
 };
-
 const projectAlpha: Project = {
   id: "proj-account-1-ALPHA",
   orgId: org.id,
@@ -65,7 +58,6 @@ const projectAlpha: Project = {
   jiraProjectKey: "ALPHA",
   availableStatuses: [],
 };
-
 const projectBeta: Project = {
   id: "proj-account-1-BETA",
   orgId: org.id,
@@ -74,33 +66,54 @@ const projectBeta: Project = {
   availableStatuses: [],
 };
 
-function buildStoreState(overrides: Partial<ReturnType<typeof defaultState>> = {}) {
-  return { ...defaultState(), ...overrides };
-}
-
-function defaultState() {
+function makeActiveTask(id: string, projectId: string): Task {
   return {
-    organizations: [org],
-    selectedProjectId: null as string | null,
-    setSelectedProject: vi.fn(),
-    getVisibleProjects: () => [projectAlpha, projectBeta],
+    id,
+    projectId,
+    jiraTaskId: id,
+    title: id,
+    description: null,
+    status: "In Progress",
+    type: "Task",
+    severity: "Medium",
+    storyLevel: null,
+    mandays: null,
+    assignee: null,
+    refUrl: null,
+    note: null,
+    isSynced: true,
+    isDirty: false,
+    createdAt: "2026-03-20T10:00:00.000Z",
+    updatedAt: "2026-03-21T10:00:00.000Z",
   };
 }
 
 describe("MobileSidebar", () => {
   let container: HTMLDivElement;
   let root: Root;
-  let storeState: ReturnType<typeof buildStoreState>;
-  let onOpenSettings: () => void;
+  let onOpenSettings: ReturnType<typeof mock>;
+
+  let spies: Array<{ mockRestore(): void }>;
 
   beforeEach(async () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
-    storeState = buildStoreState();
-    onOpenSettings = vi.fn<() => void>();
-    useTaskStoreMock.mockImplementation(() => storeState);
+    onOpenSettings = mock();
+    spies = [];
+    // Use real computed functions with proper raw state
 
+    useTaskStore.setState({
+      organizations: [org],
+      projects: [projectAlpha, projectBeta],
+      tasks: [makeActiveTask("t1", projectAlpha.id), makeActiveTask("t2", projectBeta.id)],
+      workLogs: [],
+      selectedProjectId: null,
+      selectedTaskId: null,
+      taskStatusFilter: "active" as const,
+      searchQuery: "",
+      hiddenProjectIds: new Set<string>(),
+    } as Partial<TaskStore>);
     await act(async () => {
       root.render(<MobileSidebar onOpenSettings={onOpenSettings} />);
     });
@@ -111,7 +124,8 @@ describe("MobileSidebar", () => {
       root.unmount();
     });
     container.remove();
-    vi.clearAllMocks();
+    spies.forEach((s) => s.mockRestore());
+    jest.clearAllMocks();
   });
 
   it("lists all visible projects", () => {
@@ -125,23 +139,31 @@ describe("MobileSidebar", () => {
   });
 
   it("clicking All Tasks calls setSelectedProject(null)", async () => {
+    const spy = spyOn(useTaskStore.getState(), "setSelectedProject");
+    spies.push(spy);
+    // Re-render so component captures the spy
+    await act(async () => {
+      root.render(<MobileSidebar onOpenSettings={onOpenSettings} />);
+    });
     const allTasksBtn = Array.from(container.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("All Tasks"),
     );
     await act(async () => {
       allTasksBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(storeState.setSelectedProject).toHaveBeenCalledWith(null);
+    expect(spy).toHaveBeenCalledWith(null);
   });
 
   it("clicking a project calls setSelectedProject with project id", async () => {
+    const spy = spyOn(useTaskStore.getState(), "setSelectedProject");
+    spies.push(spy);
     const alphaBtn = Array.from(container.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("Project Alpha"),
     );
     await act(async () => {
       alphaBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(storeState.setSelectedProject).toHaveBeenCalledWith(projectAlpha.id);
+    expect(spy).toHaveBeenCalledWith(projectAlpha.id);
   });
 
   it("clicking Jira Settings calls onOpenSettings", async () => {
@@ -155,9 +177,9 @@ describe("MobileSidebar", () => {
   });
 
   it("does not render org section when it has no visible projects", async () => {
-    storeState = buildStoreState({ getVisibleProjects: () => [] });
-    useTaskStoreMock.mockImplementation(() => storeState);
     await act(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      useTaskStore.setState({ tasks: [] } as any); // No tasks = no visible projects
       root.render(<MobileSidebar onOpenSettings={onOpenSettings} />);
     });
     expect(container.textContent).not.toContain("Project Alpha");

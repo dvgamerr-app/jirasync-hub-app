@@ -1,16 +1,17 @@
+import "@/test/jsdom-setup";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, jest, mock } from "bun:test";
 import { LogWorkModal, type LogWorkPayload } from "@/components/LogWorkModal";
 
-const toastMock = vi.fn();
+const toastMock = mock();
 
-vi.mock("@/hooks/use-toast", () => ({
+mock.module("@/hooks/use-toast", () => ({
   toast: (...args: unknown[]) => toastMock(...args),
 }));
 
 // Stub heavy UI primitives so they render predictably
-vi.mock("@/components/ui/button", () => ({
+mock.module("@/components/ui/button", () => ({
   Button: ({
     children,
     onClick,
@@ -22,15 +23,15 @@ vi.mock("@/components/ui/button", () => ({
   ),
 }));
 
-vi.mock("@/components/ui/input", () => ({
+mock.module("@/components/ui/input", () => ({
   Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
 }));
 
-vi.mock("@/components/ui/textarea", () => ({
+mock.module("@/components/ui/textarea", () => ({
   Textarea: (props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => <textarea {...props} />,
 }));
 
-vi.mock("@/components/ui/calendar", () => ({
+mock.module("@/components/ui/calendar", () => ({
   Calendar: ({ onSelect }: { onSelect?: (date: Date | undefined) => void }) => (
     <button type="button" onClick={() => onSelect?.(new Date("2026-04-01"))}>
       Pick date
@@ -38,7 +39,7 @@ vi.mock("@/components/ui/calendar", () => ({
   ),
 }));
 
-vi.mock("@/components/ui/popover", () => ({
+mock.module("@/components/ui/popover", () => ({
   Popover: ({
     open,
     onOpenChange,
@@ -66,7 +67,7 @@ describe("LogWorkModal — button variant (default)", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
-    onLog = vi.fn<(payload: LogWorkPayload) => void>();
+    onLog = mock<(payload: LogWorkPayload) => void>();
 
     await act(async () => {
       root.render(<LogWorkModal taskId="task-1" onLog={onLog} />);
@@ -78,7 +79,7 @@ describe("LogWorkModal — button variant (default)", () => {
       root.unmount();
     });
     container.remove();
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   it("renders a Log Time button", () => {
@@ -107,16 +108,19 @@ describe("LogWorkModal — button variant (default)", () => {
     });
 
     const input = container.querySelector("input") as HTMLInputElement;
+
+    const propsKey = Object.keys(input).find((k) => k.startsWith("__reactProps"));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const reactProps = propsKey ? (input as any)[propsKey] : {};
+
     await act(async () => {
-      Object.defineProperty(input, "value", { value: "1h 30m", writable: true });
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      // Simulate React change event
       const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
         HTMLInputElement.prototype,
         "value",
       )?.set;
       nativeInputValueSetter?.call(input, "1h 30m");
-      input.dispatchEvent(new Event("change", { bubbles: true }));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      reactProps?.onChange?.({ target: input } as any);
     });
 
     const logWorkButton = Array.from(container.querySelectorAll("button")).find(
@@ -163,18 +167,26 @@ describe("LogWorkModal — button variant (default)", () => {
 
     const input = container.querySelector("input") as HTMLInputElement;
 
-    // Set value via native setter so React state sees it
+    const propsKey = Object.keys(input).find((k) => k.startsWith("__reactProps"));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const reactProps = propsKey ? (input as any)[propsKey] : {};
+
     await act(async () => {
       const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
         HTMLInputElement.prototype,
         "value",
       )?.set;
       nativeInputValueSetter?.call(input, "2h");
-      input.dispatchEvent(new Event("change", { bubbles: true }));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      reactProps?.onChange?.({ target: input } as any);
     });
 
     await act(async () => {
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      // Re-read props after re-render so onKeyDown closure captures updated timeInput
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const currentProps = propsKey ? (input as any)[propsKey] : {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      currentProps?.onKeyDown?.({ key: "Enter" } as any);
     });
 
     expect(onLog).toHaveBeenCalledWith(expect.objectContaining({ timeSpentMinutes: 120 }));
@@ -191,7 +203,7 @@ describe("LogWorkModal — inline variant", () => {
     root = createRoot(container);
 
     await act(async () => {
-      root.render(<LogWorkModal taskId="task-2" onLog={vi.fn()} variant="inline" />);
+      root.render(<LogWorkModal taskId="task-2" onLog={mock()} variant="inline" />);
     });
   });
 
@@ -200,7 +212,7 @@ describe("LogWorkModal — inline variant", () => {
       root.unmount();
     });
     container.remove();
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   it("renders a small plus-icon button instead of the full Log Time button", () => {

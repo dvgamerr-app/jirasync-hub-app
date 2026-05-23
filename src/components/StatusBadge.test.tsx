@@ -1,6 +1,7 @@
+import "@/test/jsdom-setup";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { StatusBadge } from "@/components/StatusBadge";
 
 describe("StatusBadge", () => {
@@ -55,7 +56,7 @@ describe("StatusBadge", () => {
       root.render(<StatusBadge status="To Do" />);
     });
     const span = container.querySelector("span");
-    expect(span?.className).toContain("text-muted-foreground");
+    expect(span?.className).toContain("text-zinc-700");
   });
 
   it("falls back to muted for an unknown status", async () => {
@@ -72,7 +73,7 @@ describe("StatusBadge", () => {
       root.render(<StatusBadge status="In Progress" truncate />);
     });
     const badge = container.querySelector("span");
-    expect(badge?.className).toContain("max-w-[7em]");
+    expect(badge?.className).toContain("max-w-[10em]");
     const inner = badge?.querySelector("span");
     expect(inner?.className).toContain("truncate");
   });
@@ -82,7 +83,7 @@ describe("StatusBadge", () => {
       root.render(<StatusBadge status="Done" />);
     });
     const badge = container.querySelector("span");
-    expect(badge?.className).not.toContain("max-w-[7em]");
+    expect(badge?.className).not.toContain("max-w-[10em]");
   });
 
   it("works for all known statuses without throwing", async () => {

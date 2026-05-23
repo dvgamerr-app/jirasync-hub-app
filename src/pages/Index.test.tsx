@@ -1,51 +1,34 @@
+import "@/test/jsdom-setup";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, jest, mock, spyOn } from "bun:test";
 import Index from "@/pages/Index";
+import { useTaskStore, type TaskStore } from "@/store/task-store";
 import type { Project, Task, WorkLog } from "@/types/jira";
 
-const useTaskStoreMock = vi.fn();
-const exportDialogMock = vi.fn();
-const getJiraAccountsMock = vi.fn();
-const onSyncStatusMock = vi.fn();
-const startBackgroundSyncMock = vi.fn();
-const stopBackgroundSyncMock = vi.fn();
-const syncNowMock = vi.fn();
-const toastMock = vi.fn();
-const jiraSettingsDialogMock = vi.fn();
+const exportDialogMock = mock();
+const getJiraAccountsMock = mock();
+const onSyncStatusMock = mock();
+const startBackgroundSyncMock = mock();
+const stopBackgroundSyncMock = mock();
+const syncNowMock = mock();
+const toastMock = mock();
+const jiraSettingsDialogMock = mock();
 
-vi.mock("@/store/task-store", () => ({
-  useTaskStore: () => useTaskStoreMock(),
-}));
-
-vi.mock("@/components/AppSidebar", () => ({
-  AppSidebar: () => <div>App Sidebar</div>,
-}));
-
-vi.mock("@/components/TaskTable", () => ({
-  TaskTable: () => <div>Task Table</div>,
-}));
-
-vi.mock("@/components/TaskDetailPanel", () => ({
+mock.module("@/components/AppSidebar", () => ({ AppSidebar: () => <div>App Sidebar</div> }));
+mock.module("@/components/TaskTable", () => ({ TaskTable: () => <div>Task Table</div> }));
+mock.module("@/components/TaskDetailPanel", () => ({
   TaskDetailPanel: () => <div>Task Detail</div>,
 }));
-
-vi.mock("@/components/CommandMenu", () => ({
-  CommandMenu: () => <div>Command Menu</div>,
-}));
-
-vi.mock("@/components/ThemeToggle", () => ({
-  ThemeToggle: () => <div>Theme Toggle</div>,
-}));
-
-vi.mock("@/components/MobileSidebar", () => ({
+mock.module("@/components/CommandMenu", () => ({ CommandMenu: () => <div>Command Menu</div> }));
+mock.module("@/components/ThemeToggle", () => ({ ThemeToggle: () => <div>Theme Toggle</div> }));
+mock.module("@/components/MobileSidebar", () => ({
   MobileSidebar: () => <div>Mobile Sidebar</div>,
 }));
 
-vi.mock("@/components/ExportDialog", () => ({
+mock.module("@/components/ExportDialog", () => ({
   ExportDialog: (props: { open: boolean; tasks: Array<{ id: string }> }) => {
     exportDialogMock(props);
-
     return (
       <div
         data-open={String(props.open)}
@@ -56,7 +39,7 @@ vi.mock("@/components/ExportDialog", () => ({
   },
 }));
 
-vi.mock("@/components/JiraSettings", () => ({
+mock.module("@/components/JiraSettings", () => ({
   JiraSettingsDialog: ({
     open,
     onOpenChange,
@@ -65,7 +48,6 @@ vi.mock("@/components/JiraSettings", () => ({
     onOpenChange: (open: boolean) => void;
   }) => {
     jiraSettingsDialogMock({ open, onOpenChange });
-
     return (
       <div data-open={String(open)}>
         Jira Settings
@@ -79,23 +61,55 @@ vi.mock("@/components/JiraSettings", () => ({
   },
 }));
 
-vi.mock("@/hooks/use-mobile", () => ({
-  useIsMobile: () => false,
-}));
-
-vi.mock("@/hooks/use-toast", () => ({
-  toast: (...args: unknown[]) => toastMock(...args),
-}));
-
-vi.mock("@/lib/sync-service", () => ({
+mock.module("@/hooks/use-mobile", () => ({ useIsMobile: () => false }));
+mock.module("@/hooks/use-toast", () => ({ toast: (...args: unknown[]) => toastMock(...args) }));
+mock.module("@/lib/sync-service", () => ({
   onSyncStatus: (...args: unknown[]) => onSyncStatusMock(...args),
   startBackgroundSync: (...args: unknown[]) => startBackgroundSyncMock(...args),
   stopBackgroundSync: (...args: unknown[]) => stopBackgroundSyncMock(...args),
   syncNow: (...args: unknown[]) => syncNowMock(...args),
 }));
-
-vi.mock("@/lib/jira-db", () => ({
+mock.module("@/lib/jira-db", () => ({
   getJiraAccounts: () => getJiraAccountsMock(),
+  getStoryPointFieldMap: () => ({}),
+  db: {
+    organizations: {
+      toArray: mock(async () => []),
+      put: mock(),
+      delete: mock(),
+      where: mock(() => ({
+        equals: mock(() => ({ toArray: mock(async () => []), delete: mock() })),
+      })),
+    },
+    projects: {
+      toArray: mock(async () => []),
+      put: mock(),
+      where: mock(() => ({
+        equals: mock(() => ({ toArray: mock(async () => []), delete: mock() })),
+      })),
+    },
+    tasks: {
+      toArray: mock(async () => []),
+      put: mock(),
+      get: mock(async () => undefined),
+      where: mock(() => ({
+        equals: mock(() => ({ toArray: mock(async () => []), delete: mock() })),
+      })),
+      toCollection: mock(() => ({ filter: () => ({ delete: mock() }) })),
+    },
+    workLogs: {
+      toArray: mock(async () => []),
+      put: mock(),
+      bulkPut: mock(),
+      delete: mock(),
+      bulkDelete: mock(),
+      where: mock(() => ({
+        equals: mock(() => ({ toArray: mock(async () => []), delete: mock() })),
+      })),
+      toCollection: mock(() => ({ filter: () => ({ delete: mock() }) })),
+    },
+    syncMeta: { put: mock(), get: mock(async () => undefined) },
+  },
 }));
 
 const projectAlpha: Project = {
@@ -112,22 +126,6 @@ const projectBeta: Project = {
   name: "Project Beta",
   jiraProjectKey: "BETA",
   availableStatuses: [],
-};
-
-type IndexStoreState = {
-  tasks: Task[];
-  selectedTaskId: string | null;
-  selectedProjectId: string | null;
-  taskStatusFilter: "active" | "done" | "all";
-  getFilteredTasks: () => Task[];
-  projects: Project[];
-  workLogs: WorkLog[];
-  syncAllDirtyTasks: () => Promise<void>;
-  getDirtyTaskCount: () => number;
-  loadFromDB: () => Promise<void>;
-  reloadFromDB: () => Promise<void>;
-  setTaskStatusFilter: (filter: "active" | "done" | "all") => void;
-  isLoaded: boolean;
 };
 
 function buildTask(id: string, projectId: string, jiraTaskId: string): Task {
@@ -152,31 +150,6 @@ function buildTask(id: string, projectId: string, jiraTaskId: string): Task {
   };
 }
 
-function buildStoreState(overrides?: Partial<IndexStoreState>): IndexStoreState {
-  return {
-    ...buildBaseStoreState(),
-    ...overrides,
-  };
-}
-
-function buildBaseStoreState(): IndexStoreState {
-  return {
-    tasks: [buildTask("task-account-1-ALPHA-1", projectAlpha.id, "ALPHA-1")],
-    selectedTaskId: null,
-    selectedProjectId: projectAlpha.id,
-    taskStatusFilter: "active" as const,
-    getFilteredTasks: () => [buildTask("task-account-1-ALPHA-1", projectAlpha.id, "ALPHA-1")],
-    projects: [projectAlpha, projectBeta],
-    workLogs: [],
-    syncAllDirtyTasks: vi.fn(async () => undefined),
-    getDirtyTaskCount: () => 0,
-    loadFromDB: vi.fn(async () => undefined),
-    reloadFromDB: vi.fn(async () => undefined),
-    setTaskStatusFilter: vi.fn(),
-    isLoaded: true,
-  };
-}
-
 function findButton(container: HTMLElement, label: string): HTMLButtonElement | undefined {
   return Array.from(container.querySelectorAll("button")).find((button) =>
     button.textContent?.includes(label),
@@ -187,18 +160,41 @@ describe("Index", () => {
   let container: HTMLDivElement;
   let root: Root;
 
+  let spies: Array<{ mockRestore(): void }>;
+
   beforeEach(() => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
+    spies = [];
 
     getJiraAccountsMock.mockReturnValue([]);
-    onSyncStatusMock.mockImplementation(() => vi.fn());
+    onSyncStatusMock.mockImplementation(() => mock());
     startBackgroundSyncMock.mockReset();
     stopBackgroundSyncMock.mockReset();
     syncNowMock.mockReset();
     exportDialogMock.mockReset();
     jiraSettingsDialogMock.mockReset();
+
+    const alphaTask = buildTask("task-account-1-ALPHA-1", projectAlpha.id, "ALPHA-1");
+    // Use real computed functions with proper raw state
+
+    useTaskStore.setState({
+      tasks: [alphaTask],
+      projects: [projectAlpha, projectBeta],
+      workLogs: [] as WorkLog[],
+      selectedTaskId: null,
+      selectedProjectId: projectAlpha.id,
+      taskStatusFilter: "active" as const,
+      searchQuery: "",
+      hiddenProjectIds: new Set<string>(),
+      isLoaded: true,
+    } as Partial<TaskStore>);
+
+    // Spy on loadFromDB/reloadFromDB to prevent overwriting test state
+    const loadSpy = spyOn(useTaskStore.getState(), "loadFromDB").mockResolvedValue(undefined);
+    const reloadSpy = spyOn(useTaskStore.getState(), "reloadFromDB").mockResolvedValue(undefined);
+    spies.push(loadSpy, reloadSpy);
   });
 
   afterEach(async () => {
@@ -206,48 +202,38 @@ describe("Index", () => {
       root.unmount();
     });
     container.remove();
-    vi.clearAllMocks();
+    spies.forEach((s) => s.mockRestore());
+    jest.clearAllMocks();
   });
 
   it("passes all tasks to ExportDialog even when a project filter is active", async () => {
     const alphaTask = buildTask("task-account-1-ALPHA-1", projectAlpha.id, "ALPHA-1");
     const betaTask = buildTask("task-account-1-BETA-1", projectBeta.id, "BETA-1");
-
-    useTaskStoreMock.mockImplementation(() =>
-      buildStoreState({
-        tasks: [alphaTask, betaTask],
-        selectedProjectId: projectAlpha.id,
-        getFilteredTasks: () => [alphaTask],
-      }),
-    );
+    useTaskStore.setState({
+      tasks: [alphaTask, betaTask],
+      selectedProjectId: projectAlpha.id,
+    } as Partial<TaskStore>);
 
     await act(async () => {
       root.render(<Index />);
     });
 
     const exportDialog = container.querySelector('[data-testid="export-dialog"]');
-
     expect(exportDialog?.getAttribute("data-task-count")).toBe("2");
     expect(container.textContent).toContain("Project Alpha");
   });
 
   it("keeps the export button enabled when the selected project has no visible tasks but other tasks exist", async () => {
     const alphaTask = buildTask("task-account-1-ALPHA-1", projectAlpha.id, "ALPHA-1");
-
-    useTaskStoreMock.mockImplementation(() =>
-      buildStoreState({
-        tasks: [alphaTask],
-        selectedProjectId: projectBeta.id,
-        getFilteredTasks: () => [],
-      }),
-    );
+    // selectedProjectId = beta, but tasks only have alpha => filteredTasks = []
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    useTaskStore.setState({ tasks: [alphaTask], selectedProjectId: projectBeta.id } as any);
 
     await act(async () => {
       root.render(<Index />);
     });
 
     const exportButton = findButton(container, "Export");
-
     expect(container.textContent).toContain("No matching tasks");
     expect(container.textContent).toContain("No active tasks match the current project selection.");
     expect(exportButton).toBeDefined();
@@ -255,8 +241,8 @@ describe("Index", () => {
   });
 
   it("lets users switch the task status filter", async () => {
-    const storeState = buildStoreState();
-    useTaskStoreMock.mockImplementation(() => storeState);
+    const spy = spyOn(useTaskStore.getState(), "setTaskStatusFilter");
+    spies.push(spy);
 
     await act(async () => {
       root.render(<Index />);
@@ -265,25 +251,18 @@ describe("Index", () => {
     const doneFilterButton = Array.from(container.querySelectorAll("button")).find(
       (button) => button.textContent?.trim() === "Done",
     );
-
     expect(doneFilterButton).toBeDefined();
 
     await act(async () => {
       doneFilterButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(storeState.setTaskStatusFilter).toHaveBeenCalledWith("done");
+    expect(spy).toHaveBeenCalledWith("done");
   });
 
   it("reloads the store when Jira Settings closes so sidebar ordering can refresh", async () => {
-    const storeState = buildStoreState({
-      tasks: [],
-      projects: [],
-      selectedProjectId: null,
-      getFilteredTasks: () => [],
-      reloadFromDB: vi.fn(async () => undefined),
-    });
-    useTaskStoreMock.mockImplementation(() => storeState);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    useTaskStore.setState({ tasks: [], projects: [], selectedProjectId: null } as any);
     getJiraAccountsMock.mockReturnValue([
       {
         id: "account-1",
@@ -293,6 +272,9 @@ describe("Index", () => {
         apiToken: "token",
       },
     ]);
+
+    // Use the reloadFromDB spy from beforeEach (restored in afterEach)
+    const reloadSpy = spies[1] as ReturnType<typeof spyOn>;
 
     await act(async () => {
       root.render(<Index />);
@@ -312,6 +294,6 @@ describe("Index", () => {
       closeSettingsButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(storeState.reloadFromDB).toHaveBeenCalledOnce();
+    expect(reloadSpy).toHaveBeenCalledOnce();
   });
 });

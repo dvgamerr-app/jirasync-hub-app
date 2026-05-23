@@ -1,14 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { fetchAssignedJiraData } from "@/lib/jira-api";
 import type { JiraAccount } from "@/lib/jira-db";
 
-const httpFetchMock = vi.fn();
+const httpFetchMock = mock();
 
-vi.mock("@tauri-apps/plugin-http", () => ({
+mock.module("@tauri-apps/plugin-http", () => ({
   fetch: (...args: unknown[]) => httpFetchMock(...args),
 }));
 
-vi.mock("@/lib/jira-db", () => ({
+mock.module("@/lib/jira-db", () => ({
   getJiraBaseUrl: (account: { instanceUrl: string }) => account.instanceUrl,
   getStoryPointFieldMap: () => ({}),
 }));
@@ -24,8 +24,8 @@ const account: JiraAccount = {
 function mockJsonResponse(payload: unknown): Response {
   return {
     ok: true,
-    json: vi.fn(async () => payload),
-    text: vi.fn(async () => JSON.stringify(payload)),
+    json: mock(async () => payload),
+    text: mock(async () => JSON.stringify(payload)),
   } as unknown as Response;
 }
 
@@ -83,7 +83,7 @@ describe("fetchAssignedJiraData", () => {
   });
 
   it("falls back to issue-derived statuses if project status lookup fails", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
 
     httpFetchMock.mockImplementation(async (url: string) => {
       if (url.endsWith("/rest/api/3/search/jql")) {
@@ -101,5 +101,7 @@ describe("fetchAssignedJiraData", () => {
 
     expect(result.projects[0].availableStatuses).toEqual(["QA"]);
     expect(warnSpy).toHaveBeenCalled();
+
+    warnSpy.mockRestore();
   });
 });

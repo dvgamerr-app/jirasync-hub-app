@@ -1,17 +1,12 @@
+import "@/test/jsdom-setup";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, mock, jest, spyOn } from "bun:test";
 import { CommandMenu } from "@/components/CommandMenu";
+import { useTaskStore, type TaskStore } from "@/store/task-store";
 import type { Project, Task } from "@/types/jira";
 
-const useTaskStoreMock = vi.fn();
-
-vi.mock("@/store/task-store", () => ({
-  useTaskStore: () => useTaskStoreMock(),
-}));
-
-// Minimal stubs for shadcn command primitives
-vi.mock("@/components/ui/command", () => ({
+mock.module("@/components/ui/command", () => ({
   CommandDialog: ({
     open,
     children,
@@ -52,7 +47,6 @@ const project: Project = {
   jiraProjectKey: "ALPHA",
   availableStatuses: [],
 };
-
 const task: Task = {
   id: "task-account-1-ALPHA-1",
   projectId: project.id,
@@ -73,38 +67,40 @@ const task: Task = {
   updatedAt: "2026-03-21T10:00:00.000Z",
 };
 
-function buildStoreState() {
-  return {
-    tasks: [task],
-    projects: [project],
-    setSelectedTask: vi.fn(),
-    setSelectedProject: vi.fn(),
-  };
-}
-
 describe("CommandMenu", () => {
   let container: HTMLDivElement;
   let root: Root;
-  let storeState: ReturnType<typeof buildStoreState>;
+  let setSelectedTask: ReturnType<typeof spyOn>;
+  let setSelectedProject: ReturnType<typeof spyOn>;
 
   beforeEach(async () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
-    storeState = buildStoreState();
-    useTaskStoreMock.mockImplementation(() => storeState);
 
+    useTaskStore.setState({
+      tasks: [task],
+      projects: [project],
+      taskStatusFilter: "active" as const,
+      selectedProjectId: null,
+      searchQuery: "",
+      hiddenProjectIds: new Set<string>(),
+    } as Partial<TaskStore>);
+    setSelectedTask = spyOn(useTaskStore.getState(), "setSelectedTask");
+    setSelectedProject = spyOn(useTaskStore.getState(), "setSelectedProject");
     await act(async () => {
       root.render(<CommandMenu />);
     });
   });
 
   afterEach(async () => {
+    setSelectedTask?.mockRestore?.();
+    setSelectedProject?.mockRestore?.();
     await act(async () => {
       root.unmount();
     });
     container.remove();
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   it("dialog is closed by default", () => {
@@ -117,7 +113,6 @@ describe("CommandMenu", () => {
         new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
       );
     });
-
     expect(container.querySelector('[data-testid="command-dialog"]')).not.toBeNull();
   });
 
@@ -127,7 +122,6 @@ describe("CommandMenu", () => {
         new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }),
       );
     });
-
     expect(container.querySelector('[data-testid="command-dialog"]')).not.toBeNull();
   });
 
@@ -135,7 +129,6 @@ describe("CommandMenu", () => {
     await act(async () => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", bubbles: true }));
     });
-
     expect(container.querySelector('[data-testid="command-dialog"]')).toBeNull();
   });
 
@@ -145,7 +138,6 @@ describe("CommandMenu", () => {
         new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
       );
     });
-
     const text = container.textContent ?? "";
     expect(text).toContain("ALPHA-1");
     expect(text).toContain("Fix login bug");
@@ -158,19 +150,15 @@ describe("CommandMenu", () => {
         new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
       );
     });
-
     const taskButton = Array.from(container.querySelectorAll("button")).find((btn) =>
       btn.textContent?.includes("Fix login bug"),
     );
     expect(taskButton).toBeDefined();
-
     await act(async () => {
       taskButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-
-    expect(storeState.setSelectedProject).toHaveBeenCalledWith(task.projectId);
-    expect(storeState.setSelectedTask).toHaveBeenCalledWith(task.id);
-    // Dialog should close
+    expect(setSelectedProject).toHaveBeenCalledWith(task.projectId);
+    expect(setSelectedTask).toHaveBeenCalledWith(task.id);
     expect(container.querySelector('[data-testid="command-dialog"]')).toBeNull();
   });
 
@@ -180,18 +168,15 @@ describe("CommandMenu", () => {
         new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
       );
     });
-
     const projectButton = Array.from(container.querySelectorAll("button")).find((btn) =>
       btn.textContent?.includes("Project Alpha"),
     );
     expect(projectButton).toBeDefined();
-
     await act(async () => {
       projectButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-
-    expect(storeState.setSelectedProject).toHaveBeenCalledWith(project.id);
-    expect(storeState.setSelectedTask).toHaveBeenCalledWith(null);
+    expect(setSelectedProject).toHaveBeenCalledWith(project.id);
+    expect(setSelectedTask).toHaveBeenCalledWith(null);
     expect(container.querySelector('[data-testid="command-dialog"]')).toBeNull();
   });
 
@@ -200,30 +185,23 @@ describe("CommandMenu", () => {
       root.unmount();
     });
     container.remove();
-
-    // Rebuild fresh container to avoid afterEach double-unmount
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => {
       root.render(<CommandMenu />);
     });
-
     await act(async () => {
       root.unmount();
     });
     container.remove();
-
     container = document.createElement("div");
     root = createRoot(container);
-
-    // Fire Ctrl+K after unmount — dialog should NOT be in document
     await act(async () => {
       document.dispatchEvent(
         new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
       );
     });
-
     expect(document.querySelector('[data-testid="command-dialog"]')).toBeNull();
   });
 });

@@ -1,10 +1,12 @@
+import "@/test/jsdom-setup";
 import type React from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, mock, jest } from "bun:test";
 import { JiraSettingsDialog } from "@/components/JiraSettings";
 
-const dbMocks = vi.hoisted(() => {
+// Function declarations are hoisted - available when mock.module factory runs
+function createDbMocks() {
   const accounts = [
     {
       id: "acc-1",
@@ -23,47 +25,53 @@ const dbMocks = vi.hoisted(() => {
   ];
 
   return {
-    getJiraAccounts: vi.fn(() => accounts),
-    addJiraAccount: vi.fn(),
-    updateJiraAccount: vi.fn(),
-    reorderJiraAccounts: vi.fn(() => [accounts[1], accounts[0]]),
-    removeJiraAccount: vi.fn(),
-    getStoryPointFieldMap: vi.fn(() => ({})),
-    saveStoryPointFieldMap: vi.fn(),
+    getJiraAccounts: mock(() => accounts),
+    addJiraAccount: mock(),
+    updateJiraAccount: mock(),
+    reorderJiraAccounts: mock(() => [accounts[1], accounts[0]]),
+    removeJiraAccount: mock(),
+    getStoryPointFieldMap: mock(() => ({})),
+    saveStoryPointFieldMap: mock(),
     db: {
       projects: {
-        where: vi.fn(() => ({
-          equals: vi.fn(() => ({
-            sortBy: vi.fn(async () => []),
+        where: mock(() => ({
+          equals: mock(() => ({
+            sortBy: mock(async () => []),
           })),
         })),
       },
     },
   };
+}
+
+// var hoisted as undefined; assigned inside mock.module factory
+let dbMocks: ReturnType<typeof createDbMocks>;
+
+mock.module("@/lib/jira-db", () => {
+  dbMocks = createDbMocks();
+  return dbMocks;
 });
 
-vi.mock("@/lib/jira-db", () => dbMocks);
-
-vi.mock("@/lib/jira-api", () => ({
-  testJiraConnection: vi.fn(async () => true),
-  fetchJiraFields: vi.fn(async () => []),
-  detectStoryPointCandidates: vi.fn(async () => []),
+mock.module("@/lib/jira-api", () => ({
+  testJiraConnection: mock(async () => true),
+  fetchJiraFields: mock(async () => []),
+  detectStoryPointCandidates: mock(async () => []),
 }));
 
-vi.mock("@/lib/sync-service", () => ({
-  startBackgroundSync: vi.fn(),
-  stopBackgroundSync: vi.fn(),
+mock.module("@/lib/sync-service", () => ({
+  startBackgroundSync: mock(),
+  stopBackgroundSync: mock(),
 }));
 
-vi.mock("@/lib/desktop", () => ({
-  openExternal: vi.fn(),
+mock.module("@/lib/desktop", () => ({
+  openExternal: mock(),
 }));
 
-vi.mock("@/hooks/use-toast", () => ({
-  toast: vi.fn(),
+mock.module("@/hooks/use-toast", () => ({
+  toast: mock(),
 }));
 
-vi.mock("@/components/ui/dialog", () => ({
+mock.module("@/components/ui/dialog", () => ({
   Dialog: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -71,7 +79,7 @@ vi.mock("@/components/ui/dialog", () => ({
   DialogDescription: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock("@/components/ui/button", () => ({
+mock.module("@/components/ui/button", () => ({
   Button: ({
     children,
     ...props
@@ -82,15 +90,15 @@ vi.mock("@/components/ui/button", () => ({
   ),
 }));
 
-vi.mock("@/components/ui/input", () => ({
+mock.module("@/components/ui/input", () => ({
   Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
 }));
 
-vi.mock("@/components/ui/label", () => ({
+mock.module("@/components/ui/label", () => ({
   Label: ({ children }: { children: React.ReactNode }) => <label>{children}</label>,
 }));
 
-vi.mock("@/components/ui/select", () => ({
+mock.module("@/components/ui/select", () => ({
   Select: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   SelectContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   SelectItem: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -121,7 +129,7 @@ describe("JiraSettingsDialog", () => {
       root.unmount();
     });
     container.remove();
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   it("reorders Jira connections by dragging the handle over another row", async () => {

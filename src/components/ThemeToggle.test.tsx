@@ -1,6 +1,7 @@
+import "@/test/jsdom-setup";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 describe("ThemeToggle", () => {
@@ -27,7 +28,7 @@ describe("ThemeToggle", () => {
     });
     container.remove();
     document.documentElement.classList.remove("dark");
-    vi.restoreAllMocks();
+    jest.restoreAllMocks();
   });
 
   it("renders a button", () => {

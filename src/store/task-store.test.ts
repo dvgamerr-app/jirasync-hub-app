@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { Organization, Project, Task, WorkLog } from "@/types/jira";
 
 type StoredTaskRow = Task;
 type StoredWorkLogRow = WorkLog;
 
-const mocked = vi.hoisted(() => {
+// Function declarations are hoisted - available when mock.module factories run
+function createMockState() {
   const accounts = [
     {
       id: "account-1",
@@ -49,89 +50,89 @@ const mocked = vi.hoisted(() => {
 
   const db = {
     organizations: {
-      toArray: vi.fn<() => Promise<Organization[]>>(async () => []),
-      delete: vi.fn(async () => undefined),
-      where: vi.fn(() => ({
-        equals: vi.fn(() => ({
-          toArray: vi.fn<() => Promise<Organization[]>>(async () => []),
-          delete: vi.fn(async () => undefined),
+      toArray: mock<() => Promise<Organization[]>>(async () => []),
+      delete: mock(async () => undefined),
+      where: mock(() => ({
+        equals: mock(() => ({
+          toArray: mock<() => Promise<Organization[]>>(async () => []),
+          delete: mock(async () => undefined),
         })),
       })),
     },
     projects: {
-      toArray: vi.fn<() => Promise<Project[]>>(async () => []),
-      where: vi.fn(() => ({
-        equals: vi.fn(() => ({
-          toArray: vi.fn<() => Promise<Project[]>>(async () => []),
-          delete: vi.fn(async () => undefined),
+      toArray: mock<() => Promise<Project[]>>(async () => []),
+      where: mock(() => ({
+        equals: mock(() => ({
+          toArray: mock<() => Promise<Project[]>>(async () => []),
+          delete: mock(async () => undefined),
         })),
       })),
     },
     tasks: {
-      put: vi.fn(async (task: StoredTaskRow) => {
+      put: mock(async (task: StoredTaskRow) => {
         tasks.set(task.id, task);
         return task.id;
       }),
-      get: vi.fn(async (id: string) => tasks.get(id)),
-      toArray: vi.fn(async () => Array.from(tasks.values())),
-      where: vi.fn((field: keyof StoredTaskRow) => ({
-        equals: vi.fn((value: unknown) => ({
-          toArray: vi.fn(async () => getByField(tasks, field, value)),
-          delete: vi.fn(async () => {
+      get: mock(async (id: string) => tasks.get(id)),
+      toArray: mock(async () => Array.from(tasks.values())),
+      where: mock((field: keyof StoredTaskRow) => ({
+        equals: mock((value: unknown) => ({
+          toArray: mock(async () => getByField(tasks, field, value)),
+          delete: mock(async () => {
             deleteByField(tasks, field, value);
           }),
         })),
       })),
-      toCollection: vi.fn(() => ({
+      toCollection: mock(() => ({
         filter: (predicate: (item: StoredTaskRow) => boolean) => ({
-          delete: vi.fn(async () => {
+          delete: mock(async () => {
             deleteByPredicate(tasks, predicate);
           }),
         }),
       })),
     },
     workLogs: {
-      put: vi.fn(async (workLog: StoredWorkLogRow) => {
+      put: mock(async (workLog: StoredWorkLogRow) => {
         workLogs.set(workLog.id, workLog);
         return workLog.id;
       }),
-      bulkPut: vi.fn(async (logs: StoredWorkLogRow[]) => {
+      bulkPut: mock(async (logs: StoredWorkLogRow[]) => {
         logs.forEach((log) => workLogs.set(log.id, log));
       }),
-      delete: vi.fn(async (id: string) => {
+      delete: mock(async (id: string) => {
         workLogs.delete(id);
       }),
-      bulkDelete: vi.fn(async (ids: string[]) => {
+      bulkDelete: mock(async (ids: string[]) => {
         ids.forEach((id) => workLogs.delete(id));
       }),
-      toArray: vi.fn(async () => Array.from(workLogs.values())),
-      where: vi.fn((field: keyof StoredWorkLogRow) => ({
-        equals: vi.fn((value: unknown) => ({
-          toArray: vi.fn(async () => getByField(workLogs, field, value)),
-          delete: vi.fn(async () => {
+      toArray: mock(async () => Array.from(workLogs.values())),
+      where: mock((field: keyof StoredWorkLogRow) => ({
+        equals: mock((value: unknown) => ({
+          toArray: mock(async () => getByField(workLogs, field, value)),
+          delete: mock(async () => {
             deleteByField(workLogs, field, value);
           }),
         })),
       })),
-      toCollection: vi.fn(() => ({
+      toCollection: mock(() => ({
         filter: (predicate: (item: StoredWorkLogRow) => boolean) => ({
-          delete: vi.fn(async () => {
+          delete: mock(async () => {
             deleteByPredicate(workLogs, predicate);
           }),
         }),
       })),
     },
     syncMeta: {
-      put: vi.fn(async () => undefined),
-      get: vi.fn(async () => undefined),
+      put: mock(async () => undefined),
+      get: mock(async () => undefined),
     },
   };
 
-  const getJiraAccounts = vi.fn(() => accounts);
-  const updateJiraIssue = vi.fn(async () => undefined);
-  const transitionJiraIssue = vi.fn(async () => undefined);
-  const addJiraWorkLog = vi.fn(async () => "jira-worklog-new");
-  const deleteJiraWorkLog = vi.fn(async () => undefined);
+  const getJiraAccounts = mock(() => accounts);
+  const updateJiraIssue = mock(async () => undefined);
+  const transitionJiraIssue = mock(async () => undefined);
+  const addJiraWorkLog = mock(async () => "jira-worklog-new");
+  const deleteJiraWorkLog = mock(async () => undefined);
 
   const reset = () => {
     tasks.clear();
@@ -176,19 +177,34 @@ const mocked = vi.hoisted(() => {
     deleteJiraWorkLog,
     reset,
   };
+}
+
+// var is hoisted as undefined; assigned inside the mock.module factory
+// so it's available for all subsequent module-level and test code
+let mocked: ReturnType<typeof createMockState>;
+
+mock.module("@/lib/jira-db", () => {
+  mocked = createMockState();
+  return {
+    db: mocked.db,
+    getJiraAccounts: mocked.getJiraAccounts,
+    getStoryPointFieldMap: () => ({}),
+  };
 });
 
-vi.mock("@/lib/jira-db", () => ({
-  db: mocked.db,
-  getJiraAccounts: mocked.getJiraAccounts,
-  getStoryPointFieldMap: () => ({}),
-}));
-
-vi.mock("@/lib/jira-api", () => ({
-  updateJiraIssue: mocked.updateJiraIssue,
-  transitionJiraIssue: mocked.transitionJiraIssue,
-  addJiraWorkLog: mocked.addJiraWorkLog,
-  deleteJiraWorkLog: mocked.deleteJiraWorkLog,
+mock.module("@/lib/jira-api", () => ({
+  get updateJiraIssue() {
+    return mocked?.updateJiraIssue;
+  },
+  get transitionJiraIssue() {
+    return mocked?.transitionJiraIssue;
+  },
+  get addJiraWorkLog() {
+    return mocked?.addJiraWorkLog;
+  },
+  get deleteJiraWorkLog() {
+    return mocked?.deleteJiraWorkLog;
+  },
 }));
 
 import { useTaskStore } from "@/store/task-store";
@@ -248,7 +264,7 @@ function seedStore(tasks: Task[], workLogs: WorkLog[], projects: Project[] = [])
   mocked.workLogs.clear();
   workLogs.forEach((workLog) => mocked.workLogs.set(workLog.id, workLog));
 
-  const reloadFromDB = vi.fn(async () => undefined);
+  const reloadFromDB = mock(async () => undefined);
 
   useTaskStore.setState({
     organizations: [],
@@ -284,6 +300,8 @@ describe("task-store manual worklog sync", () => {
       selectedTaskId: null,
       taskStatusFilter: "active",
       taskDetailViewMode: "details",
+      searchQuery: "",
+      hiddenProjectIds: new Set<string>(),
     });
   });
 
@@ -409,6 +427,8 @@ describe("task-store task status filters", () => {
       selectedTaskId: null,
       taskStatusFilter: "active",
       taskDetailViewMode: "details",
+      searchQuery: "",
+      hiddenProjectIds: new Set<string>(),
     });
   });
 
@@ -595,6 +615,8 @@ describe("task-store story level rules", () => {
       selectedTaskId: null,
       taskStatusFilter: "active",
       taskDetailViewMode: "details",
+      searchQuery: "",
+      hiddenProjectIds: new Set<string>(),
     });
   });
 

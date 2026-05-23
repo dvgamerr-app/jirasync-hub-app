@@ -21,11 +21,15 @@ import {
   isVisibleWorkLog,
   toSyncedWorkLog,
 } from "@/lib/worklog-sync";
+
+function getVisibleWorkLogsForTask(workLogs: WorkLog[], taskId: string): WorkLog[] {
+  return workLogs.filter((wl) => wl.taskId === taskId && isVisibleWorkLog(wl));
+}
 import { formatMandayEstimate } from "@/lib/worklog-time";
 
 export type TaskStatusFilter = "active" | "done" | "all";
 
-interface TaskStore {
+export interface TaskStore {
   organizations: Organization[];
   projects: Project[];
   tasks: Task[];
@@ -80,7 +84,7 @@ const SEVERITY_TO_PRIORITY: Record<string, string> = {
   Low: "Low",
 };
 
-const INACTIVE_STATUSES = new Set(["done", "closed", "cancelled", "cancel", "canceled"]);
+export const INACTIVE_STATUSES = new Set(["done", "closed", "cancelled", "cancel", "canceled"]);
 
 type ScopedTaskCollections = Pick<TaskStore, "organizations" | "projects" | "tasks" | "workLogs">;
 
@@ -565,6 +569,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const q = searchQuery.trim().toLowerCase();
         filtered = filtered.filter(
           (task) =>
+            task.jiraTaskId.toLowerCase().includes(q) ||
             task.title.toLowerCase().includes(q) ||
             (task.description && task.description.toLowerCase().includes(q)),
         );
@@ -586,15 +591,16 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     },
 
     getWorkLogsForTask: (taskId) =>
-      get()
-        .workLogs.filter((workLog) => workLog.taskId === taskId && isVisibleWorkLog(workLog))
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
+      getVisibleWorkLogsForTask(get().workLogs, taskId).sort((left, right) =>
+        right.createdAt.localeCompare(left.createdAt),
+      ),
 
     getTaskById: (taskId) => get().tasks.find((task) => task.id === taskId),
     getProjectById: (projectId) => get().projects.find((project) => project.id === projectId),
     getTotalTimeForTask: (taskId) =>
-      get()
-        .workLogs.filter((workLog) => workLog.taskId === taskId && isVisibleWorkLog(workLog))
-        .reduce((sum, workLog) => sum + workLog.timeSpentMinutes, 0),
+      getVisibleWorkLogsForTask(get().workLogs, taskId).reduce(
+        (sum, workLog) => sum + workLog.timeSpentMinutes,
+        0,
+      ),
   };
 });

@@ -1,23 +1,24 @@
+import "@/test/jsdom-setup";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, jest, mock } from "bun:test";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { useTaskStore } from "@/store/task-store";
 import type { Project, Task } from "@/types/jira";
 
-vi.mock("@/lib/desktop", () => ({
-  openExternal: vi.fn(),
+mock.module("@/lib/desktop", () => ({
+  openExternal: mock(),
 }));
 
-vi.mock("@/hooks/use-toast", () => ({
-  toast: vi.fn(),
+mock.module("@/hooks/use-toast", () => ({
+  toast: mock(),
 }));
 
-vi.mock("@/components/StatusBadge", () => ({
+mock.module("@/components/StatusBadge", () => ({
   StatusBadge: ({ status }: { status: string | null }) => <span>{status ?? "—"}</span>,
 }));
 
-vi.mock("@/components/LogWorkModal", () => ({
+mock.module("@/components/LogWorkModal", () => ({
   LogWorkModal: () => <button type="button">Log Time</button>,
   formatMinutes: (minutes: number) => `${minutes}m`,
   parseTimeInput: () => null,
@@ -118,7 +119,7 @@ describe("TaskDetailPanel", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
-    window.open = vi.fn();
+    window.open = mock();
 
     useTaskStore.setState({
       organizations: [],
@@ -142,7 +143,7 @@ describe("TaskDetailPanel", () => {
       root.unmount();
     });
     container.remove();
-    vi.clearAllMocks();
+    jest.clearAllMocks();
     useTaskStore.setState({
       organizations: [],
       projects: [],

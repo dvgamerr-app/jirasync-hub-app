@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { hasAdfContent } from "@/lib/adf-content";
 
 function adfDoc(content: unknown[]): string {

@@ -1,54 +1,75 @@
+import "@/test/jsdom-setup";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, mock, jest, spyOn } from "bun:test";
 import { AppSidebar } from "@/components/AppSidebar";
+import { useTaskStore, type TaskStore } from "@/store/task-store";
+import type { Task } from "@/types/jira";
 
-const useTaskStoreMock = vi.fn();
-const getLastSyncTimeMock = vi.fn(async () => null as string | null);
+const getLastSyncTimeMock = mock(async () => null as string | null);
 
-vi.mock("@/store/task-store", () => ({
-  useTaskStore: () => useTaskStoreMock(),
-}));
-
-vi.mock("@/lib/sync-service", () => ({
+mock.module("@/lib/sync-service", () => ({
   getLastSyncTime: () => getLastSyncTimeMock(),
   onSyncStatus: () => () => {},
 }));
 
-function buildStoreState(overrides: Record<string, unknown> = {}) {
-  return {
-    organizations: [
-      { id: "org-1", name: "Acme", jiraInstanceUrl: "https://acme.test", lastSyncedAt: null },
-    ],
-    selectedProjectId: null as string | null,
-    setSelectedProject: vi.fn(),
-    getVisibleProjects: () => [
-      {
-        id: "proj-1",
-        orgId: "org-1",
-        name: "Project Alpha",
-        jiraProjectKey: "ALPHA",
-        availableStatuses: [],
-      },
-    ],
-    ...overrides,
-  };
-}
+const projectAlpha = {
+  id: "proj-1",
+  orgId: "org-1",
+  name: "Project Alpha",
+  jiraProjectKey: "ALPHA",
+  availableStatuses: [],
+};
+const org = { id: "org-1", name: "Acme", jiraInstanceUrl: "https://acme.test", lastSyncedAt: null };
+const activeTask: Task = {
+  id: "task-1",
+  projectId: "proj-1",
+  jiraTaskId: "ALPHA-1",
+  title: "Task",
+  description: null,
+  status: "In Progress",
+  type: "Task",
+  severity: "Medium",
+  storyLevel: null,
+  mandays: null,
+  assignee: null,
+  refUrl: null,
+  note: null,
+  isSynced: true,
+  isDirty: false,
+  createdAt: "2026-03-20T10:00:00.000Z",
+  updatedAt: "2026-03-21T10:00:00.000Z",
+};
 
 describe("AppSidebar", () => {
   let container: HTMLDivElement;
   let root: Root;
 
+  let spies: Array<{ mockRestore(): void }>;
+
   beforeEach(async () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
+    spies = [];
     getLastSyncTimeMock.mockResolvedValue(null);
-    useTaskStoreMock.mockImplementation(() => buildStoreState());
+    // Use real computed functions - set raw state correctly
 
+    useTaskStore.setState({
+      organizations: [org],
+      projects: [projectAlpha],
+      tasks: [activeTask],
+      workLogs: [],
+      selectedProjectId: null,
+      selectedTaskId: null,
+      taskStatusFilter: "active" as const,
+      searchQuery: "",
+      hiddenProjectIds: new Set<string>(),
+    } as Partial<TaskStore>);
     await act(async () => {
-      root.render(<AppSidebar onOpenSettings={vi.fn()} />);
+      root.render(<AppSidebar onOpenSettings={mock()} />);
     });
+    await act(async () => {}); // flush getLastSyncTime().then(setLastSync) from useEffect
   });
 
   afterEach(async () => {
@@ -56,7 +77,8 @@ describe("AppSidebar", () => {
       root.unmount();
     });
     container.remove();
-    vi.clearAllMocks();
+    spies.forEach((s) => s.mockRestore());
+    jest.clearAllMocks();
   });
 
   it("shows only projects that still have visible tasks after filtering", () => {
@@ -65,82 +87,66 @@ describe("AppSidebar", () => {
   });
 
   it("clicking All Tasks calls setSelectedProject(null)", async () => {
-    const storeState = buildStoreState({ selectedProjectId: "proj-1" });
-    useTaskStoreMock.mockImplementation(() => storeState);
-
+    const spy = spyOn(useTaskStore.getState(), "setSelectedProject");
+    spies.push(spy);
     await act(async () => {
-      root.render(<AppSidebar onOpenSettings={vi.fn()} />);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      useTaskStore.setState({ selectedProjectId: "proj-1" } as any);
+      root.render(<AppSidebar onOpenSettings={mock()} />);
     });
-
     const allTasksBtn = Array.from(container.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("All Tasks"),
     );
     await act(async () => {
       allTasksBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-
-    expect(storeState.setSelectedProject).toHaveBeenCalledWith(null);
+    expect(spy).toHaveBeenCalledWith(null);
   });
 
   it("clicking a project calls setSelectedProject with the project id", async () => {
-    const storeState = buildStoreState();
-    useTaskStoreMock.mockImplementation(() => storeState);
-
-    await act(async () => {
-      root.render(<AppSidebar onOpenSettings={vi.fn()} />);
-    });
-
+    const spy = spyOn(useTaskStore.getState(), "setSelectedProject");
+    spies.push(spy);
     const alphaBtn = Array.from(container.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("Project Alpha"),
     );
     await act(async () => {
       alphaBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-
-    expect(storeState.setSelectedProject).toHaveBeenCalledWith("proj-1");
+    expect(spy).toHaveBeenCalledWith("proj-1");
   });
 
   it("clicking Jira Settings calls onOpenSettings", async () => {
-    const onOpenSettings = vi.fn();
+    const onOpenSettings = mock();
     await act(async () => {
       root.render(<AppSidebar onOpenSettings={onOpenSettings} />);
     });
-
     const settingsBtn = Array.from(container.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("Jira Settings"),
     );
     await act(async () => {
       settingsBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-
     expect(onOpenSettings).toHaveBeenCalledOnce();
   });
 
   it("shows last-synced timestamp when sync-service returns a date", async () => {
     getLastSyncTimeMock.mockResolvedValue("2026-04-09T08:00:00.000Z");
-
-    // Remount so the useEffect([]) fires again with the updated mock
     await act(async () => {
       root.unmount();
     });
     root = createRoot(container);
     await act(async () => {
-      root.render(<AppSidebar onOpenSettings={vi.fn()} />);
+      root.render(<AppSidebar onOpenSettings={mock()} />);
     });
-    // Flush the .then(setLastSync) microtask
     await act(async () => {});
-
-    // The sidebar renders "Synced X ago" text
     expect(container.textContent).toContain("Synced");
   });
 
   it("does not show sync label when getLastSyncTime returns null", async () => {
     getLastSyncTimeMock.mockResolvedValue(null);
-
     await act(async () => {
-      root.render(<AppSidebar onOpenSettings={vi.fn()} />);
+      root.render(<AppSidebar onOpenSettings={mock()} />);
     });
-
     expect(container.textContent).not.toContain("Synced");
   });
 });

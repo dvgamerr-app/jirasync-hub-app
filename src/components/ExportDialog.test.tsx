@@ -1,36 +1,37 @@
+import "@/test/jsdom-setup";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, jest, mock } from "bun:test";
 import { ExportDialog } from "@/components/ExportDialog";
 import type { Project, Task, WorkLog } from "@/types/jira";
 
-const saveMock = vi.fn();
-const writeTextFileMock = vi.fn();
-const toastMock = vi.fn();
-const fetchJiraMyselfDisplayNameMock = vi.fn();
-const getJiraAccountsMock = vi.fn();
+const saveMock = mock();
+const writeTextFileMock = mock();
+const toastMock = mock();
+const fetchJiraMyselfDisplayNameMock = mock();
+const getJiraAccountsMock = mock();
 
-vi.mock("@tauri-apps/plugin-dialog", () => ({
+mock.module("@tauri-apps/plugin-dialog", () => ({
   save: (...args: unknown[]) => saveMock(...args),
 }));
 
-vi.mock("@tauri-apps/plugin-fs", () => ({
+mock.module("@tauri-apps/plugin-fs", () => ({
   writeTextFile: (...args: unknown[]) => writeTextFileMock(...args),
 }));
 
-vi.mock("@/hooks/use-toast", () => ({
+mock.module("@/hooks/use-toast", () => ({
   toast: (...args: unknown[]) => toastMock(...args),
 }));
 
-vi.mock("@/lib/jira-api", () => ({
+mock.module("@/lib/jira-api", () => ({
   fetchJiraMyselfDisplayName: (...args: unknown[]) => fetchJiraMyselfDisplayNameMock(...args),
 }));
 
-vi.mock("@/lib/jira-db", () => ({
+mock.module("@/lib/jira-db", () => ({
   getJiraAccounts: () => getJiraAccountsMock(),
 }));
 
-vi.mock("@/components/ui/dialog", () => ({
+mock.module("@/components/ui/dialog", () => ({
   Dialog: ({ open, children }: { open: boolean; children: ReactNode }) => (open ? children : null),
   DialogContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   DialogHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -39,7 +40,7 @@ vi.mock("@/components/ui/dialog", () => ({
   DialogFooter: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock("@/components/ui/select", () => ({
+mock.module("@/components/ui/select", () => ({
   Select: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   SelectTrigger: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
     <button type="button" {...props}>
@@ -103,13 +104,13 @@ const workLogs: WorkLog[] = [
 describe("ExportDialog", () => {
   let container: HTMLDivElement;
   let root: Root;
-  let onOpenChange: ReturnType<typeof vi.fn<(open: boolean) => void>>;
+  let onOpenChange: ReturnType<typeof mock>;
 
   beforeEach(async () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
-    onOpenChange = vi.fn<(open: boolean) => void>();
+    onOpenChange = mock();
 
     saveMock.mockResolvedValue("C:\\exports\\jirasync-export-2026-Mar.csv");
     writeTextFileMock.mockResolvedValue(undefined);
@@ -142,7 +143,7 @@ describe("ExportDialog", () => {
       root.unmount();
     });
     container.remove();
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   it("lists time-tracking months in descending year-month order", () => {
