@@ -427,6 +427,44 @@ function addProjectStatus(map: Map<string, Set<string>>, projectId: string, stat
   map.set(projectId, set);
 }
 
+type IssueCollections = {
+  projectMap: Map<string, Project>;
+  statusSetByProjectId: Map<string, Set<string>>;
+  tasks: Task[];
+  worklogsByTaskId: Record<string, WorkLog[]>;
+  truncatedIssueKeys: Map<string, string>;
+  fetchedKeys: Set<string>;
+  storyPointFieldMap: Record<string, string>;
+};
+
+function processIssueIntoCollections(
+  issue: JiraIssue,
+  account: JiraAccount,
+  cols: IssueCollections,
+): void {
+  const projectKey = issue.fields.project?.key;
+  if (!projectKey) return;
+
+  cols.fetchedKeys.add(issue.key);
+
+  const projectId = getProjectId(account.id, projectKey);
+  if (!cols.projectMap.has(projectKey)) {
+    cols.projectMap.set(
+      projectKey,
+      buildProjectEntry(account, projectKey, issue.fields.project?.name),
+    );
+  }
+
+  const status = issue.fields.status?.name ?? null;
+  if (status) addProjectStatus(cols.statusSetByProjectId, projectId, status);
+
+  const storyPointFieldId = cols.storyPointFieldMap[projectId] ?? DEFAULT_STORY_POINT_FIELD_ID;
+  const task = mapIssueToTask(issue, account, projectKey, storyPointFieldId);
+  cols.tasks.push(task);
+
+  resolveWorklogs(issue.key, task.id, issue, cols.worklogsByTaskId, cols.truncatedIssueKeys);
+}
+
 export async function fetchAssignedJiraData(account: JiraAccount): Promise<AssignedJiraData> {
   const storyPointFieldMap = getStoryPointFieldMap();
   // Collect all unique story-point field IDs configured for this account's projects.
@@ -453,12 +491,15 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
     "issuelinks",
   ];
 
-  const projectMap = new Map<string, Project>();
-  const statusSetByProjectId = new Map<string, Set<string>>();
-  const tasks: Task[] = [];
-  const worklogsByTaskId: Record<string, WorkLog[]> = {};
-  const truncatedIssueKeys = new Map<string, string>(); // issueKey -> taskId
-  const fetchedKeys = new Set<string>();
+  const cols: IssueCollections = {
+    projectMap: new Map(),
+    statusSetByProjectId: new Map(),
+    tasks: [],
+    worklogsByTaskId: {},
+    truncatedIssueKeys: new Map(),
+    fetchedKeys: new Set(),
+    storyPointFieldMap,
+  };
   const linkedKeys = new Set<string>();
   let nextPageToken: string | undefined;
 
@@ -473,30 +514,7 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
     const data = (await res.json()) as JiraSearchResponse;
 
     for (const issue of data.issues ?? []) {
-      const projectKey = issue.fields.project?.key;
-      if (!projectKey) continue;
-
-      fetchedKeys.add(issue.key);
-
-      const projectId = getProjectId(account.id, projectKey);
-      if (!projectMap.has(projectKey)) {
-        projectMap.set(
-          projectKey,
-          buildProjectEntry(account, projectKey, issue.fields.project?.name),
-        );
-      }
-
-      const status = issue.fields.status?.name ?? null;
-      if (status) addProjectStatus(statusSetByProjectId, projectId, status);
-
-      const projectStoryPointFieldId =
-        storyPointFieldMap[projectId] ?? DEFAULT_STORY_POINT_FIELD_ID;
-      const task = mapIssueToTask(issue, account, projectKey, projectStoryPointFieldId);
-      tasks.push(task);
-
-      resolveWorklogs(issue.key, task.id, issue, worklogsByTaskId, truncatedIssueKeys);
-
-      // Collect linked issue keys for a follow-up fetch
+      processIssueIntoCollections(issue, account, cols);
       for (const link of issue.fields.issuelinks ?? []) {
         const key = link.inwardIssue?.key ?? link.outwardIssue?.key;
         if (key) linkedKeys.add(key);
@@ -509,48 +527,19 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
   }
 
   // Fetch linked issues that weren't already returned by the main query
-  const unfetchedLinkedKeys = Array.from(linkedKeys).filter((k) => !fetchedKeys.has(k));
+  const unfetchedLinkedKeys = Array.from(linkedKeys).filter((k) => !cols.fetchedKeys.has(k));
   if (unfetchedLinkedKeys.length > 0) {
     for (let i = 0; i < unfetchedLinkedKeys.length; i += LINKED_ISSUES_BATCH_SIZE) {
       const batch = unfetchedLinkedKeys.slice(i, i + LINKED_ISSUES_BATCH_SIZE);
       const linkedJql = `issueKey in (${batch.map((k) => `"${k}"`).join(",")})`;
-      const body: Record<string, unknown> = {
-        jql: linkedJql,
-        maxResults: LINKED_ISSUES_BATCH_SIZE,
-        fields,
-      };
-
       try {
         const res = await jiraFetch("search/jql", account, {
           method: "POST",
-          body: JSON.stringify(body),
+          body: JSON.stringify({ jql: linkedJql, maxResults: LINKED_ISSUES_BATCH_SIZE, fields }),
         });
         const data = (await res.json()) as JiraSearchResponse;
-
         for (const issue of data.issues ?? []) {
-          if (fetchedKeys.has(issue.key)) continue;
-          fetchedKeys.add(issue.key);
-
-          const projectKey = issue.fields.project?.key;
-          if (!projectKey) continue;
-
-          const projectId = getProjectId(account.id, projectKey);
-          if (!projectMap.has(projectKey)) {
-            projectMap.set(
-              projectKey,
-              buildProjectEntry(account, projectKey, issue.fields.project?.name),
-            );
-          }
-
-          const status = issue.fields.status?.name ?? null;
-          if (status) addProjectStatus(statusSetByProjectId, projectId, status);
-
-          const linkedStoryPointFieldId =
-            storyPointFieldMap[projectId] ?? DEFAULT_STORY_POINT_FIELD_ID;
-          const task = mapIssueToTask(issue, account, projectKey, linkedStoryPointFieldId);
-          tasks.push(task);
-
-          resolveWorklogs(issue.key, task.id, issue, worklogsByTaskId, truncatedIssueKeys);
+          if (!cols.fetchedKeys.has(issue.key)) processIssueIntoCollections(issue, account, cols);
         }
       } catch (error: unknown) {
         console.warn("Failed fetching linked issues batch:", error);
@@ -559,11 +548,11 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
   }
 
   // Fetch parent epics not returned by the main JQL (they may not be assigned to the user)
-  const parentEpicKeys = new Set<string>();
-  for (const task of tasks) {
-    if (task.parentKey) parentEpicKeys.add(task.parentKey);
-  }
-  const unfetchedParentKeys = Array.from(parentEpicKeys).filter((k) => !fetchedKeys.has(k));
+  const unfetchedParentKeys = cols.tasks
+    .filter((t) => t.parentKey && !cols.fetchedKeys.has(t.parentKey))
+    .map((t) => t.parentKey as string)
+    .filter((key, i, arr) => arr.indexOf(key) === i);
+
   if (unfetchedParentKeys.length > 0) {
     for (let i = 0; i < unfetchedParentKeys.length; i += LINKED_ISSUES_BATCH_SIZE) {
       const batch = unfetchedParentKeys.slice(i, i + LINKED_ISSUES_BATCH_SIZE);
@@ -575,22 +564,7 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
         });
         const data = (await res.json()) as JiraSearchResponse;
         for (const issue of data.issues ?? []) {
-          if (fetchedKeys.has(issue.key)) continue;
-          fetchedKeys.add(issue.key);
-          const projectKey = issue.fields.project?.key;
-          if (!projectKey) continue;
-          const projectId = getProjectId(account.id, projectKey);
-          if (!projectMap.has(projectKey)) {
-            projectMap.set(
-              projectKey,
-              buildProjectEntry(account, projectKey, issue.fields.project?.name),
-            );
-          }
-          const status = issue.fields.status?.name ?? null;
-          if (status) addProjectStatus(statusSetByProjectId, projectId, status);
-          const epicStoryPointFieldId =
-            storyPointFieldMap[projectId] ?? DEFAULT_STORY_POINT_FIELD_ID;
-          tasks.push(mapIssueToTask(issue, account, projectKey, epicStoryPointFieldId));
+          if (!cols.fetchedKeys.has(issue.key)) processIssueIntoCollections(issue, account, cols);
         }
       } catch (error: unknown) {
         console.warn("Failed fetching parent epics batch:", error);
@@ -598,9 +572,9 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
     }
   }
 
-  await fetchTruncatedWorklogs(account, truncatedIssueKeys, worklogsByTaskId);
+  await fetchTruncatedWorklogs(account, cols.truncatedIssueKeys, cols.worklogsByTaskId);
 
-  const collectedProjects = Array.from(projectMap.values());
+  const collectedProjects = Array.from(cols.projectMap.values());
   const projectStatusResults = await Promise.allSettled(
     collectedProjects.map((project) => fetchProjectStatuses(account, project.jiraProjectKey)),
   );
@@ -618,12 +592,12 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
       ...project,
       availableStatuses: mergeStatuses(
         statusResult.status === "fulfilled" ? statusResult.value : [],
-        statusSetByProjectId.get(project.id) ?? [],
+        cols.statusSetByProjectId.get(project.id) ?? [],
       ),
     };
   });
 
-  return { projects, tasks, worklogsByTaskId };
+  return { projects, tasks: cols.tasks, worklogsByTaskId: cols.worklogsByTaskId };
 }
 
 function isWorklogTruncated(issue: JiraIssue): boolean {

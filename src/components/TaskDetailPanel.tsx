@@ -1,5 +1,6 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useTaskStore } from "@/store/task-store";
+import { useShallow } from "zustand/react/shallow";
 import { StatusBadge } from "@/components/StatusBadge";
 import { StoryLevel, TaskType, Severity } from "@/types/jira";
 import { Input } from "@/components/ui/input";
@@ -30,7 +31,7 @@ import { openExternal } from "@/lib/desktop";
 import { hasAdfContent } from "@/lib/adf-content";
 import { LogWorkModal } from "@/components/LogWorkModal";
 import { AdfRenderer } from "@/components/AdfRenderer";
-import { formatMinutes, parseTimeInput } from "@/lib/worklog-time";
+import { formatMandays, formatMinutes, parseTimeInput } from "@/lib/worklog-time";
 import { cn } from "@/lib/utils";
 
 const TASK_TYPES: TaskType[] = ["Story", "Bug", "Task"];
@@ -57,7 +58,27 @@ export function TaskDetailPanel() {
     syncTaskToJira,
     taskDetailViewMode,
     setTaskDetailViewMode,
-  } = useTaskStore();
+  } = useTaskStore(
+    useShallow((s) => ({
+      selectedTaskId: s.selectedTaskId,
+      setSelectedTask: s.setSelectedTask,
+      getTaskById: s.getTaskById,
+      getProjectById: s.getProjectById,
+      getStatusesForProject: s.getStatusesForProject,
+      getWorkLogsForTask: s.getWorkLogsForTask,
+      updateTaskStatus: s.updateTaskStatus,
+      updateTaskStoryLevel: s.updateTaskStoryLevel,
+      updateTaskMandays: s.updateTaskMandays,
+      updateTaskType: s.updateTaskType,
+      updateTaskSeverity: s.updateTaskSeverity,
+      updateTaskNote: s.updateTaskNote,
+      addWorkLog: s.addWorkLog,
+      removeWorkLog: s.removeWorkLog,
+      syncTaskToJira: s.syncTaskToJira,
+      taskDetailViewMode: s.taskDetailViewMode,
+      setTaskDetailViewMode: s.setTaskDetailViewMode,
+    })),
+  );
 
   if (!selectedTaskId) return null;
 
@@ -390,7 +411,7 @@ function MandayInput({
   const [pendingSourceValue, setPendingSourceValue] = useState<
     number | null | typeof NO_PENDING_MANDAY
   >(NO_PENDING_MANDAY);
-  const display = value != null ? formatMinutes(Math.round(value * 480)) : "";
+  const display = formatMandays(value);
   const dirty = pendingSourceValue !== NO_PENDING_MANDAY && value === pendingSourceValue;
 
   const commit = (inputRaw: string) => {
@@ -442,7 +463,7 @@ function NoteField({
   value: string | null;
   onSave: (v: string | null) => void;
 }) {
-  return <NoteFieldEditor key={value ?? "__empty__"} initialValue={value ?? ""} onSave={onSave} />;
+  return <NoteFieldEditor initialValue={value ?? ""} onSave={onSave} />;
 }
 
 function NoteFieldEditor({
@@ -454,6 +475,14 @@ function NoteFieldEditor({
 }) {
   const [current, setCurrent] = useState(initialValue);
   const originalRef = useRef(initialValue);
+  const isFocusedRef = useRef(false);
+
+  useEffect(() => {
+    if (!isFocusedRef.current) {
+      setCurrent(initialValue);
+      originalRef.current = initialValue;
+    }
+  }, [initialValue]);
 
   const commit = () => {
     const trimmed = current.trim() || null;
@@ -475,7 +504,13 @@ function NoteFieldEditor({
         value={current}
         placeholder="Add a note..."
         onChange={(e) => setCurrent(e.target.value)}
-        onBlur={commit}
+        onFocus={() => {
+          isFocusedRef.current = true;
+        }}
+        onBlur={() => {
+          isFocusedRef.current = false;
+          commit();
+        }}
         onKeyDown={(e) => {
           if (e.key === "Escape") {
             setCurrent(originalRef.current);

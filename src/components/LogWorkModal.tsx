@@ -72,7 +72,11 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
       open={open}
       onOpenChange={(nextOpen) => {
         setOpen(nextOpen);
-        if (!nextOpen) {
+        if (nextOpen) {
+          setDate(new Date());
+          setTimeInput("");
+          setComment("");
+        } else {
           setDatePickerOpen(false);
         }
       }}

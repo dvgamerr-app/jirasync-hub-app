@@ -297,14 +297,15 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
     setCopiedPeriodValue("");
   }, [open, exportPeriods]);
 
-  const matchingRows = exportRows.filter((row) => row.periodValue === selectedPeriodValue);
-  const totalMinutes = matchingRows.reduce((sum, row) => sum + row.timeSpentMinutes, 0);
-  const capacityMinutes = workingDaysInMonth(selectedPeriodValue) * MINUTES_PER_MANDAY;
-  const totalMandayMinutes = calculateMandayMinutesForPeriod(
-    tasks,
-    exportRows,
-    selectedPeriodValue,
-  );
+  const { matchingRows, totalMinutes, capacityMinutes, totalMandayMinutes } = useMemo(() => {
+    const rows = exportRows.filter((row) => row.periodValue === selectedPeriodValue);
+    return {
+      matchingRows: rows,
+      totalMinutes: rows.reduce((sum, row) => sum + row.timeSpentMinutes, 0),
+      capacityMinutes: workingDaysInMonth(selectedPeriodValue) * MINUTES_PER_MANDAY,
+      totalMandayMinutes: calculateMandayMinutesForPeriod(tasks, exportRows, selectedPeriodValue),
+    };
+  }, [exportRows, selectedPeriodValue, tasks]);
   const selectedPeriodLabel =
     exportPeriods.find((period) => period.value === selectedPeriodValue)?.label ?? "";
   const hasSavedCurrentPeriod = Boolean(savedFileName) && savedPeriodValue === selectedPeriodValue;

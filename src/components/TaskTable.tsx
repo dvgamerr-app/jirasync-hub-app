@@ -1,4 +1,13 @@
-import { memo, useRef, useState, useMemo, useCallback, type Ref, type ReactNode } from "react";
+import {
+  memo,
+  useRef,
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+  type Ref,
+  type ReactNode,
+} from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTaskStore } from "@/store/task-store";
 import { Task, TaskType, Severity } from "@/types/jira";
@@ -38,8 +47,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { LogWorkModal } from "@/components/LogWorkModal";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { formatMinutes, parseTimeInput } from "@/lib/worklog-time";
+import { formatMandays, formatMinutes, parseTimeInput } from "@/lib/worklog-time";
 import { isVisibleWorkLog } from "@/lib/worklog-sync";
+import { INACTIVE_STATUSES } from "@/store/task-store";
 import { useShallow } from "zustand/react/shallow";
 
 const TASK_TYPES: TaskType[] = ["Story", "Bug", "Task"];
@@ -88,7 +98,7 @@ function SeverityBadge({ severity }: { severity: Severity | null }) {
 }
 
 function isDoneTask(status: string | null | undefined): boolean {
-  return status?.trim().toLowerCase() === "done" || status?.trim().toLowerCase() === "closed";
+  return INACTIVE_STATUSES.has(status?.trim().toLowerCase() ?? "");
 }
 
 function bfsDescendants(rootKey: string, childrenMap: Record<string, Task[]>): Task[] {
@@ -824,14 +834,7 @@ function InlineNote({
   note: string | null;
   onUpdate: (taskId: string, note: string | null) => void;
 }) {
-  return (
-    <InlineNoteEditor
-      key={note ?? "__empty__"}
-      taskId={taskId}
-      initialValue={note ?? ""}
-      onUpdate={onUpdate}
-    />
-  );
+  return <InlineNoteEditor taskId={taskId} initialValue={note ?? ""} onUpdate={onUpdate} />;
 }
 
 function InlineNoteEditor({
@@ -847,6 +850,14 @@ function InlineNoteEditor({
   const [value, setValue] = useState(initialValue);
   const originalRef = useRef(initialValue);
   const skipBlurCommitRef = useRef(false);
+
+  useEffect(() => {
+    if (!editing) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setValue(initialValue);
+      originalRef.current = initialValue;
+    }
+  }, [initialValue, editing]);
 
   const commit = () => {
     const trimmed = value.trim() || null;
@@ -906,6 +917,4 @@ function InlineNoteEditor({
   );
 }
 
-function formatMandayValue(value: number | null): string {
-  return value != null ? formatMinutes(Math.round(value * 480)) : "";
-}
+const formatMandayValue = formatMandays;

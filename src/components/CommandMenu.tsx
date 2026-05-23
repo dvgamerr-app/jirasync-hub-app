@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTaskStore } from "@/store/task-store";
+import { useShallow } from "zustand/react/shallow";
 import {
   CommandDialog,
   CommandEmpty,
@@ -21,7 +22,14 @@ export function CommandMenu({
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
   const setOpen = controlledOnOpenChange ?? setInternalOpen;
-  const { tasks, setSelectedTask, setSelectedProject, projects } = useTaskStore();
+  const { tasks, setSelectedTask, setSelectedProject, projects } = useTaskStore(
+    useShallow((s) => ({
+      tasks: s.tasks,
+      projects: s.projects,
+      setSelectedTask: s.setSelectedTask,
+      setSelectedProject: s.setSelectedProject,
+    })),
+  );
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {

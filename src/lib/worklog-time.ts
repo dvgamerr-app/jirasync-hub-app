@@ -41,6 +41,11 @@ export function formatMinutes(minutes: number): string {
   return parts.join(" ");
 }
 
+/** Formats a manday value (1 = 8h) for display, e.g. 1.5 → "1d 4h". Returns "" for null. */
+export function formatMandays(value: number | null): string {
+  return value != null ? formatMinutes(Math.round(value * MINUTES_PER_DAY)) : "";
+}
+
 /**
  * Converts a manday value (1 = 8h) to a Jira-compatible estimate string and seconds.
  * Used when pushing timetracking back to Jira.

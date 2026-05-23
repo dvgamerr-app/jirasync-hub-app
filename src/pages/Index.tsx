@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { TaskTable } from "@/components/TaskTable";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
@@ -8,6 +8,7 @@ import { MobileSidebar } from "@/components/MobileSidebar";
 import { ExportDialog } from "@/components/ExportDialog";
 import { JiraSettingsDialog } from "@/components/JiraSettings";
 import { type TaskStatusFilter, useTaskStore } from "@/store/task-store";
+import { useShallow } from "zustand/react/shallow";
 import {
   Search,
   X,
@@ -38,7 +39,9 @@ function getEmptyMessage(
   hasAnyTasks: boolean,
   taskStatusFilter: TaskStatusFilter,
   hasJiraAccounts: boolean,
+  searchQuery?: string,
 ): string {
+  if (searchQuery?.trim()) return `ไม่พบ ticket ที่ตรงกับ "${searchQuery.trim()}"`;
   if (!hasAnyTasks) {
     if (!hasJiraAccounts)
       return "Add a Jira instance in Jira Settings to start your first sync and load tasks into this workspace.";
@@ -54,6 +57,7 @@ function EmptyTasksState({
   hasAnyTasks,
   syncing,
   taskStatusFilter,
+  searchQuery,
   onOpenSettings,
   onSync,
 }: {
@@ -61,11 +65,13 @@ function EmptyTasksState({
   hasAnyTasks: boolean;
   syncing: boolean;
   taskStatusFilter: TaskStatusFilter;
+  searchQuery: string;
   onOpenSettings: () => void;
   onSync: () => Promise<void>;
 }) {
-  const title = hasAnyTasks ? "No matching tasks" : "No tasks yet";
-  const message = getEmptyMessage(hasAnyTasks, taskStatusFilter, hasJiraAccounts);
+  const isSearching = searchQuery.trim().length > 0;
+  const title = isSearching ? "ไม่พบผลลัพธ์" : hasAnyTasks ? "No matching tasks" : "No tasks yet";
+  const message = getEmptyMessage(hasAnyTasks, taskStatusFilter, hasJiraAccounts, searchQuery);
 
   return (
     <div className="flex flex-1 items-center justify-center p-6">
@@ -76,25 +82,31 @@ function EmptyTasksState({
         <h2 className="text-lg font-semibold">{title}</h2>
         <p className="text-muted-foreground mt-2 text-sm leading-6">{message}</p>
 
-        <div className="mt-6 flex flex-wrap justify-center gap-2">
-          {hasJiraAccounts ? (
-            <>
-              <Button className="h-9 text-[13px]" onClick={() => void onSync()} disabled={syncing}>
-                <RefreshCw className={syncing ? "animate-spin" : ""} />
-                {syncing ? "Syncing..." : "Sync Now"}
-              </Button>
-              <Button variant="outline" className="h-9 text-[13px]" onClick={onOpenSettings}>
+        {!isSearching && (
+          <div className="mt-6 flex flex-wrap justify-center gap-2">
+            {hasJiraAccounts ? (
+              <>
+                <Button
+                  className="h-9 text-[13px]"
+                  onClick={() => void onSync()}
+                  disabled={syncing}
+                >
+                  <RefreshCw className={syncing ? "animate-spin" : ""} />
+                  {syncing ? "Syncing..." : "Sync Now"}
+                </Button>
+                <Button variant="outline" className="h-9 text-[13px]" onClick={onOpenSettings}>
+                  <Settings className="h-4 w-4" />
+                  Jira Settings
+                </Button>
+              </>
+            ) : (
+              <Button className="h-9 text-[13px]" onClick={onOpenSettings}>
                 <Settings className="h-4 w-4" />
-                Jira Settings
+                Add Jira Instance
               </Button>
-            </>
-          ) : (
-            <Button className="h-9 text-[13px]" onClick={onOpenSettings}>
-              <Settings className="h-4 w-4" />
-              Add Jira Instance
-            </Button>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -117,7 +129,25 @@ const Index = () => {
     searchQuery,
     setSearchQuery,
     isLoaded,
-  } = useTaskStore();
+  } = useTaskStore(
+    useShallow((s) => ({
+      tasks: s.tasks,
+      selectedTaskId: s.selectedTaskId,
+      selectedProjectId: s.selectedProjectId,
+      getFilteredTasks: s.getFilteredTasks,
+      projects: s.projects,
+      workLogs: s.workLogs,
+      syncAllDirtyTasks: s.syncAllDirtyTasks,
+      getDirtyTaskCount: s.getDirtyTaskCount,
+      taskStatusFilter: s.taskStatusFilter,
+      loadFromDB: s.loadFromDB,
+      reloadFromDB: s.reloadFromDB,
+      setTaskStatusFilter: s.setTaskStatusFilter,
+      searchQuery: s.searchQuery,
+      setSearchQuery: s.setSearchQuery,
+      isLoaded: s.isLoaded,
+    })),
+  );
   const filteredTasks = getFilteredTasks();
   const currentProject = projects.find((p) => p.id === selectedProjectId);
   const isMobile = useIsMobile();
@@ -129,7 +159,14 @@ const Index = () => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
+  const [searchInputValue, setSearchInputValue] = useState(searchQuery);
+  const [, startTransition] = useTransition();
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchQuery(searchInputValue), 250);
+    return () => clearTimeout(timer);
+  }, [searchInputValue, setSearchQuery]);
   const hasJiraAccounts = getJiraAccounts().length > 0;
   const showEmptyState = isLoaded && filteredTasks.length === 0 && !selectedTaskId;
 
@@ -142,7 +179,7 @@ const Index = () => {
         searchInputRef.current?.select();
       }
       if (e.key === "Escape" && searchFocused) {
-        setSearchQuery("");
+        setSearchInputValue("");
         searchInputRef.current?.blur();
       }
     };
@@ -243,7 +280,7 @@ const Index = () => {
                 <button
                   key={filter.value}
                   type="button"
-                  onClick={() => setTaskStatusFilter(filter.value)}
+                  onClick={() => startTransition(() => setTaskStatusFilter(filter.value))}
                   className={cn(
                     "rounded-md px-2.5 py-1 text-[11px] font-medium sm:text-[12px]",
                     taskStatusFilter === filter.value
@@ -259,23 +296,23 @@ const Index = () => {
               <Search className="text-muted-foreground pointer-events-none absolute left-2 h-3 w-3" />
               <Input
                 ref={searchInputRef}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                value={searchInputValue}
+                onChange={(e) => setSearchInputValue(e.target.value)}
                 onFocus={() => setSearchFocused(true)}
                 onBlur={() => setSearchFocused(false)}
                 placeholder="Search… (Ctrl+F)"
                 className={cn(
-                  "border-border text-muted-foreground placeholder:text-muted-foreground/60 h-8 w-40 rounded-md pl-6 text-[12px] shadow-none transition-[width] duration-200 focus-visible:ring-1",
-                  searchQuery ? "pr-6" : "pr-2",
+                  "border-border text-muted-foreground placeholder:text-muted-foreground/60 h-8 w-40 rounded-md pl-6 text-[11px] shadow-none transition-[width] duration-200 focus-visible:ring-1",
+                  searchInputValue ? "pr-6" : "pr-2",
                   searchFocused && "w-52",
                 )}
               />
-              {searchQuery && (
+              {searchInputValue && (
                 <button
                   type="button"
                   className="text-muted-foreground hover:text-foreground absolute right-1.5"
                   onClick={() => {
-                    setSearchQuery("");
+                    setSearchInputValue("");
                     searchInputRef.current?.focus();
                   }}
                 >
@@ -357,6 +394,7 @@ const Index = () => {
               hasAnyTasks={allTasks.length > 0}
               syncing={syncing}
               taskStatusFilter={taskStatusFilter}
+              searchQuery={searchQuery}
               onOpenSettings={() => setSettingsOpen(true)}
               onSync={handleManualSync}
             />

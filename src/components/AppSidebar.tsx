@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useTransition } from "react";
 import { useTaskStore } from "@/store/task-store";
+import { useShallow } from "zustand/react/shallow";
 import {
   ChevronDown,
   Eye,
@@ -26,8 +27,18 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
     getVisibleProjects,
     hiddenProjectIds,
     toggleProjectVisibility,
-  } = useTaskStore();
+  } = useTaskStore(
+    useShallow((s) => ({
+      organizations: s.organizations,
+      selectedProjectId: s.selectedProjectId,
+      setSelectedProject: s.setSelectedProject,
+      getVisibleProjects: s.getVisibleProjects,
+      hiddenProjectIds: s.hiddenProjectIds,
+      toggleProjectVisibility: s.toggleProjectVisibility,
+    })),
+  );
   const projects = getVisibleProjects();
+  const [, startTransition] = useTransition();
   const [lastSync, setLastSync] = useState<string | null>(null);
 
   useEffect(() => {
@@ -50,7 +61,7 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
         {/* Navigation */}
         <div className="flex-1 overflow-y-auto p-2">
           <button
-            onClick={() => setSelectedProject(null)}
+            onClick={() => startTransition(() => setSelectedProject(null))}
             className={cn(
               "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]",
               !selectedProjectId
@@ -77,7 +88,7 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
                     return (
                       <button
                         key={project.id}
-                        onClick={() => setSelectedProject(project.id)}
+                        onClick={() => startTransition(() => setSelectedProject(project.id))}
                         className={cn(
                           "group flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]",
                           selectedProjectId === project.id
@@ -90,7 +101,7 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
                           className="shrink-0"
                           onClick={(e) => {
                             e.stopPropagation();
-                            toggleProjectVisibility(project.id);
+                            startTransition(() => toggleProjectVisibility(project.id));
                           }}
                         >
                           {isHidden ? (

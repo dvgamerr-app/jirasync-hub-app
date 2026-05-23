@@ -222,10 +222,18 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
   };
 
   const handleDelete = async (id: string) => {
-    await removeJiraAccount(id);
-    refresh();
-    if (getJiraAccounts().length === 0) {
-      stopBackgroundSync();
+    try {
+      await removeJiraAccount(id);
+      refresh();
+      if (getJiraAccounts().length === 0) {
+        stopBackgroundSync();
+      }
+    } catch (error) {
+      toast({
+        title: "Failed to remove account",
+        description: error instanceof Error ? error.message : "Could not remove the Jira account",
+        variant: "destructive",
+      });
     }
   };
 
