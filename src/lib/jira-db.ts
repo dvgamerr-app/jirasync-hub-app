@@ -1,4 +1,5 @@
 import Dexie, { type Table } from "dexie";
+import { invoke } from "@tauri-apps/api/core";
 import type { Organization, Project, Task, WorkLog } from "@/types/jira";
 import { getOrganizationId, getTaskIdPrefix } from "@/lib/jira-ids";
 
@@ -44,6 +45,37 @@ export type JiraSettings = JiraAccount;
 const JIRA_ACCOUNTS_KEY = "jira-accounts";
 const JIRA_SETTINGS_KEY_LEGACY = "jira-settings";
 
+let _accountsCache: JiraAccount[] | null = null;
+
+async function encryptAndPersist(accounts: JiraAccount[]): Promise<void> {
+  try {
+    const encrypted = await invoke<string>("encrypt_data", { plaintext: JSON.stringify(accounts) });
+    localStorage.setItem(JIRA_ACCOUNTS_KEY, encrypted);
+  } catch (e) {
+    console.error("Failed to encrypt accounts:", e);
+  }
+}
+
+export async function initializeAccounts(): Promise<void> {
+  const raw = localStorage.getItem(JIRA_ACCOUNTS_KEY);
+  if (!raw) {
+    _accountsCache = [];
+    return;
+  }
+  try {
+    const decrypted = await invoke<string>("decrypt_data", { ciphertext: raw });
+    _accountsCache = JSON.parse(decrypted) as JiraAccount[];
+  } catch {
+    // migrate from plain-text format
+    try {
+      _accountsCache = JSON.parse(raw) as JiraAccount[];
+      void encryptAndPersist(_accountsCache);
+    } catch {
+      _accountsCache = [];
+    }
+  }
+}
+
 export function migrateLegacyJiraSettings(): void {
   if (localStorage.getItem(JIRA_ACCOUNTS_KEY)) return;
   const legacy = localStorage.getItem(JIRA_SETTINGS_KEY_LEGACY);
@@ -67,16 +99,12 @@ export function migrateLegacyJiraSettings(): void {
 }
 
 export function getJiraAccounts(): JiraAccount[] {
-  try {
-    const raw = localStorage.getItem(JIRA_ACCOUNTS_KEY);
-    return raw ? (JSON.parse(raw) as JiraAccount[]) : [];
-  } catch {
-    return [];
-  }
+  return _accountsCache ?? [];
 }
 
 export function saveJiraAccounts(accounts: JiraAccount[]): void {
-  localStorage.setItem(JIRA_ACCOUNTS_KEY, JSON.stringify(accounts));
+  _accountsCache = accounts;
+  void encryptAndPersist(accounts);
 }
 
 export function addJiraAccount(account: Omit<JiraAccount, "id">): JiraAccount {

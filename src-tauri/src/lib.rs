@@ -1,6 +1,60 @@
 use tauri::{webview::PageLoadEvent, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_window_state::{Builder as WindowStateBuilder, StateFlags, WindowExt};
 
+fn derive_key() -> Result<[u8; 32], String> {
+    use sha2::{Digest, Sha256};
+    let machine_id = machine_uid::get().map_err(|e| e.to_string())?;
+    let mut hasher = Sha256::new();
+    hasher.update(machine_id.as_bytes());
+    hasher.update(b"jirasync-hub-v1");
+    Ok(hasher.finalize().into())
+}
+
+#[tauri::command]
+fn encrypt_data(plaintext: String) -> Result<String, String> {
+    use aes_gcm::{
+        aead::{Aead, AeadCore, KeyInit, OsRng},
+        Aes256Gcm, Key,
+    };
+    use base64::{engine::general_purpose::STANDARD, Engine};
+
+    let key_bytes = derive_key()?;
+    let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
+    let cipher = Aes256Gcm::new(key);
+    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let ciphertext = cipher
+        .encrypt(&nonce, plaintext.as_bytes())
+        .map_err(|e| e.to_string())?;
+
+    let mut payload = nonce.to_vec();
+    payload.extend_from_slice(&ciphertext);
+    Ok(STANDARD.encode(&payload))
+}
+
+#[tauri::command]
+fn decrypt_data(ciphertext: String) -> Result<String, String> {
+    use aes_gcm::{
+        aead::{Aead, KeyInit},
+        Aes256Gcm, Key, Nonce,
+    };
+    use base64::{engine::general_purpose::STANDARD, Engine};
+
+    let data = STANDARD.decode(&ciphertext).map_err(|e| e.to_string())?;
+    if data.len() < 12 {
+        return Err("invalid ciphertext".into());
+    }
+
+    let key_bytes = derive_key()?;
+    let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
+    let cipher = Aes256Gcm::new(key);
+    let nonce = Nonce::from_slice(&data[..12]);
+    let plaintext = cipher
+        .decrypt(nonce, &data[12..])
+        .map_err(|e| e.to_string())?;
+
+    String::from_utf8(plaintext).map_err(|e| e.to_string())
+}
+
 #[cfg(target_os = "macos")]
 use tauri::TitleBarStyle;
 
@@ -49,7 +103,7 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(WindowStateBuilder::default().build())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![set_window_theme])
+        .invoke_handler(tauri::generate_handler![set_window_theme, encrypt_data, decrypt_data])
         .setup(|app| {
             let window_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title(WINDOW_TITLE)
