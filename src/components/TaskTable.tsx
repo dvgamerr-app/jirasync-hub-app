@@ -5,20 +5,18 @@ import {
   useMemo,
   useCallback,
   useEffect,
-  type Ref,
   type ReactNode,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTaskStore } from "@/store/task-store";
 import { Task, TaskType, Severity } from "@/types/jira";
+import { TASK_TYPES, SEVERITIES, NO_PENDING_MANDAY } from "@/constants/task";
 import { StatusBadge } from "@/components/StatusBadge";
-import { AdfRenderer } from "@/components/AdfRenderer";
 import { TypeIcon } from "@/components/TypeIcon";
 import { cn } from "@/lib/utils";
 import {
   ExternalLink,
   Zap,
-  FileText,
   Info,
   ChevronsUp,
   ChevronUp,
@@ -50,11 +48,8 @@ import { isVisibleWorkLog } from "@/lib/worklog-sync";
 import { INACTIVE_STATUSES } from "@/store/task-store";
 import { useShallow } from "zustand/react/shallow";
 
-const TASK_TYPES: TaskType[] = ["Story", "Bug", "Task"];
-const SEVERITIES: Severity[] = ["Critical", "High", "Medium", "Low", "NA"];
 const COMPACT_COLUMN_COUNT = 4;
 const FULL_COLUMN_COUNT = 9;
-const NO_PENDING_MANDAY = Symbol("no-pending-manday");
 
 function hasStoryPointRuleViolation(task: Pick<Task, "type" | "storyLevel">): boolean {
   return task.type !== "Story" && task.storyLevel !== null;
@@ -107,7 +102,6 @@ type FlatRow =
       totalManday: number;
       epicTotalMinutes: number;
     }
-  | { kind: "epic-desc"; epic: Task }
   | { kind: "task"; task: Task; depth: number; isLastSibling: boolean };
 
 const EpicHeaderRow = memo(function EpicHeaderRow({
@@ -117,8 +111,8 @@ const EpicHeaderRow = memo(function EpicHeaderRow({
   totalManday,
   epicTotalMinutes,
   showExtendedColumns,
-  descOpen,
-  onDescToggle,
+  isSelected,
+  onSelect,
   dataIndex,
 }: {
   epic: Task;
@@ -127,16 +121,18 @@ const EpicHeaderRow = memo(function EpicHeaderRow({
   totalManday: number;
   epicTotalMinutes: number;
   showExtendedColumns: boolean;
-  descOpen: boolean;
-  onDescToggle: () => void;
+  isSelected: boolean;
+  onSelect: (taskId: string) => void;
   dataIndex: number;
 }) {
-  const hasDescription = !!epic.description;
-
   return (
     <TableRow
       data-index={dataIndex}
-      className="border-l-2 border-l-purple-400 bg-purple-50/40 hover:bg-purple-50/60 dark:bg-purple-950/20 dark:hover:bg-purple-950/30"
+      className={cn(
+        "cursor-pointer border-l-2 border-l-purple-400 bg-purple-50/40 hover:bg-purple-50/60 dark:bg-purple-950/20 dark:hover:bg-purple-950/30",
+        isSelected && "border-l-primary bg-primary/5",
+      )}
+      onClick={() => onSelect(epic.id)}
     >
       <TableCell className="py-2">
         <div className="flex items-center gap-1.5">
@@ -158,20 +154,6 @@ const EpicHeaderRow = memo(function EpicHeaderRow({
               }}
             >
               <ExternalLink className="text-muted-foreground hover:text-primary h-3 w-3" />
-            </button>
-          )}
-          {hasDescription && (
-            <button
-              type="button"
-              onClick={onDescToggle}
-              title={descOpen ? "Hide description" : "Show description"}
-            >
-              <FileText
-                className={cn(
-                  "h-3 w-3",
-                  descOpen ? "text-purple-500" : "text-muted-foreground hover:text-primary",
-                )}
-              />
             </button>
           )}
         </div>
@@ -306,18 +288,6 @@ export function TaskTable() {
     return { epicGroups: groups, orphanRoots: roots };
   }, [allTasks, filteredChildrenByParentKey]);
 
-  const [openDescEpics, setOpenDescEpics] = useState<Set<string>>(new Set());
-  const toggleDesc = useCallback(
-    (epicId: string) =>
-      setOpenDescEpics((prev) => {
-        const next = new Set(prev);
-        if (next.has(epicId)) next.delete(epicId);
-        else next.add(epicId);
-        return next;
-      }),
-    [],
-  );
-
   const flatRows = useMemo<FlatRow[]>(() => {
     const rows: FlatRow[] = [];
 
@@ -339,9 +309,6 @@ export function TaskTable() {
         0,
       );
       rows.push({ kind: "epic-header", epic, subtasks, pct, totalManday, epicTotalMinutes });
-      if (openDescEpics.has(epic.id) && epic.description) {
-        rows.push({ kind: "epic-desc", epic });
-      }
       emitChildren(epic.jiraTaskId, 1);
     }
 
@@ -351,14 +318,7 @@ export function TaskTable() {
     }
 
     return rows;
-  }, [
-    epicGroups,
-    orphanRoots,
-    openDescEpics,
-    totalMinutesByTaskId,
-    rawChildrenByParentKey,
-    filteredChildrenByParentKey,
-  ]);
+  }, [epicGroups, orphanRoots, totalMinutesByTaskId, rawChildrenByParentKey, filteredChildrenByParentKey]);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const handleSelectTask = useCallback((taskId: string) => {
@@ -370,7 +330,7 @@ export function TaskTable() {
   const virtualizer = useVirtualizer({
     count: flatRows.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: (i) => (flatRows[i].kind === "epic-desc" ? 160 : 40),
+    estimateSize: (i) => (flatRows[i].kind === "epic-header" ? 48 : 40),
     overscan: 12,
   });
 
@@ -477,24 +437,10 @@ export function TaskTable() {
                         totalManday={row.totalManday}
                         epicTotalMinutes={row.epicTotalMinutes}
                         showExtendedColumns={showExtendedColumns}
-                        descOpen={openDescEpics.has(row.epic.id)}
-                        onDescToggle={() => toggleDesc(row.epic.id)}
+                        isSelected={row.epic.id === selectedTaskId}
+                        onSelect={handleSelectTask}
                         dataIndex={vRow.index}
                       />
-                    );
-                  }
-                  if (row.kind === "epic-desc") {
-                    return (
-                      <TableRow
-                        key={vRow.key}
-                        data-index={vRow.index}
-                        ref={virtualizer.measureElement as Ref<HTMLTableRowElement>}
-                        className="bg-purple-50/20 hover:bg-purple-50/20 dark:bg-purple-950/10"
-                      >
-                        <TableCell colSpan={colSpanAll} className="px-10 py-3">
-                          <AdfRenderer content={row.epic.description!} />
-                        </TableCell>
-                      </TableRow>
                     );
                   }
                   return (
@@ -716,7 +662,7 @@ const TaskRow = memo(function TaskRow({
       {/* Note */}
       {showExtendedColumns && (
         <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
-          <InlineNote taskId={task.id} note={task.note} onUpdate={updateTaskNote} />
+          <InlineNoteEditor taskId={task.id} initialValue={task.note ?? ""} onUpdate={updateTaskNote} />
         </TableCell>
       )}
     </TableRow>
@@ -818,18 +764,6 @@ function InlineManday({
       {display || "—"}
     </span>
   );
-}
-
-function InlineNote({
-  taskId,
-  note,
-  onUpdate,
-}: {
-  taskId: string;
-  note: string | null;
-  onUpdate: (taskId: string, note: string | null) => void;
-}) {
-  return <InlineNoteEditor taskId={taskId} initialValue={note ?? ""} onUpdate={onUpdate} />;
 }
 
 function InlineNoteEditor({

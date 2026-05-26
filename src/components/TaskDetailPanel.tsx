@@ -1,9 +1,11 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useTaskStore } from "@/store/task-store";
 import { useShallow } from "zustand/react/shallow";
 import { StatusBadge } from "@/components/StatusBadge";
 import { StoryLevel, TaskType, Severity } from "@/types/jira";
 import { inferTypeIcon } from "@/components/TypeIcon";
+import { TASK_TYPES, SEVERITIES, STORY_LEVEL_OPTIONS, NO_PENDING_MANDAY } from "@/constants/task";
+import { isVisibleWorkLog } from "@/lib/worklog-sync";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -32,19 +34,13 @@ import { AdfRenderer } from "@/components/AdfRenderer";
 import { formatMandays, formatMinutes, parseTimeInput } from "@/lib/worklog-time";
 import { cn } from "@/lib/utils";
 
-const TASK_TYPES: TaskType[] = ["Story", "Bug", "Task"];
-const SEVERITIES: Severity[] = ["Critical", "High", "Medium", "Low", "NA"];
-const NO_PENDING_MANDAY = Symbol("no-pending-manday");
-const STORY_LEVEL_OPTIONS: StoryLevel[] = [1, 2, 3, 5];
-
 export function TaskDetailPanel() {
   const {
     selectedTaskId,
     setSelectedTask,
-    getTaskById,
-    getProjectById,
-    getStatusesForProject,
-    getWorkLogsForTask,
+    tasks,
+    projects,
+    rawWorkLogs,
     updateTaskStatus,
     updateTaskStoryLevel,
     updateTaskMandays,
@@ -60,10 +56,9 @@ export function TaskDetailPanel() {
     useShallow((s) => ({
       selectedTaskId: s.selectedTaskId,
       setSelectedTask: s.setSelectedTask,
-      getTaskById: s.getTaskById,
-      getProjectById: s.getProjectById,
-      getStatusesForProject: s.getStatusesForProject,
-      getWorkLogsForTask: s.getWorkLogsForTask,
+      tasks: s.tasks,
+      projects: s.projects,
+      rawWorkLogs: s.workLogs,
       updateTaskStatus: s.updateTaskStatus,
       updateTaskStoryLevel: s.updateTaskStoryLevel,
       updateTaskMandays: s.updateTaskMandays,
@@ -78,19 +73,41 @@ export function TaskDetailPanel() {
     })),
   );
 
-  if (!selectedTaskId) return null;
+  // Derive task, project, and work logs via useMemo so useShallow above only
+  // compares raw array references — avoids infinite loops from new array instances.
+  const task = useMemo(
+    () => (selectedTaskId ? (tasks.find((t) => t.id === selectedTaskId) ?? null) : null),
+    [selectedTaskId, tasks],
+  );
 
-  const task = getTaskById(selectedTaskId);
-  if (!task) return null;
+  const project = useMemo(
+    () => (task ? (projects.find((p) => p.id === task.projectId) ?? null) : null),
+    [task, projects],
+  );
 
-  const project = getProjectById(task.projectId);
-  const statuses = getStatusesForProject(task.projectId);
-  const issueTypes: string[] = project?.availableIssueTypes ?? [];
+  const statuses = useMemo(() => project?.availableStatuses ?? [], [project]);
+  const issueTypes = useMemo(() => project?.availableIssueTypes ?? [], [project]);
+
+  const workLogs = useMemo(
+    () =>
+      task
+        ? rawWorkLogs
+            .filter((wl) => wl.taskId === task.id && isVisibleWorkLog(wl))
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        : [],
+    [task, rawWorkLogs],
+  );
+
+  if (!selectedTaskId || !task) return null;
+
   const displayIssueTypes = issueTypes.length > 0 ? issueTypes : TASK_TYPES;
-  const workLogs = getWorkLogsForTask(task.id);
   const hasDescription = hasAdfContent(task.description);
-  const activeView =
-    hasDescription && taskDetailViewMode === "description" ? "description" : "details";
+  const isEpic = task.isEpic === true;
+  const activeView = isEpic
+    ? "description"
+    : hasDescription && taskDetailViewMode === "description"
+      ? "description"
+      : "details";
   const canAssignStoryLevel = task.type === "Story";
   const hasInvalidStoryLevel = task.storyLevel !== null && !canAssignStoryLevel;
 
@@ -249,7 +266,7 @@ export function TaskDetailPanel() {
       </div>
 
       {/* Note */}
-      <NoteField value={task.note} onSave={(v) => updateTaskNote(task.id, v)} />
+      <NoteFieldEditor initialValue={task.note ?? ""} onSave={(v) => updateTaskNote(task.id, v)} />
 
       {/* Timestamps */}
       <div className="text-muted-foreground flex gap-4 text-[11px]">
@@ -311,14 +328,15 @@ export function TaskDetailPanel() {
 
   const descriptionContent = hasDescription ? (
     <AdfRenderer content={task.description ?? ""} className="text-muted-foreground" />
-  ) : null;
+  ) : (
+    <p className="text-muted-foreground text-[13px]">No description</p>
+  );
 
   return (
     <div className="animate-slide-in-right border-border bg-card flex h-full w-full flex-col border-l md:w-[45vw] md:max-w-[600px] md:min-w-[360px]">
       {/* Header — sticky by flex-col layout */}
       <div className="border-border flex shrink-0 items-center justify-between border-b px-4 py-3">
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          {/* Task ID as clickable link with project name */}
           <button
             type="button"
             className="text-muted-foreground hover:text-primary flex min-w-0 items-center gap-1 rounded"
@@ -374,7 +392,7 @@ export function TaskDetailPanel() {
 
       <div className="border-border flex shrink-0 items-start justify-between gap-3 border-b px-4 py-3">
         <h2 className="min-w-0 flex-1 text-base leading-snug font-semibold">{task.title}</h2>
-        {hasDescription && (
+        {hasDescription && !isEpic && (
           <Button
             type="button"
             variant="outline"
@@ -453,16 +471,6 @@ function MandayInput({
       }}
     />
   );
-}
-
-function NoteField({
-  value,
-  onSave,
-}: {
-  value: string | null;
-  onSave: (v: string | null) => void;
-}) {
-  return <NoteFieldEditor initialValue={value ?? ""} onSave={onSave} />;
 }
 
 function NoteFieldEditor({

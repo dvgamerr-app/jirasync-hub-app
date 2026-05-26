@@ -87,6 +87,10 @@ jobs:
       - name: Install frontend dependencies
         run: bun install
 
+      # ── Unittest ─────────────────────────────────────────────────────────
+      - name: Test before build
+        run: bun test --isolate
+
       # ── Build + create/update GitHub Release ─────────────────────────────
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v0

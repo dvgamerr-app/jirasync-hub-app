@@ -14,6 +14,7 @@ import {
   transitionJiraIssue,
   addJiraWorkLog,
   deleteJiraWorkLog,
+  DEFAULT_STORY_POINT_FIELD_ID,
 } from "@/lib/jira-api";
 import {
   isPendingCreateWorkLog,
@@ -21,11 +22,11 @@ import {
   isVisibleWorkLog,
   toSyncedWorkLog,
 } from "@/lib/worklog-sync";
+import { formatMandayEstimate } from "@/lib/worklog-time";
 
 function getVisibleWorkLogsForTask(workLogs: WorkLog[], taskId: string): WorkLog[] {
   return workLogs.filter((wl) => wl.taskId === taskId && isVisibleWorkLog(wl));
 }
-import { formatMandayEstimate } from "@/lib/worklog-time";
 
 export type TaskStatusFilter = "active" | "done" | "all";
 
@@ -99,7 +100,7 @@ async function pushTaskToJira(task: Task, accounts: JiraAccount[]): Promise<void
   if (!account) return;
 
   const storyPointFieldMap = getStoryPointFieldMap();
-  const storyPointFieldId = storyPointFieldMap[task.projectId] ?? "customfield_10016";
+  const storyPointFieldId = storyPointFieldMap[task.projectId] ?? DEFAULT_STORY_POINT_FIELD_ID;
 
   const fields: Record<string, unknown> = {};
   // Always send the story point field — null clears it in Jira

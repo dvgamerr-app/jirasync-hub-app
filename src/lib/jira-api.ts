@@ -3,7 +3,7 @@ import type { Organization, Project, Task, WorkLog } from "@/types/jira";
 import { fetch } from "@tauri-apps/plugin-http";
 import { getOrganizationId, getProjectId, getTaskId } from "@/lib/jira-ids";
 
-const DEFAULT_STORY_POINT_FIELD_ID = "customfield_10016";
+export const DEFAULT_STORY_POINT_FIELD_ID = "customfield_10016";
 const SECONDS_PER_WORKDAY = 8 * 60 * 60; // 8 hours in seconds
 const LINKED_ISSUES_BATCH_SIZE = 50;
 
