@@ -3,6 +3,7 @@ import { useTaskStore } from "@/store/task-store";
 import { useShallow } from "zustand/react/shallow";
 import { StatusBadge } from "@/components/StatusBadge";
 import { StoryLevel, TaskType, Severity } from "@/types/jira";
+import { inferTypeIcon } from "@/components/TypeIcon";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -20,9 +21,6 @@ import {
   Cloud,
   CloudUpload,
   ExternalLink,
-  Bug,
-  BookOpen,
-  ClipboardList,
   Trash2,
 } from "lucide-react";
 import { format as formatDate, formatDistanceToNow } from "date-fns";
@@ -87,6 +85,8 @@ export function TaskDetailPanel() {
 
   const project = getProjectById(task.projectId);
   const statuses = getStatusesForProject(task.projectId);
+  const issueTypes: string[] = project?.availableIssueTypes ?? [];
+  const displayIssueTypes = issueTypes.length > 0 ? issueTypes : TASK_TYPES;
   const workLogs = getWorkLogsForTask(task.id);
   const hasDescription = hasAdfContent(task.description);
   const activeView =
@@ -110,19 +110,18 @@ export function TaskDetailPanel() {
             <SelectTrigger className="h-8 text-[13px]">
               <SelectValue placeholder="—">
                 <div className="flex items-center gap-1.5">
-                  {task.type === "Bug" && <Bug className="text-destructive h-3.5 w-3.5" />}
-                  {task.type === "Story" && <BookOpen className="text-primary h-3.5 w-3.5" />}
-                  {task.type === "Task" && (
-                    <ClipboardList className="text-muted-foreground h-3.5 w-3.5" />
-                  )}
+                  {task.type && inferTypeIcon(task.type)}
                   {task.type}
                 </div>
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              {TASK_TYPES.map((t) => (
+              {displayIssueTypes.map((t) => (
                 <SelectItem key={t} value={t} className="text-[13px]">
-                  {t}
+                  <div className="flex items-center gap-1.5">
+                    {inferTypeIcon(t)}
+                    {t}
+                  </div>
                 </SelectItem>
               ))}
             </SelectContent>

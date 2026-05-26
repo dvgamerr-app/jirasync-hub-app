@@ -13,15 +13,13 @@ import { useTaskStore } from "@/store/task-store";
 import { Task, TaskType, Severity } from "@/types/jira";
 import { StatusBadge } from "@/components/StatusBadge";
 import { AdfRenderer } from "@/components/AdfRenderer";
+import { TypeIcon } from "@/components/TypeIcon";
 import { cn } from "@/lib/utils";
 import {
   ExternalLink,
-  Bug,
-  BookOpen,
-  ClipboardList,
-  Info,
   Zap,
   FileText,
+  Info,
   ChevronsUp,
   ChevronUp,
   Equal,
@@ -62,18 +60,6 @@ function hasStoryPointRuleViolation(task: Pick<Task, "type" | "storyLevel">): bo
   return task.type !== "Story" && task.storyLevel !== null;
 }
 
-function TypeIcon({ type }: { type: TaskType | null }) {
-  switch (type) {
-    case "Bug":
-      return <Bug className="text-destructive h-3.5 w-3.5" />;
-    case "Story":
-      return <BookOpen className="text-primary h-3.5 w-3.5" />;
-    case "Task":
-      return <ClipboardList className="text-muted-foreground h-3.5 w-3.5" />;
-    default:
-      return <span className="text-muted-foreground text-[12px]">—</span>;
-  }
-}
 
 function SeverityBadge({ severity }: { severity: Severity | null }) {
   if (!severity || severity === "NA")
@@ -263,6 +249,11 @@ export function TaskTable() {
 
   const statusesByProjectId = useMemo(
     () => new Map(projects.map((p) => [p.id, p.availableStatuses] as const)),
+    [projects],
+  );
+
+  const issueTypesByProjectId = useMemo(
+    () => new Map(projects.map((p) => [p.id, p.availableIssueTypes ?? []] as const)),
     [projects],
   );
 
@@ -513,6 +504,7 @@ export function TaskTable() {
                       isSelected={row.task.id === selectedTaskId}
                       showExtendedColumns={showExtendedColumns}
                       statuses={statusesByProjectId.get(row.task.projectId) ?? []}
+                      issueTypes={issueTypesByProjectId.get(row.task.projectId) ?? []}
                       totalMinutes={totalMinutesByTaskId[row.task.id] ?? 0}
                       onSelect={handleSelectTask}
                       depth={row.depth}
@@ -540,6 +532,7 @@ const TaskRow = memo(function TaskRow({
   isSelected,
   showExtendedColumns,
   statuses,
+  issueTypes,
   totalMinutes,
   onSelect,
   depth,
@@ -550,6 +543,7 @@ const TaskRow = memo(function TaskRow({
   isSelected: boolean;
   showExtendedColumns: boolean;
   statuses: string[];
+  issueTypes: string[];
   totalMinutes: number;
   onSelect: (taskId: string) => void;
   depth?: number;
@@ -574,6 +568,7 @@ const TaskRow = memo(function TaskRow({
     })),
   );
   const hasStoryPointViolation = hasStoryPointRuleViolation(task);
+  const displayIssueTypes = issueTypes.length > 0 ? issueTypes : TASK_TYPES;
 
   return (
     <TableRow
@@ -641,7 +636,7 @@ const TaskRow = memo(function TaskRow({
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            {TASK_TYPES.map((t) => (
+            {displayIssueTypes.map((t) => (
               <SelectItem key={t} value={t} className="text-[13px]">
                 <div className="flex items-center gap-1.5">
                   <TypeIcon type={t} />

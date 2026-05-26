@@ -11,9 +11,10 @@ export interface Project {
   name: string;
   jiraProjectKey: string;
   availableStatuses: string[];
+  availableIssueTypes?: string[];
 }
 
-export type TaskType = "Story" | "Bug" | "Task";
+export type TaskType = string;
 export type Severity = "Critical" | "High" | "Medium" | "Low" | "NA";
 
 export interface Task {

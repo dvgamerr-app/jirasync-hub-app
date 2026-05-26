@@ -7,11 +7,6 @@ const DEFAULT_STORY_POINT_FIELD_ID = "customfield_10016";
 const SECONDS_PER_WORKDAY = 8 * 60 * 60; // 8 hours in seconds
 const LINKED_ISSUES_BATCH_SIZE = 50;
 
-const ISSUE_TYPE_MAP: Partial<Record<string, Task["type"]>> = {
-  Bug: "Bug",
-  Story: "Story",
-};
-
 const SEVERITY_PATTERNS: [RegExp, Task["severity"]][] = [
   [/critical|highest|blocker/, "Critical"],
   [/high/, "High"],
@@ -94,6 +89,7 @@ type JiraProjectStatus = {
 };
 
 type JiraProjectIssueTypeStatuses = {
+  name?: string | null;
   statuses?: JiraProjectStatus[] | null;
 };
 
@@ -344,11 +340,7 @@ function mapIssueToTask(
 
   const issueTypeName = issue.fields.issuetype?.name ?? "";
   const isEpic = issueTypeName === "Epic";
-  const type: Task["type"] = isEpic
-    ? null
-    : issueTypeName
-      ? (ISSUE_TYPE_MAP[issueTypeName] ?? "Task")
-      : null;
+  const type: Task["type"] = isEpic ? null : issueTypeName || null;
 
   return {
     id: getTaskId(account.id, issue.key),
@@ -397,14 +389,26 @@ function mergeStatuses(primary: Iterable<string>, secondary: Iterable<string>): 
   return merged;
 }
 
-async function fetchProjectStatuses(account: JiraAccount, projectKey: string): Promise<string[]> {
+type ProjectMetadata = {
+  statuses: string[];
+  issueTypes: string[];
+};
+
+async function fetchProjectMetadata(account: JiraAccount, projectKey: string): Promise<ProjectMetadata> {
   const res = await jiraFetch(`project/${encodeURIComponent(projectKey)}/statuses`, account);
   const data = (await res.json()) as JiraProjectIssueTypeStatuses[];
 
-  const names = (data ?? []).flatMap((issueType) =>
-    (issueType.statuses ?? []).map((status) => status.name ?? "").filter(Boolean),
-  );
-  return [...new Set(names)];
+  const statuses = [...new Set(
+    (data ?? []).flatMap((it) =>
+      (it.statuses ?? []).map((s) => s.name ?? "").filter(Boolean),
+    ),
+  )];
+
+  const issueTypes = [...new Set(
+    (data ?? []).map((it) => it.name ?? "").filter(Boolean),
+  )];
+
+  return { statuses, issueTypes };
 }
 
 function buildProjectEntry(
@@ -575,25 +579,27 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
   await fetchTruncatedWorklogs(account, cols.truncatedIssueKeys, cols.worklogsByTaskId);
 
   const collectedProjects = Array.from(cols.projectMap.values());
-  const projectStatusResults = await Promise.allSettled(
-    collectedProjects.map((project) => fetchProjectStatuses(account, project.jiraProjectKey)),
+  const projectMetaResults = await Promise.allSettled(
+    collectedProjects.map((project) => fetchProjectMetadata(account, project.jiraProjectKey)),
   );
 
   const projects = collectedProjects.map((project, index) => {
-    const statusResult = projectStatusResults[index];
-    if (statusResult.status === "rejected") {
+    const metaResult = projectMetaResults[index];
+    if (metaResult.status === "rejected") {
       console.warn(
-        `Failed fetching statuses for project ${project.jiraProjectKey}:`,
-        statusResult.reason,
+        `Failed fetching metadata for project ${project.jiraProjectKey}:`,
+        metaResult.reason,
       );
     }
 
+    const meta = metaResult.status === "fulfilled" ? metaResult.value : null;
     return {
       ...project,
       availableStatuses: mergeStatuses(
-        statusResult.status === "fulfilled" ? statusResult.value : [],
+        meta?.statuses ?? [],
         cols.statusSetByProjectId.get(project.id) ?? [],
       ),
+      availableIssueTypes: meta?.issueTypes ?? [],
     };
   });
 
