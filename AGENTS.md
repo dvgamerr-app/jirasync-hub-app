@@ -74,6 +74,18 @@
 
 ## Rules / gotchas
 
+**Offline-first.** IndexedDB is source of truth. Never call Jira API from components — only through `task-store.ts` or `sync-service.ts`.
+
+**Single store.** All UI state + async ops go through `src/store/task-store.ts` (Zustand). Don't create parallel state.
+
+**Persist before push.** All task mutations: `updateTask()` → `markDirtyAndPersist()` → IndexedDB write in background. Then sync to Jira separately.
+
+**Shared constants.** `TASK_TYPES`, `SEVERITIES`, `STORY_LEVEL_OPTIONS`, `NO_PENDING_MANDAY` live in `src/constants/task.ts`. `DEFAULT_STORY_POINT_FIELD_ID` exported from `src/lib/jira-api.ts`.
+
+**useShallow selectors must return stable references.** Never create new array/object instances inside a `useShallow` selector (e.g. `.filter()`, `.sort()`, `?? []`). `useShallow` uses reference equality — new instances every call = infinite render loop. Pattern: subscribe to raw arrays in `useShallow`, then derive computed values with `useMemo` in the component body. Getter functions (`getTaskById`, etc.) are stable refs and won't trigger re-renders when data changes — subscribe to `tasks`/`projects`/`workLogs` directly instead.
+
+**No wrapper components.** Don't create one-liner wrapper components. Call the underlying component directly.
+
 - `createExportRows()` ใน `ExportDialog.tsx` ต้อง group worklogs ที่ task เดียวกัน + เดือนเดียวกันเข้าด้วยกัน (key = `taskId::periodValue`) และ sum `timeSpentMinutes` ก่อน build rows — ห้ามสร้าง 1 row ต่อ 1 worklog ตรงๆ เพราะจะทำให้ ticket id ซ้ำใน CSV และ clipboard
 - อย่า hardcode story point field ใหม่ตรงๆ; ใช้ `getStoryPointFieldMap()[projectId] ?? "customfield_10016"`
 - `JiraIssueFields` ต้องมี `[key: string]: unknown` เพื่อรองรับ dynamic custom fields
@@ -87,6 +99,13 @@
 
 ## Useful commands
 
+| Task | Command |
+|---|---|
+| Dev server | `bun run dev` + `bun run tauri dev` |
+| Tests | `bun run test` |
+| Lint | `bun run lint` |
+| Type check | `bun run build` (runs `tsc`) |
+
 ```bash
 bun tauri dev
 bun tauri build
@@ -95,3 +114,27 @@ bun format
 bun x vitest run
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
+
+## Detailed Docs
+
+- [Architecture](docs/architecture.md) — stack, data flow, ID scheme, sync strategy, Dexie schema
+- [Technical Debt](docs/technical-debt.md) — fixed issues + remaining backlog with fix guidance
+
+## Architecture Diagram
+
+```
+Jira API ──sync──► IndexedDB (Dexie) ──loadFromDB──► Zustand ──► React UI
+                                                          ▲
+                              local edits (isDirty=true) ─┘
+                                                          │
+                              syncAllDirtyTasks ──────────┘──► Jira API
+```
+
+## Known Remaining Debt
+
+High priority — see [docs/technical-debt.md](docs/technical-debt.md#remaining) for details:
+1. `loadScopedCollections` loads all DB records to memory (should use Dexie indexed queries)
+2. `getFilteredTasks()` computed twice per render (Index + TaskTable each call it)
+3. `syncTaskToJira` reloads all data after syncing a single task
+4. No React Error Boundary around `TaskTable` / `TaskDetailPanel`
+5. `@tanstack/react-query` still in `package.json` — run `bun remove @tanstack/react-query`
