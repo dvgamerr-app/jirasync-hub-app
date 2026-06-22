@@ -73,6 +73,7 @@ type JiraIssueFields = {
 
 type JiraIssue = {
   key: string;
+  archived?: boolean;
   fields: JiraIssueFields;
 };
 
@@ -363,6 +364,7 @@ function mapIssueToTask(
     assignee: issue.fields.assignee?.displayName ?? null,
     refUrl: `${getJiraBaseUrl(account)}/browse/${issue.key}`,
     note: null,
+    isArchived: issue.archived ?? false,
     isSynced: true,
     isDirty: false,
     createdAt: issue.fields.created,

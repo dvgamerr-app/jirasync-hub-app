@@ -72,6 +72,18 @@ async function replaceTaskWorklogs(taskId: string, freshLogs: WorkLog[]): Promis
   });
 }
 
+async function markStaleTasksAsArchived(
+  visibleProjectIds: Set<string>,
+  syncedTaskIds: Set<string>,
+): Promise<void> {
+  const localTasks = await db.tasks.where("projectId").anyOf([...visibleProjectIds]).toArray();
+  const staleIds = localTasks
+    .filter((t) => !syncedTaskIds.has(t.id) && !t.isDirty)
+    .map((t) => t.id);
+  if (staleIds.length === 0) return;
+  await db.tasks.where("id").anyOf(staleIds).modify({ isArchived: true });
+}
+
 async function removeStaleProjectsForAccount(
   accountId: string,
   visibleProjectIds: Set<string>,
@@ -133,6 +145,7 @@ export async function syncNow(): Promise<void> {
       const localMap = new Map(localTasks.filter(Boolean).map((t) => [t!.id, t!]));
       const mergedTasks = tasks.map((t) => mergeRemoteTaskWithLocalState(t, localMap.get(t.id)));
       await db.tasks.bulkPut(mergedTasks);
+      await markStaleTasksAsArchived(visibleProjectIds, new Set(tasks.map((t) => t.id)));
 
       // Sync work logs: replace Jira-sourced logs, keep locally-created ones
       await Promise.all(

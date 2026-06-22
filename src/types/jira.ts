@@ -33,6 +33,7 @@ export interface Task {
   assignee: string | null;
   refUrl: string | null;
   note: string | null;
+  isArchived?: boolean;
   isSynced: boolean;
   isDirty: boolean;
   createdAt: string;

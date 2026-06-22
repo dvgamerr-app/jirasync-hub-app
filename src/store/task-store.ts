@@ -247,14 +247,14 @@ function isDoneTask(task: Pick<Task, "status">): boolean {
 }
 
 function matchesTaskStatusFilter(
-  task: Pick<Task, "status">,
+  task: Pick<Task, "status" | "isArchived">,
   taskStatusFilter: TaskStatusFilter,
 ): boolean {
   switch (taskStatusFilter) {
     case "done":
-      return isDoneTask(task);
+      return isDoneTask(task) && !task.isArchived;
     case "active":
-      return !isDoneTask(task);
+      return !isDoneTask(task) && !task.isArchived;
     case "all":
     default:
       return true;
