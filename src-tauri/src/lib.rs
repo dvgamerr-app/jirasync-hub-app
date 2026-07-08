@@ -13,15 +13,15 @@ fn derive_key() -> Result<[u8; 32], String> {
 #[tauri::command]
 fn encrypt_data(plaintext: String) -> Result<String, String> {
     use aes_gcm::{
-        aead::{Aead, AeadCore, KeyInit, OsRng},
+        aead::{Aead, Generate, KeyInit},
         Aes256Gcm, Key,
     };
     use base64::{engine::general_purpose::STANDARD, Engine};
 
     let key_bytes = derive_key()?;
-    let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
-    let cipher = Aes256Gcm::new(key);
-    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let key = Key::<Aes256Gcm>::from(key_bytes);
+    let cipher = Aes256Gcm::new(&key);
+    let nonce = aes_gcm::aead::Nonce::<Aes256Gcm>::generate();
     let ciphertext = cipher
         .encrypt(&nonce, plaintext.as_bytes())
         .map_err(|e| e.to_string())?;
@@ -45,11 +45,11 @@ fn decrypt_data(ciphertext: String) -> Result<String, String> {
     }
 
     let key_bytes = derive_key()?;
-    let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
-    let cipher = Aes256Gcm::new(key);
-    let nonce = Nonce::from_slice(&data[..12]);
+    let key = Key::<Aes256Gcm>::from(key_bytes);
+    let cipher = Aes256Gcm::new(&key);
+    let nonce = Nonce::try_from(&data[..12]).map_err(|e| e.to_string())?;
     let plaintext = cipher
-        .decrypt(nonce, &data[12..])
+        .decrypt(&nonce, &data[12..])
         .map_err(|e| e.to_string())?;
 
     String::from_utf8(plaintext).map_err(|e| e.to_string())
