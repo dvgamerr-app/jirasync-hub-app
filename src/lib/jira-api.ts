@@ -26,6 +26,10 @@ type JiraNamedField = {
   name?: string | null;
 };
 
+type JiraStatusField = JiraNamedField & {
+  statusCategory?: { key?: string | null } | null;
+};
+
 type JiraAssignee = {
   displayName?: string | null;
 };
@@ -50,7 +54,7 @@ type JiraIssueLinkEntry = {
 type JiraIssueFields = {
   summary?: string | null;
   description?: JiraTextContent;
-  status?: JiraNamedField | null;
+  status?: JiraStatusField | null;
   issuetype?: JiraNamedField | null;
   priority?: JiraNamedField | null;
   assignee?: JiraAssignee | null;
@@ -322,11 +326,17 @@ function normalizeStoryLevel(value: number | null | undefined): Task["storyLevel
   }
 }
 
+function mapStatusCategory(key: string | null | undefined): Task["statusCategory"] {
+  if (key === "new" || key === "indeterminate" || key === "done") return key;
+  return null;
+}
+
 function mapIssueToTask(
   issue: JiraIssue,
   account: JiraAccount,
   projectKey: string,
   storyPointFieldId = DEFAULT_STORY_POINT_FIELD_ID,
+  currentUserDisplayName: string | null = null,
 ): Task {
   const desc = issue.fields.description;
   // Preserve raw ADF as JSON string so the renderer can produce rich output.
@@ -342,6 +352,7 @@ function mapIssueToTask(
   const issueTypeName = issue.fields.issuetype?.name ?? "";
   const isEpic = issueTypeName === "Epic";
   const type: Task["type"] = isEpic ? null : issueTypeName || null;
+  const assignee = issue.fields.assignee?.displayName ?? null;
 
   return {
     id: getTaskId(account.id, issue.key),
@@ -361,7 +372,9 @@ function mapIssueToTask(
             (issue.fields.timetracking.originalEstimateSeconds / SECONDS_PER_WORKDAY) * 1000,
           ) / 1000
         : null,
-    assignee: issue.fields.assignee?.displayName ?? null,
+    assignee,
+    statusCategory: mapStatusCategory(issue.fields.status?.statusCategory?.key),
+    isCurrentAssignee: currentUserDisplayName == null ? null : assignee === currentUserDisplayName,
     refUrl: `${getJiraBaseUrl(account)}/browse/${issue.key}`,
     note: null,
     isArchived: issue.archived ?? false,
@@ -441,6 +454,7 @@ type IssueCollections = {
   truncatedIssueKeys: Map<string, string>;
   fetchedKeys: Set<string>;
   storyPointFieldMap: Record<string, string>;
+  currentUserDisplayName: string | null;
 };
 
 function processIssueIntoCollections(
@@ -465,13 +479,20 @@ function processIssueIntoCollections(
   if (status) addProjectStatus(cols.statusSetByProjectId, projectId, status);
 
   const storyPointFieldId = cols.storyPointFieldMap[projectId] ?? DEFAULT_STORY_POINT_FIELD_ID;
-  const task = mapIssueToTask(issue, account, projectKey, storyPointFieldId);
+  const task = mapIssueToTask(
+    issue,
+    account,
+    projectKey,
+    storyPointFieldId,
+    cols.currentUserDisplayName,
+  );
   cols.tasks.push(task);
 
   resolveWorklogs(issue.key, task.id, issue, cols.worklogsByTaskId, cols.truncatedIssueKeys);
 }
 
 export async function fetchAssignedJiraData(account: JiraAccount): Promise<AssignedJiraData> {
+  const currentUserDisplayName = await fetchJiraMyselfDisplayName(account).catch(() => null);
   const storyPointFieldMap = getStoryPointFieldMap();
   // Collect all unique story-point field IDs configured for this account's projects.
   const storyPointFieldIds = new Set([DEFAULT_STORY_POINT_FIELD_ID]);
@@ -505,6 +526,7 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
     truncatedIssueKeys: new Map(),
     fetchedKeys: new Set(),
     storyPointFieldMap,
+    currentUserDisplayName,
   };
   const linkedKeys = new Set<string>();
   let nextPageToken: string | undefined;

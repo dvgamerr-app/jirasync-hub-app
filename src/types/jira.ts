@@ -16,6 +16,7 @@ export interface Project {
 
 export type TaskType = string;
 export type Severity = "Critical" | "High" | "Medium" | "Low" | "NA";
+export type StatusCategory = "new" | "indeterminate" | "done";
 
 export interface Task {
   id: string;
@@ -31,6 +32,8 @@ export interface Task {
   storyLevel: StoryLevel | null;
   mandays: number | null;
   assignee: string | null;
+  statusCategory?: StatusCategory | null;
+  isCurrentAssignee?: boolean | null;
   refUrl: string | null;
   note: string | null;
   isArchived?: boolean;

@@ -29,7 +29,10 @@ function mockJsonResponse(payload: unknown): Response {
   } as unknown as Response;
 }
 
-function buildSearchResponse(status: string) {
+function buildSearchResponse(
+  status: string,
+  options: { statusCategoryKey?: string; assigneeDisplayName?: string | null } = {},
+) {
   return {
     issues: [
       {
@@ -37,10 +40,18 @@ function buildSearchResponse(status: string) {
         fields: {
           summary: "Alpha task",
           description: null,
-          status: { name: status },
+          status: {
+            name: status,
+            statusCategory: options.statusCategoryKey ? { key: options.statusCategoryKey } : undefined,
+          },
           issuetype: { name: "Task" },
           priority: { name: "Medium" },
-          assignee: { displayName: "Alice" },
+          assignee:
+            options.assigneeDisplayName === undefined
+              ? { displayName: "Alice" }
+              : options.assigneeDisplayName === null
+                ? null
+                : { displayName: options.assigneeDisplayName },
           customfield_10016: null,
           timetracking: null,
           project: { key: "ALPHA", name: "Project Alpha" },
@@ -103,5 +114,61 @@ describe("fetchAssignedJiraData", () => {
     expect(warnSpy).toHaveBeenCalled();
 
     warnSpy.mockRestore();
+  });
+
+  it("maps statusCategory and flags whether the issue is still assigned to us", async () => {
+    httpFetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith("/rest/api/3/myself")) {
+        return mockJsonResponse({ displayName: "Alice" });
+      }
+
+      if (url.endsWith("/rest/api/3/search/jql")) {
+        return mockJsonResponse(
+          buildSearchResponse("To Do", { statusCategoryKey: "new", assigneeDisplayName: "Bob" }),
+        );
+      }
+
+      if (url.endsWith("/rest/api/3/project/ALPHA/statuses")) {
+        return mockJsonResponse([{ statuses: [{ name: "To Do" }] }]);
+      }
+
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const result = await fetchAssignedJiraData(account);
+    const task = result.tasks[0];
+
+    expect(task.statusCategory).toBe("new");
+    expect(task.assignee).toBe("Bob");
+    expect(task.isCurrentAssignee).toBe(false);
+  });
+
+  it("marks isCurrentAssignee true when the issue is still assigned to us", async () => {
+    httpFetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith("/rest/api/3/myself")) {
+        return mockJsonResponse({ displayName: "Alice" });
+      }
+
+      if (url.endsWith("/rest/api/3/search/jql")) {
+        return mockJsonResponse(
+          buildSearchResponse("In Progress", {
+            statusCategoryKey: "indeterminate",
+            assigneeDisplayName: "Alice",
+          }),
+        );
+      }
+
+      if (url.endsWith("/rest/api/3/project/ALPHA/statuses")) {
+        return mockJsonResponse([{ statuses: [{ name: "In Progress" }] }]);
+      }
+
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const result = await fetchAssignedJiraData(account);
+    const task = result.tasks[0];
+
+    expect(task.statusCategory).toBe("indeterminate");
+    expect(task.isCurrentAssignee).toBe(true);
   });
 });

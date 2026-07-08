@@ -473,6 +473,42 @@ describe("task-store task status filters", () => {
     ).toEqual([doneTask.id, activeTask.id]);
   });
 
+  it("drops from the active list a To Do task that was reassigned away from us, but keeps it once it's in progress", () => {
+    const project = createProject();
+    const stillOurs = createTask({
+      id: "task-account-1-ALPHA-1",
+      jiraTaskId: "ALPHA-1",
+      status: "To Do",
+      statusCategory: "new",
+      isCurrentAssignee: true,
+      createdAt: "2026-03-21T10:00:00.000Z",
+    });
+    const reassignedBeforeStart = createTask({
+      id: "task-account-1-ALPHA-2",
+      jiraTaskId: "ALPHA-2",
+      status: "To Do",
+      statusCategory: "new",
+      isCurrentAssignee: false,
+      createdAt: "2026-03-21T11:00:00.000Z",
+    });
+    const reassignedAfterStart = createTask({
+      id: "task-account-1-ALPHA-3",
+      jiraTaskId: "ALPHA-3",
+      status: "In Progress",
+      statusCategory: "indeterminate",
+      isCurrentAssignee: false,
+      createdAt: "2026-03-21T12:00:00.000Z",
+    });
+    seedStore([stillOurs, reassignedBeforeStart, reassignedAfterStart], [], [project]);
+
+    expect(
+      useTaskStore
+        .getState()
+        .getFilteredTasks()
+        .map((task) => task.id),
+    ).toEqual([reassignedAfterStart.id, stillOurs.id]);
+  });
+
   it("clears the selected task when it no longer matches the active filter", () => {
     const project = createProject();
     const activeTask = createTask({
