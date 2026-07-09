@@ -29,9 +29,9 @@ export function MobileSidebar({ onOpenSettings }: MobileSidebarProps) {
         </Button>
       </SheetTrigger>
       <SheetContent side="right" className="flex w-[280px] flex-col p-0">
-        <SheetTitle className="border-border border-b px-3 py-3 text-[13px] font-semibold">
-          Task Manager
-        </SheetTitle>
+        <div className="border-border border-b p-3">
+          <SheetTitle className="text-[13px] font-semibold">Task Manager</SheetTitle>
+        </div>
         <div className="flex-1 overflow-y-auto p-2">
           <button
             onClick={() => handleSelect(null)}

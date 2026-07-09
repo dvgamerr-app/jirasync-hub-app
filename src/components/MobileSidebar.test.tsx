@@ -1,6 +1,7 @@
 import "@/test/jsdom-setup";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, mock, jest, spyOn } from "bun:test";
 import { MobileSidebar } from "@/components/MobileSidebar";
 import { useTaskStore, type TaskStore } from "@/store/task-store";
@@ -115,7 +116,11 @@ describe("MobileSidebar", () => {
       hiddenProjectIds: new Set<string>(),
     } as Partial<TaskStore>);
     await act(async () => {
-      root.render(<MobileSidebar onOpenSettings={onOpenSettings} />);
+      root.render(
+        <MemoryRouter>
+          <MobileSidebar onOpenSettings={onOpenSettings} />
+        </MemoryRouter>,
+      );
     });
   });
 
@@ -143,7 +148,11 @@ describe("MobileSidebar", () => {
     spies.push(spy);
     // Re-render so component captures the spy
     await act(async () => {
-      root.render(<MobileSidebar onOpenSettings={onOpenSettings} />);
+      root.render(
+        <MemoryRouter>
+          <MobileSidebar onOpenSettings={onOpenSettings} />
+        </MemoryRouter>,
+      );
     });
     const allTasksBtn = Array.from(container.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("All Tasks"),
@@ -180,7 +189,11 @@ describe("MobileSidebar", () => {
     await act(async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       useTaskStore.setState({ tasks: [] } as any); // No tasks = no visible projects
-      root.render(<MobileSidebar onOpenSettings={onOpenSettings} />);
+      root.render(
+        <MemoryRouter>
+          <MobileSidebar onOpenSettings={onOpenSettings} />
+        </MemoryRouter>,
+      );
     });
     expect(container.textContent).not.toContain("Project Alpha");
     expect(container.textContent).not.toContain("Acme");

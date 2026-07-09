@@ -1,6 +1,7 @@
 import "@/test/jsdom-setup";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from "bun:test";
 import { TitleBar } from "@/components/TitleBar";
 
@@ -26,7 +27,11 @@ describe("TitleBar", () => {
     root = createRoot(container);
 
     await act(async () => {
-      root.render(<TitleBar />);
+      root.render(
+        <MemoryRouter>
+          <TitleBar />
+        </MemoryRouter>,
+      );
     });
   });
 

@@ -1,5 +1,6 @@
 import type { MouseEvent } from "react";
 import { Minus, Square, X } from "lucide-react";
+import { WorkspaceTabs } from "@/components/WorkspaceTabs";
 import {
   closeWindow,
   minimizeWindow,
@@ -21,10 +22,18 @@ export function TitleBar() {
 
   return (
     <div className="border-border bg-card/85 flex h-10 shrink-0 items-center justify-between border-b backdrop-blur select-none">
-      <div className="flex h-full min-w-0 flex-1 items-center px-3" onMouseDown={onDragMouseDown}>
-        <span className="text-foreground truncate text-[13px] font-semibold tracking-wide">
+      <div
+        className="flex h-full min-w-0 flex-1 items-center gap-3 px-3"
+        onMouseDown={onDragMouseDown}
+      >
+        <span className="text-foreground shrink-0 truncate text-[13px] font-semibold tracking-wide">
           JiraSync Hub
         </span>
+        <div className="bg-border/70 h-4 w-px shrink-0" aria-hidden="true" />
+        {/* Not draggable: tabs need real clicks, not window-move gestures */}
+        <div className="shrink-0" onMouseDown={(e) => e.stopPropagation()}>
+          <WorkspaceTabs variant="compact" />
+        </div>
       </div>
 
       <div className="border-border/70 flex h-full items-center border-l">

@@ -54,7 +54,7 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
     <>
       <aside className="border-border bg-card flex h-full w-[280px] flex-col border-r">
         {/* Header */}
-        <div className="border-border border-b px-3 py-3">
+        <div className="border-border border-b p-3">
           <h2 className="text-[13px] font-semibold">Task Manager</h2>
         </div>
 

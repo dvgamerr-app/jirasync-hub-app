@@ -1,6 +1,7 @@
 import "@/test/jsdom-setup";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, mock, jest, spyOn } from "bun:test";
 import { AppSidebar } from "@/components/AppSidebar";
 import { useTaskStore, type TaskStore } from "@/store/task-store";
@@ -67,7 +68,11 @@ describe("AppSidebar", () => {
       hiddenProjectIds: new Set<string>(),
     } as Partial<TaskStore>);
     await act(async () => {
-      root.render(<AppSidebar onOpenSettings={mock()} />);
+      root.render(
+        <MemoryRouter>
+          <AppSidebar onOpenSettings={mock()} />
+        </MemoryRouter>,
+      );
     });
     await act(async () => {}); // flush getLastSyncTime().then(setLastSync) from useEffect
   });
@@ -92,7 +97,11 @@ describe("AppSidebar", () => {
     await act(async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       useTaskStore.setState({ selectedProjectId: "proj-1" } as any);
-      root.render(<AppSidebar onOpenSettings={mock()} />);
+      root.render(
+        <MemoryRouter>
+          <AppSidebar onOpenSettings={mock()} />
+        </MemoryRouter>,
+      );
     });
     const allTasksBtn = Array.from(container.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("All Tasks"),
@@ -118,7 +127,11 @@ describe("AppSidebar", () => {
   it("clicking Jira Settings calls onOpenSettings", async () => {
     const onOpenSettings = mock();
     await act(async () => {
-      root.render(<AppSidebar onOpenSettings={onOpenSettings} />);
+      root.render(
+        <MemoryRouter>
+          <AppSidebar onOpenSettings={onOpenSettings} />
+        </MemoryRouter>,
+      );
     });
     const settingsBtn = Array.from(container.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("Jira Settings"),
@@ -136,7 +149,11 @@ describe("AppSidebar", () => {
     });
     root = createRoot(container);
     await act(async () => {
-      root.render(<AppSidebar onOpenSettings={mock()} />);
+      root.render(
+        <MemoryRouter>
+          <AppSidebar onOpenSettings={mock()} />
+        </MemoryRouter>,
+      );
     });
     await act(async () => {});
     expect(container.textContent).toContain("Synced");
@@ -145,7 +162,11 @@ describe("AppSidebar", () => {
   it("does not show sync label when getLastSyncTime returns null", async () => {
     getLastSyncTimeMock.mockResolvedValue(null);
     await act(async () => {
-      root.render(<AppSidebar onOpenSettings={mock()} />);
+      root.render(
+        <MemoryRouter>
+          <AppSidebar onOpenSettings={mock()} />
+        </MemoryRouter>,
+      );
     });
     expect(container.textContent).not.toContain("Synced");
   });

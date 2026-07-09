@@ -1,4 +1,4 @@
-import { type MouseEvent, useCallback } from "react";
+import { type MouseEvent, useCallback, useEffect } from "react";
 import { HashRouter, Route, Routes } from "react-router-dom";
 import { TitleBar } from "@/components/TitleBar";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -9,7 +9,10 @@ import {
   usesNativeMacTitlebar,
   type WindowResizeDirection,
 } from "@/lib/desktop";
+import { startMcpBridge } from "@/lib/mcp-bridge";
 import Index from "./pages/Index.tsx";
+import Kanban from "./pages/Kanban.tsx";
+import KanbanCardPage from "./pages/KanbanCardPage.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 function ResizeHandles() {
@@ -49,22 +52,29 @@ function ResizeHandles() {
 const App = () => {
   const showCustomTitlebar = !usesNativeMacTitlebar();
 
+  useEffect(() => {
+    void startMcpBridge();
+  }, []);
+
   return (
     <TooltipProvider>
       <Toaster />
       <Sonner />
       <ResizeHandles />
-      <div className="bg-background flex h-screen flex-col overflow-hidden">
-        {showCustomTitlebar && <TitleBar />}
-        <div className="flex-1 overflow-hidden">
-          <HashRouter>
+      <HashRouter>
+        <div className="bg-background flex h-screen flex-col overflow-hidden">
+          {showCustomTitlebar && <TitleBar />}
+          <div className="flex-1 overflow-hidden">
             <Routes>
               <Route path="/" element={<Index />} />
+              <Route path="/kanban" element={<Kanban />} />
+              <Route path="/kanban/new" element={<KanbanCardPage />} />
+              <Route path="/kanban/card/:cardId" element={<KanbanCardPage />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
-          </HashRouter>
+          </div>
         </div>
-      </div>
+      </HashRouter>
     </TooltipProvider>
   );
 };
