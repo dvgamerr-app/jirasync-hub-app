@@ -473,7 +473,7 @@ describe("task-store task status filters", () => {
     ).toEqual([doneTask.id, activeTask.id]);
   });
 
-  it("drops from the active list a To Do task that was reassigned away from us, but keeps it once it's in progress", () => {
+  it("drops from the active list a To Do or In Progress task that was reassigned away from us", () => {
     const project = createProject();
     const stillOurs = createTask({
       id: "task-account-1-ALPHA-1",
@@ -506,7 +506,7 @@ describe("task-store task status filters", () => {
         .getState()
         .getFilteredTasks()
         .map((task) => task.id),
-    ).toEqual([reassignedAfterStart.id, stillOurs.id]);
+    ).toEqual([stillOurs.id]);
   });
 
   it("clears the selected task when it no longer matches the active filter", () => {

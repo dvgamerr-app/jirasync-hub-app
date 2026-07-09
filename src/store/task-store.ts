@@ -246,10 +246,13 @@ function isDoneTask(task: Pick<Task, "status">): boolean {
   return INACTIVE_STATUSES.has(task.status?.trim().toLowerCase() ?? "");
 }
 
-// A task still in the Jira "To Do" category that is no longer assigned to us was reassigned
-// before work started — drop it from the active list, keep only our latest assignment.
+// A task still in the Jira "To Do" or "In Progress" category that is no longer assigned to us
+// was reassigned away — drop it from the active list, keep only our latest assignment.
 function isStaleReassignedTask(task: Pick<Task, "statusCategory" | "isCurrentAssignee">): boolean {
-  return task.statusCategory === "new" && task.isCurrentAssignee === false;
+  return (
+    (task.statusCategory === "new" || task.statusCategory === "indeterminate") &&
+    task.isCurrentAssignee === false
+  );
 }
 
 function matchesTaskStatusFilter(
