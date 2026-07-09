@@ -1,6 +1,8 @@
 use tauri::{webview::PageLoadEvent, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_window_state::{Builder as WindowStateBuilder, StateFlags, WindowExt};
 
+mod mcp_server;
+
 fn derive_key() -> Result<[u8; 32], String> {
     use sha2::{Digest, Sha256};
     let machine_id = machine_uid::get().map_err(|e| e.to_string())?;
@@ -103,8 +105,16 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(WindowStateBuilder::default().build())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![set_window_theme, encrypt_data, decrypt_data])
+        .invoke_handler(tauri::generate_handler![
+            set_window_theme,
+            encrypt_data,
+            decrypt_data,
+            mcp_server::mcp_bridge_respond,
+            mcp_server::get_mcp_server_info
+        ])
         .setup(|app| {
+            mcp_server::start(app);
+
             let window_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title(WINDOW_TITLE)
                 .inner_size(WINDOW_WIDTH, WINDOW_HEIGHT)

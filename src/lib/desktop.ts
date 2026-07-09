@@ -16,7 +16,7 @@ type TauriRuntimeWindow = Window & {
   __TAURI_INTERNALS__?: unknown;
 };
 
-function isTauriRuntime(): boolean {
+export function isTauriRuntime(): boolean {
   return (
     typeof window !== "undefined" &&
     typeof (window as TauriRuntimeWindow).__TAURI_INTERNALS__ !== "undefined"
