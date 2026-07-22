@@ -132,9 +132,4 @@ Jira API ──sync──► IndexedDB (Dexie) ──loadFromDB──► Zustand
 
 ## Known Remaining Debt
 
-High priority — see [docs/technical-debt.md](docs/technical-debt.md#remaining) for details:
-1. `loadScopedCollections` loads all DB records to memory (should use Dexie indexed queries)
-2. `getFilteredTasks()` computed twice per render (Index + TaskTable each call it)
-3. `syncTaskToJira` reloads all data after syncing a single task
-4. No React Error Boundary around `TaskTable` / `TaskDetailPanel`
-5. `@tanstack/react-query` still in `package.json` — run `bun remove @tanstack/react-query`
+Current remaining debt is tracked in [docs/technical-debt.md](docs/technical-debt.md#remaining).

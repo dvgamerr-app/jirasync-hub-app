@@ -1,6 +1,6 @@
 # Technical Debt — jirasync-hub-app
 
-Last audited: 2026-05-26
+Last audited: 2026-07-09
 
 ## Fixed ✅
 
@@ -14,33 +14,15 @@ Last audited: 2026-05-26
 | `InlineNote` wrapper component with no logic | Removed — call `InlineNoteEditor` directly |
 | `TaskDetailPanel` subscribed to stable `getTaskById` ref — stale data | Now derives `task`/`project`/`workLogs` inside `useShallow` selector, subscribing to live `tasks`/`projects`/`workLogs` arrays |
 | `QueryClientProvider` + `@tanstack/react-query` unused | Removed `QueryClientProvider` from `App.tsx` |
+| `@tanstack/react-query` still installed after `QueryClientProvider` removal | Removed the unused package from `package.json` and `bun.lock` |
+| Vitest mock factories in `JiraSettings`/store tests broke on `vi.mock` hoisting | Switched the affected test handles to hoist-safe `var` bindings and completed missing mock exports |
+| `TypeIcon.tsx` exported both a component and JSX helper | Moved `inferTypeIcon` into `type-icon-glyph.tsx` so Fast Refresh lint stays clean |
+| `getFilteredTasks()` ran twice per render | `Index.tsx` now computes `filteredTasks` once and passes them into `TaskTable` |
+| `syncTaskToJira` reloaded the whole store after a single task sync | The store now patches only the synced task and affected worklogs in memory |
+| `loadScopedCollections` scanned all Dexie tables into memory | The store now loads organizations/projects/tasks/worklogs via account-scoped indexed queries |
+| No React Error Boundary protected the main task workspace | Added `WorkspaceErrorBoundary` around the main content area with retry and reload actions |
 
 ## Remaining
-
-### High Priority
-
-**`loadScopedCollections` loads ALL records to memory** (`task-store.ts:174`)
-
-All four tables are loaded with `.toArray()` then filtered in JavaScript. Should use Dexie indexed queries:
-```ts
-// Instead of:
-const allTasks = await db.tasks.toArray();
-const tasks = allTasks.filter(t => isTaskIdForAccounts(t.id, accountIds));
-
-// Better:
-const tasks = await db.tasks
-  .where("id").startsWith(`task-${accountId}-`)
-  .toArray();
-```
-Impact: Memory usage and load time for large datasets.
-
-**`getFilteredTasks()` computed twice per render**
-
-`Index.tsx` and `TaskTable.tsx` each call `getFilteredTasks()` independently. Both re-run the full filter + sort pipeline. Fix: compute once in `Index.tsx`, pass as prop to `TaskTable`, or memoize with `useMemo` in the store selector.
-
-**`syncTaskToJira` reloads everything for a single task** (`task-store.ts:527`)
-
-After syncing one task, calls `reloadFromDB()` which re-fetches all organizations/projects/tasks/worklogs. Should patch just the synced task in the Zustand state instead.
 
 ### Medium Priority
 
@@ -62,17 +44,6 @@ These add bundle weight. Safe to delete UI files and run `bun remove <pkg>` for 
 
 ### Low Priority
 
-**No React Error Boundary**
-
-No error boundary wraps `TaskTable` or `TaskDetailPanel`. A runtime error inside either would crash the whole app with a blank screen. Add an `<ErrorBoundary>` around the main content area in `Index.tsx`.
-
 **`eslint-disable` for React 19 + TanStack Virtual incompatibility** (`TaskTable.tsx`)
 
 `// eslint-disable-next-line react-hooks/incompatible-library` around `useVirtualizer`. Known upstream issue — no fix available yet. Track TanStack Virtual release notes.
-
-**`@tanstack/react-query` still in `package.json`**
-
-`QueryClientProvider` has been removed from `App.tsx` but the package itself is still installed. Run:
-```bash
-bun remove @tanstack/react-query
-```
