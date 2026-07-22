@@ -61,7 +61,7 @@ function createMockState() {
   return { cards, columns, kanbanDb, seedDefaultColumnsIfEmpty, reset };
 }
 
-let mocked: ReturnType<typeof createMockState>;
+var mocked: ReturnType<typeof createMockState>;
 
 mock.module("@/lib/kanban-db", () => {
   mocked = createMockState();

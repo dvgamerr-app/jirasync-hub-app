@@ -44,8 +44,8 @@ function createDbMocks() {
   };
 }
 
-// var hoisted as undefined; assigned inside mock.module factory
-let dbMocks: ReturnType<typeof createDbMocks>;
+// var stays available after vi.mock hoisting in the Vitest compatibility layer.
+var dbMocks: ReturnType<typeof createDbMocks>;
 
 mock.module("@/lib/jira-db", () => {
   dbMocks = createDbMocks();

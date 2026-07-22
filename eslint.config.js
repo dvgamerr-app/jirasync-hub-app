@@ -23,4 +23,11 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": "off",
     },
   },
+  {
+    files: ["**/*.test.{ts,tsx}"],
+    rules: {
+      // bun:test compatibility relies on var-backed handles for vi.mock hoisting in Vitest.
+      "no-var": "off",
+    },
+  },
 );
