@@ -37,3 +37,65 @@ export const KANBAN_JIRA_LINK_TYPE_LABELS: Record<KanbanJiraLinkType, string> = 
   is_blocked_by: "Is blocked by",
   duplicates: "Duplicates",
 };
+
+export interface KanbanColumnUiToken {
+  cardAccent: string;
+  cardSurface: string;
+  columnDot: string;
+  columnGradient: string;
+  statusBadge: string;
+}
+
+export const DEFAULT_KANBAN_COLUMN_UI: KanbanColumnUiToken = {
+  cardAccent: "bg-primary/70",
+  cardSurface: "border-primary/15 bg-primary/5",
+  columnDot: "bg-primary",
+  columnGradient: "from-primary/12",
+  statusBadge:
+    "border-primary/20 bg-primary/10 text-primary dark:border-primary/25 dark:bg-primary/15",
+};
+
+export const KANBAN_COLUMN_UI: Record<string, KanbanColumnUiToken> = {
+  todo: {
+    cardAccent: "bg-slate-500",
+    cardSurface: "border-slate-300/80 bg-slate-50/90 dark:border-slate-700/70 dark:bg-slate-950/40",
+    columnDot: "bg-slate-500",
+    columnGradient: "from-slate-500/12",
+    statusBadge:
+      "border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-200",
+  },
+  in_progress: {
+    cardAccent: "bg-sky-500",
+    cardSurface: "border-sky-300/80 bg-sky-50/90 dark:border-sky-800/70 dark:bg-sky-950/35",
+    columnDot: "bg-sky-500",
+    columnGradient: "from-sky-500/12",
+    statusBadge:
+      "border-sky-300 bg-sky-100 text-sky-700 dark:border-sky-800 dark:bg-sky-950/70 dark:text-sky-200",
+  },
+  waiting: {
+    cardAccent: "bg-amber-500",
+    cardSurface:
+      "border-amber-300/80 bg-amber-50/90 dark:border-amber-800/70 dark:bg-amber-950/35",
+    columnDot: "bg-amber-500",
+    columnGradient: "from-amber-500/12",
+    statusBadge:
+      "border-amber-300 bg-amber-100 text-amber-700 dark:border-amber-800 dark:bg-amber-950/70 dark:text-amber-200",
+  },
+  blocked: {
+    cardAccent: "bg-rose-500",
+    cardSurface: "border-rose-300/80 bg-rose-50/90 dark:border-rose-800/70 dark:bg-rose-950/35",
+    columnDot: "bg-rose-500",
+    columnGradient: "from-rose-500/12",
+    statusBadge:
+      "border-rose-300 bg-rose-100 text-rose-700 dark:border-rose-800 dark:bg-rose-950/70 dark:text-rose-200",
+  },
+  done: {
+    cardAccent: "bg-emerald-500",
+    cardSurface:
+      "border-emerald-300/80 bg-emerald-50/90 dark:border-emerald-800/70 dark:bg-emerald-950/35",
+    columnDot: "bg-emerald-500",
+    columnGradient: "from-emerald-500/12",
+    statusBadge:
+      "border-emerald-300 bg-emerald-100 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-200",
+  },
+};
