@@ -112,6 +112,10 @@ describe("TaskTable", () => {
 
   let spies: Array<{ mockRestore(): void }>;
 
+  function renderTaskTable() {
+    return root.render(<TaskTable tasks={useTaskStore.getState().getFilteredTasks()} />);
+  }
+
   beforeEach(async () => {
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -130,7 +134,7 @@ describe("TaskTable", () => {
       hiddenProjectIds: new Set<string>(),
     } as Partial<TaskStore>);
     await act(async () => {
-      root.render(<TaskTable />);
+      renderTaskTable();
     });
   });
 
@@ -193,7 +197,7 @@ describe("TaskTable", () => {
 
   it("marks rows red when a non-story task still has story points", async () => {
     await act(async () => {
-      root.render(<TaskTable />);
+      renderTaskTable();
     });
     const row = container.querySelector("tbody tr");
     expect(row?.className).toContain("bg-red-50/80");

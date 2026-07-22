@@ -7,6 +7,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { MobileSidebar } from "@/components/MobileSidebar";
 import { ExportDialog } from "@/components/ExportDialog";
 import { JiraSettingsDialog } from "@/components/JiraSettings";
+import { WorkspaceErrorBoundary } from "@/components/WorkspaceErrorBoundary";
 import { type TaskStatusFilter, useTaskStore } from "@/store/task-store";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -388,28 +389,40 @@ const Index = () => {
         </header>
 
         <div className="flex flex-1 overflow-hidden">
-          {showEmptyState ? (
-            <EmptyTasksState
-              hasJiraAccounts={hasJiraAccounts}
-              hasAnyTasks={allTasks.length > 0}
-              syncing={syncing}
-              taskStatusFilter={taskStatusFilter}
-              searchQuery={searchQuery}
-              onOpenSettings={() => setSettingsOpen(true)}
-              onSync={handleManualSync}
-            />
-          ) : isMobile ? (
-            selectedTaskId ? (
-              <TaskDetailPanel />
+          <WorkspaceErrorBoundary
+            resetKeys={[
+              isMobile,
+              showEmptyState,
+              selectedProjectId,
+              selectedTaskId,
+              taskStatusFilter,
+              searchQuery,
+              filteredTasks.length,
+            ]}
+          >
+            {showEmptyState ? (
+              <EmptyTasksState
+                hasJiraAccounts={hasJiraAccounts}
+                hasAnyTasks={allTasks.length > 0}
+                syncing={syncing}
+                taskStatusFilter={taskStatusFilter}
+                searchQuery={searchQuery}
+                onOpenSettings={() => setSettingsOpen(true)}
+                onSync={handleManualSync}
+              />
+            ) : isMobile ? (
+              selectedTaskId ? (
+                <TaskDetailPanel />
+              ) : (
+                <TaskTable tasks={filteredTasks} />
+              )
             ) : (
-              <TaskTable />
-            )
-          ) : (
-            <>
-              <TaskTable />
-              {selectedTaskId && <TaskDetailPanel />}
-            </>
-          )}
+              <>
+                <TaskTable tasks={filteredTasks} />
+                {selectedTaskId && <TaskDetailPanel />}
+              </>
+            )}
+          </WorkspaceErrorBoundary>
         </div>
       </div>
 

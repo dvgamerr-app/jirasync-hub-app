@@ -55,7 +55,6 @@ function hasStoryPointRuleViolation(task: Pick<Task, "type" | "storyLevel">): bo
   return task.type !== "Story" && task.storyLevel !== null;
 }
 
-
 function SeverityBadge({ severity }: { severity: Severity | null }) {
   if (!severity || severity === "NA")
     return <span className="text-muted-foreground text-[12px]">—</span>;
@@ -198,25 +197,17 @@ const EpicHeaderRow = memo(function EpicHeaderRow({
   );
 });
 
-export function TaskTable() {
-  const {
-    selectedTaskId,
-    getFilteredTasks,
-    workLogs,
-    projects,
-    tasks: rawTasks,
-    selectedProjectId,
-  } = useTaskStore(
+export function TaskTable({ tasks }: { tasks: Task[] }) {
+  const { selectedTaskId, workLogs, projects, tasks: rawTasks, selectedProjectId } = useTaskStore(
     useShallow((s) => ({
       selectedTaskId: s.selectedTaskId,
-      getFilteredTasks: s.getFilteredTasks,
       workLogs: s.workLogs,
       projects: s.projects,
       tasks: s.tasks,
       selectedProjectId: s.selectedProjectId,
     })),
   );
-  const allTasks = getFilteredTasks();
+  const allTasks = tasks;
   const showExtendedColumns = !selectedTaskId;
   const colSpanAll = showExtendedColumns ? FULL_COLUMN_COUNT : COMPACT_COLUMN_COUNT;
 

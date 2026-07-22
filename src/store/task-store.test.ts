@@ -16,6 +16,8 @@ function createMockState() {
     },
   ];
 
+  const organizationRows = new Map<string, Organization>();
+  const projectRows = new Map<string, Project>();
   const tasks = new Map<string, StoredTaskRow>();
   const workLogs = new Map<string, StoredWorkLogRow>();
 
@@ -24,6 +26,16 @@ function createMockState() {
     field: keyof TRow,
     value: unknown,
   ) => Array.from(collection.values()).filter((item) => Reflect.get(item, field) === value);
+
+  const getByPrefix = <TRow extends object>(
+    collection: Map<string, TRow>,
+    field: keyof TRow,
+    prefix: string,
+  ) =>
+    Array.from(collection.values()).filter((item) => {
+      const fieldValue = Reflect.get(item, field);
+      return typeof fieldValue === "string" && fieldValue.startsWith(prefix);
+    });
 
   const deleteByField = <TRow extends { id: string }>(
     collection: Map<string, TRow>,
@@ -48,22 +60,37 @@ function createMockState() {
     });
   };
 
+  const deleteByPrefix = <TRow extends { id: string }>(
+    collection: Map<string, TRow>,
+    field: keyof TRow,
+    prefix: string,
+  ) => {
+    Array.from(collection.entries()).forEach(([id, item]) => {
+      const fieldValue = Reflect.get(item, field);
+      if (typeof fieldValue === "string" && fieldValue.startsWith(prefix)) {
+        collection.delete(id);
+      }
+    });
+  };
+
   const db = {
     organizations: {
-      toArray: mock<() => Promise<Organization[]>>(async () => []),
+      toArray: mock<() => Promise<Organization[]>>(async () => Array.from(organizationRows.values())),
       delete: mock(async () => undefined),
-      where: mock(() => ({
-        equals: mock(() => ({
-          toArray: mock<() => Promise<Organization[]>>(async () => []),
+      where: mock((field: keyof Organization) => ({
+        equals: mock((value: unknown) => ({
+          toArray: mock<() => Promise<Organization[]>>(async () =>
+            getByField(organizationRows, field, value),
+          ),
           delete: mock(async () => undefined),
         })),
       })),
     },
     projects: {
-      toArray: mock<() => Promise<Project[]>>(async () => []),
-      where: mock(() => ({
-        equals: mock(() => ({
-          toArray: mock<() => Promise<Project[]>>(async () => []),
+      toArray: mock<() => Promise<Project[]>>(async () => Array.from(projectRows.values())),
+      where: mock((field: keyof Project) => ({
+        equals: mock((value: unknown) => ({
+          toArray: mock<() => Promise<Project[]>>(async () => getByField(projectRows, field, value)),
           delete: mock(async () => undefined),
         })),
       })),
@@ -80,6 +107,12 @@ function createMockState() {
           toArray: mock(async () => getByField(tasks, field, value)),
           delete: mock(async () => {
             deleteByField(tasks, field, value);
+          }),
+        })),
+        startsWith: mock((prefix: string) => ({
+          toArray: mock(async () => getByPrefix(tasks, field, prefix)),
+          delete: mock(async () => {
+            deleteByPrefix(tasks, field, prefix);
           }),
         })),
       })),
@@ -113,6 +146,12 @@ function createMockState() {
             deleteByField(workLogs, field, value);
           }),
         })),
+        startsWith: mock((prefix: string) => ({
+          toArray: mock(async () => getByPrefix(workLogs, field, prefix)),
+          delete: mock(async () => {
+            deleteByPrefix(workLogs, field, prefix);
+          }),
+        })),
       })),
       toCollection: mock(() => ({
         filter: (predicate: (item: StoredWorkLogRow) => boolean) => ({
@@ -135,6 +174,8 @@ function createMockState() {
   const deleteJiraWorkLog = mock(async () => undefined);
 
   const reset = () => {
+    organizationRows.clear();
+    projectRows.clear();
     tasks.clear();
     workLogs.clear();
 
@@ -167,6 +208,8 @@ function createMockState() {
 
   return {
     accounts,
+    organizationRows,
+    projectRows,
     tasks,
     workLogs,
     db,
@@ -179,9 +222,9 @@ function createMockState() {
   };
 }
 
-// var is hoisted as undefined; assigned inside the mock.module factory
-// so it's available for all subsequent module-level and test code
-let mocked: ReturnType<typeof createMockState>;
+// var stays available after vi.mock hoisting in the Vitest compatibility layer,
+// so it's available for all subsequent module-level and test code.
+var mocked: ReturnType<typeof createMockState>;
 
 mock.module("@/lib/jira-db", () => {
   mocked = createMockState();
@@ -193,6 +236,7 @@ mock.module("@/lib/jira-db", () => {
 });
 
 mock.module("@/lib/jira-api", () => ({
+  DEFAULT_STORY_POINT_FIELD_ID: "customfield_10016",
   get updateJiraIssue() {
     return mocked?.updateJiraIssue;
   },
@@ -382,6 +426,7 @@ describe("task-store manual worklog sync", () => {
 
     await useTaskStore.getState().syncTaskToJira(task.id);
 
+    const state = useTaskStore.getState();
     expect(mocked.updateJiraIssue).toHaveBeenCalledOnce();
     expect(mocked.addJiraWorkLog).toHaveBeenCalledWith(
       mocked.accounts[0],
@@ -410,7 +455,18 @@ describe("task-store manual worklog sync", () => {
         isSynced: true,
       }),
     );
-    expect(reloadFromDB).toHaveBeenCalledOnce();
+    expect(state.tasks[0]).toMatchObject({
+      id: task.id,
+      isDirty: false,
+      isSynced: true,
+    });
+    expect(state.workLogs).toHaveLength(1);
+    expect(state.workLogs[0]).toMatchObject({
+      id: pendingCreate.id,
+      jiraWorklogId: "jira-worklog-new",
+      syncStatus: "synced",
+    });
+    expect(reloadFromDB).not.toHaveBeenCalled();
   });
 });
 
@@ -569,49 +625,108 @@ describe("task-store task status filters", () => {
   });
 
   it("orders visible projects by Jira connection order", async () => {
-    mocked.db.organizations.toArray.mockResolvedValue([
-      {
-        id: "org-account-1",
-        name: "Account One",
-        jiraInstanceUrl: "https://account-1.atlassian.net",
-        lastSyncedAt: null,
-      },
-      {
-        id: "org-account-2",
-        name: "Account Two",
-        jiraInstanceUrl: "https://account-2.atlassian.net",
-        lastSyncedAt: null,
-      },
-    ]);
-    mocked.db.projects.toArray.mockResolvedValue([
+    mocked.organizationRows.set("org-account-1", {
+      id: "org-account-1",
+      name: "Account One",
+      jiraInstanceUrl: "https://account-1.atlassian.net",
+      lastSyncedAt: null,
+    });
+    mocked.organizationRows.set("org-account-2", {
+      id: "org-account-2",
+      name: "Account Two",
+      jiraInstanceUrl: "https://account-2.atlassian.net",
+      lastSyncedAt: null,
+    });
+    mocked.organizationRows.set("org-account-3", {
+      id: "org-account-3",
+      name: "Account Three",
+      jiraInstanceUrl: "https://account-3.atlassian.net",
+      lastSyncedAt: null,
+    });
+    mocked.projectRows.set(
+      "proj-account-2-BETA",
       createProject({
         id: "proj-account-2-BETA",
         orgId: "org-account-2",
         name: "Project Beta",
         jiraProjectKey: "BETA",
       }),
+    );
+    mocked.projectRows.set(
+      "proj-account-1-ALPHA",
       createProject({
         id: "proj-account-1-ALPHA",
         orgId: "org-account-1",
         name: "Project Alpha",
         jiraProjectKey: "ALPHA",
       }),
-    ]);
-    mocked.db.tasks.toArray.mockResolvedValue([
+    );
+    mocked.projectRows.set(
+      "proj-account-3-OMEGA",
+      createProject({
+        id: "proj-account-3-OMEGA",
+        orgId: "org-account-3",
+        name: "Project Omega",
+        jiraProjectKey: "OMEGA",
+      }),
+    );
+    mocked.tasks.set(
+      "task-account-2-BETA-1",
       createTask({
         id: "task-account-2-BETA-1",
         projectId: "proj-account-2-BETA",
         jiraTaskId: "BETA-1",
         status: "In Progress",
       }),
+    );
+    mocked.tasks.set(
+      "task-account-1-ALPHA-1",
       createTask({
         id: "task-account-1-ALPHA-1",
         projectId: "proj-account-1-ALPHA",
         jiraTaskId: "ALPHA-1",
         status: "In Progress",
       }),
-    ]);
-    mocked.db.workLogs.toArray.mockResolvedValue([]);
+    );
+    mocked.tasks.set(
+      "task-account-1-GHOST-1",
+      createTask({
+        id: "task-account-1-GHOST-1",
+        projectId: "proj-account-1-MISSING",
+        jiraTaskId: "GHOST-1",
+        status: "In Progress",
+      }),
+    );
+    mocked.tasks.set(
+      "task-account-3-OMEGA-1",
+      createTask({
+        id: "task-account-3-OMEGA-1",
+        projectId: "proj-account-3-OMEGA",
+        jiraTaskId: "OMEGA-1",
+        status: "In Progress",
+      }),
+    );
+    mocked.workLogs.set(
+      "wl-account-1-keep",
+      createWorkLog({
+        id: "wl-account-1-keep",
+        taskId: "task-account-1-ALPHA-1",
+      }),
+    );
+    mocked.workLogs.set(
+      "wl-account-1-drop",
+      createWorkLog({
+        id: "wl-account-1-drop",
+        taskId: "task-account-1-GHOST-1",
+      }),
+    );
+    mocked.workLogs.set(
+      "wl-account-3-drop",
+      createWorkLog({
+        id: "wl-account-3-drop",
+        taskId: "task-account-3-OMEGA-1",
+      }),
+    );
     mocked.getJiraAccounts.mockReturnValue([
       mocked.accounts[0],
       {
@@ -625,6 +740,12 @@ describe("task-store task status filters", () => {
 
     await useTaskStore.getState().loadFromDB();
 
+    expect(mocked.db.organizations.toArray).not.toHaveBeenCalled();
+    expect(mocked.db.projects.toArray).not.toHaveBeenCalled();
+    expect(mocked.db.tasks.toArray).not.toHaveBeenCalled();
+    expect(mocked.db.workLogs.toArray).not.toHaveBeenCalled();
+    expect(mocked.db.tasks.where).toHaveBeenCalledWith("id");
+    expect(mocked.db.workLogs.where).toHaveBeenCalledWith("taskId");
     expect(
       useTaskStore
         .getState()
@@ -634,6 +755,13 @@ describe("task-store task status filters", () => {
     expect(useTaskStore.getState().organizations.map((organization) => organization.id)).toEqual([
       "org-account-1",
       "org-account-2",
+    ]);
+    expect(useTaskStore.getState().tasks.map((task) => task.id)).toEqual([
+      "task-account-1-ALPHA-1",
+      "task-account-2-BETA-1",
+    ]);
+    expect(useTaskStore.getState().workLogs.map((workLog) => workLog.id)).toEqual([
+      "wl-account-1-keep",
     ]);
   });
 });

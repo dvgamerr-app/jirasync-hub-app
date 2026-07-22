@@ -3,7 +3,7 @@ import { useTaskStore } from "@/store/task-store";
 import { useShallow } from "zustand/react/shallow";
 import { StatusBadge } from "@/components/StatusBadge";
 import { StoryLevel, TaskType, Severity } from "@/types/jira";
-import { inferTypeIcon } from "@/components/TypeIcon";
+import { inferTypeIcon } from "@/components/type-icon-glyph";
 import { TASK_TYPES, SEVERITIES, STORY_LEVEL_OPTIONS, NO_PENDING_MANDAY } from "@/constants/task";
 import { isVisibleWorkLog } from "@/lib/worklog-sync";
 import { Input } from "@/components/ui/input";

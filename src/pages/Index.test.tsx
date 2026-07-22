@@ -14,9 +14,17 @@ const stopBackgroundSyncMock = mock();
 const syncNowMock = mock();
 const toastMock = mock();
 const jiraSettingsDialogMock = mock();
+var taskTableShouldThrow = false;
 
 mock.module("@/components/AppSidebar", () => ({ AppSidebar: () => <div>App Sidebar</div> }));
-mock.module("@/components/TaskTable", () => ({ TaskTable: () => <div>Task Table</div> }));
+mock.module("@/components/TaskTable", () => ({
+  TaskTable: () => {
+    if (taskTableShouldThrow) {
+      throw new Error("Task table crashed");
+    }
+    return <div>Task Table</div>;
+  },
+}));
 mock.module("@/components/TaskDetailPanel", () => ({
   TaskDetailPanel: () => <div>Task Detail</div>,
 }));
@@ -175,6 +183,7 @@ describe("Index", () => {
     syncNowMock.mockReset();
     exportDialogMock.mockReset();
     jiraSettingsDialogMock.mockReset();
+    taskTableShouldThrow = false;
 
     const alphaTask = buildTask("task-account-1-ALPHA-1", projectAlpha.id, "ALPHA-1");
     // Use real computed functions with proper raw state
@@ -295,5 +304,26 @@ describe("Index", () => {
     });
 
     expect(reloadSpy).toHaveBeenCalledOnce();
+  });
+
+  it("shows a recoverable fallback when the task workspace crashes", async () => {
+    const consoleErrorSpy = spyOn(console, "error").mockImplementation(() => {});
+    spies.push(consoleErrorSpy);
+    taskTableShouldThrow = true;
+
+    await act(async () => {
+      root.render(<Index />);
+    });
+
+    expect(container.textContent).toContain("Task workspace crashed");
+    expect(container.textContent).toContain("Try Again");
+
+    taskTableShouldThrow = false;
+
+    await act(async () => {
+      findButton(container, "Try Again")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain("Task Table");
   });
 });

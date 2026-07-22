@@ -5,9 +5,7 @@ import {
   getAccountIdFromTask,
   getOrganizationId,
   getProjectIdPrefix,
-  isOrganizationIdForAccounts,
-  isProjectIdForAccounts,
-  isTaskIdForAccounts,
+  getTaskIdPrefix,
 } from "@/lib/jira-ids";
 import {
   updateJiraIssue,
@@ -163,7 +161,9 @@ function deleteWorkLogInBackground(workLogId: string): void {
 }
 
 async function loadScopedCollections(accountIds: string[]): Promise<ScopedTaskCollections> {
-  if (accountIds.length === 0) {
+  const scopedAccountIds = [...new Set(accountIds)];
+
+  if (scopedAccountIds.length === 0) {
     return {
       organizations: [],
       projects: [],
@@ -172,25 +172,45 @@ async function loadScopedCollections(accountIds: string[]): Promise<ScopedTaskCo
     };
   }
 
-  const [allOrganizations, allProjects, allTasks, allWorkLogs] = await Promise.all([
-    db.organizations.toArray(),
-    db.projects.toArray(),
-    db.tasks.toArray(),
-    db.workLogs.toArray(),
+  const [organizationGroups, projectGroups, taskGroups, workLogGroups] = await Promise.all([
+    Promise.all(
+      scopedAccountIds.map((accountId) =>
+        db.organizations.where("id").equals(getOrganizationId(accountId)).toArray(),
+      ),
+    ),
+    Promise.all(
+      scopedAccountIds.map((accountId) =>
+        db.projects.where("orgId").equals(getOrganizationId(accountId)).toArray(),
+      ),
+    ),
+    Promise.all(
+      scopedAccountIds.map((accountId) =>
+        db.tasks.where("id").startsWith(getTaskIdPrefix(accountId)).toArray(),
+      ),
+    ),
+    Promise.all(
+      scopedAccountIds.map((accountId) =>
+        db.workLogs.where("taskId").startsWith(getTaskIdPrefix(accountId)).toArray(),
+      ),
+    ),
   ]);
 
-  const organizations = allOrganizations
-    .filter((org) => isOrganizationIdForAccounts(org.id, accountIds))
-    .sort((left, right) => compareScopedEntityOrder(left.id, right.id, accountIds, "organization"));
-  const projects = allProjects
-    .filter((project) => isProjectIdForAccounts(project.id, accountIds))
-    .sort((left, right) => compareScopedEntityOrder(left.id, right.id, accountIds, "project"));
+  const organizations = organizationGroups
+    .flat()
+    .sort((left, right) =>
+      compareScopedEntityOrder(left.id, right.id, scopedAccountIds, "organization"),
+    );
+  const projects = projectGroups
+    .flat()
+    .sort((left, right) =>
+      compareScopedEntityOrder(left.id, right.id, scopedAccountIds, "project"),
+    );
   const visibleProjectIds = new Set(projects.map((project) => project.id));
-  const tasks = allTasks.filter(
-    (task) => isTaskIdForAccounts(task.id, accountIds) && visibleProjectIds.has(task.projectId),
-  );
+  const tasks = taskGroups.flat().filter((task) => visibleProjectIds.has(task.projectId));
   const visibleTaskIds = new Set(tasks.map((task) => task.id));
-  const workLogs = allWorkLogs.filter((workLog) => visibleTaskIds.has(workLog.taskId));
+  const workLogs = workLogGroups
+    .flat()
+    .filter((workLog) => visibleTaskIds.has(workLog.taskId));
 
   return {
     organizations,
@@ -339,10 +359,23 @@ async function persistSyncedTask(task: Task): Promise<Task> {
   return synced;
 }
 
-async function syncTaskWorkLogsToJira(task: Task, account: JiraAccount): Promise<void> {
+interface SyncedWorkLogCreate {
+  workLogId: string;
+  jiraWorklogId: string;
+}
+
+interface TaskWorkLogSyncResult {
+  syncedCreates: SyncedWorkLogCreate[];
+  deletedWorkLogIds: string[];
+}
+
+async function syncTaskWorkLogsToJira(
+  task: Task,
+  account: JiraAccount,
+): Promise<TaskWorkLogSyncResult> {
   const taskWorkLogs = await db.workLogs.where("taskId").equals(task.id).toArray();
 
-  await Promise.all(
+  const syncedCreates = await Promise.all(
     taskWorkLogs.filter(isPendingCreateWorkLog).map(async (workLog) => {
       const jiraWorklogId = await addJiraWorkLog(
         account,
@@ -353,26 +386,56 @@ async function syncTaskWorkLogsToJira(task: Task, account: JiraAccount): Promise
       );
       if (!jiraWorklogId) throw new Error(`Failed creating worklog for ${task.jiraTaskId}`);
       await db.workLogs.put(toSyncedWorkLog(workLog, jiraWorklogId));
+      return { workLogId: workLog.id, jiraWorklogId };
     }),
   );
 
-  await Promise.all(
+  const deletedWorkLogIds = await Promise.all(
     taskWorkLogs.filter(isPendingDeleteWorkLog).map(async (workLog) => {
       if (workLog.jiraWorklogId) {
         await deleteJiraWorkLog(account, task.jiraTaskId, workLog.jiraWorklogId);
       }
       await db.workLogs.delete(workLog.id);
+      return workLog.id;
     }),
   );
+
+  return { syncedCreates, deletedWorkLogIds };
 }
 
-async function syncDirtyTask(task: Task, accounts: JiraAccount[]): Promise<void> {
+function applyTaskWorkLogSyncResult(
+  workLogs: WorkLog[],
+  workLogSync: TaskWorkLogSyncResult,
+): WorkLog[] {
+  const syncedCreateById = new Map(
+    workLogSync.syncedCreates.map(({ workLogId, jiraWorklogId }) => [workLogId, jiraWorklogId]),
+  );
+  const deletedWorkLogIds = new Set(workLogSync.deletedWorkLogIds);
+
+  return workLogs
+    .filter((workLog) => !deletedWorkLogIds.has(workLog.id))
+    .map((workLog) => {
+      const jiraWorklogId = syncedCreateById.get(workLog.id);
+      return jiraWorklogId ? toSyncedWorkLog(workLog, jiraWorklogId) : workLog;
+    });
+}
+
+interface DirtyTaskSyncResult extends TaskWorkLogSyncResult {
+  task: Task;
+}
+
+async function syncDirtyTask(
+  task: Task,
+  accounts: JiraAccount[],
+): Promise<DirtyTaskSyncResult | null> {
   const account = getAccountForTask(task, accounts);
-  if (!account) return;
+  if (!account) return null;
 
   await pushTaskToJira(task, accounts);
-  await syncTaskWorkLogsToJira(task, account);
-  await persistSyncedTask(task);
+  const workLogSync = await syncTaskWorkLogsToJira(task, account);
+  const syncedTask = await persistSyncedTask(task);
+
+  return { task: syncedTask, ...workLogSync };
 }
 
 const HIDDEN_PROJECTS_KEY = "jirasync-hidden-projects";
@@ -534,8 +597,26 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       const task = get().tasks.find((candidate) => candidate.id === taskId);
       if (!task || !task.isDirty) return;
 
-      await syncDirtyTask(task, getJiraAccounts());
-      await get().reloadFromDB();
+      const syncResult = await syncDirtyTask(task, getJiraAccounts());
+      if (!syncResult) return;
+
+      set((state) => {
+        const tasks = replaceTask(state.tasks, syncResult.task);
+        const workLogs = applyTaskWorkLogSyncResult(state.workLogs, syncResult);
+        const normalizedSelection = getNormalizedSelectionState(
+          tasks,
+          state.projects,
+          state.selectedProjectId,
+          state.selectedTaskId,
+          state.taskStatusFilter,
+        );
+
+        return {
+          tasks,
+          workLogs,
+          ...normalizedSelection,
+        };
+      });
     },
 
     syncAllDirtyTasks: async () => {
