@@ -96,7 +96,7 @@ function EmptyTasksState({
                 </Button>
                 <Button variant="outline" className="h-9 text-[13px]" onClick={onOpenSettings}>
                   <Settings className="h-4 w-4" />
-                  Jira Settings
+                  Settings
                 </Button>
               </>
             ) : (

@@ -89,7 +89,7 @@ export function MobileSidebar({ onOpenSettings }: MobileSidebarProps) {
             }}
           >
             <Settings className="h-3.5 w-3.5" />
-            Jira Settings
+            Settings
           </Button>
         </div>
       </SheetContent>

@@ -38,7 +38,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "@/hooks/use-toast";
+import {
+  getAutoUpdateEnabled,
+  requestUpdateCheck,
+  setAutoUpdateEnabled,
+} from "@/lib/app-updater";
 import {
   Loader2,
   CheckCircle2,
@@ -51,6 +57,7 @@ import {
   GripVertical,
   Server,
   Settings,
+  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -81,6 +88,7 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
   const [status, setStatus] = useState<"idle" | "ok" | "fail">("idle");
   const [draggingAccountId, setDraggingAccountId] = useState<string | null>(null);
   const [dragOverAccountId, setDragOverAccountId] = useState<string | null>(null);
+  const [autoUpdateEnabled, setAutoUpdateEnabledState] = useState(() => getAutoUpdateEnabled());
 
   useEffect(() => {
     if (open) {
@@ -90,6 +98,7 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
       setEditing(null);
       setForm(emptyForm);
       setStatus("idle");
+      setAutoUpdateEnabledState(getAutoUpdateEnabled());
     }
   }, [open]);
 
@@ -306,16 +315,27 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
 
   const isFormValid = Boolean(form.instanceUrl && form.email && form.apiToken);
 
+  const handleAutoUpdateChange = (enabled: boolean) => {
+    setAutoUpdateEnabledState(enabled);
+    setAutoUpdateEnabled(enabled);
+  };
+
   return (
     <DialogContent className="sm:max-w-[460px]">
       <DialogHeader>
         <DialogTitle className="text-[15px]">
-          {mode === "story-points" ? "Story Point Fields" : "Jira Connections"}
+          {mode === "story-points"
+            ? "Story Point Fields"
+            : mode === "list"
+              ? "Settings"
+              : "Jira Connections"}
         </DialogTitle>
         <DialogDescription className="text-[12px]">
           {mode === "story-points"
             ? "Choose which Jira custom field holds story points for each project."
-            : "Connect one or more Jira instances. Credentials are stored locally only."}
+            : mode === "list"
+              ? "Manage Jira connections and application updates."
+              : "Connect one or more Jira instances. Credentials are stored locally only."}
         </DialogDescription>
       </DialogHeader>
 
@@ -407,6 +427,30 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
               </Button>
             </>
           )}
+          <div className="border-border mt-4 space-y-3 border-t pt-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-[13px] font-medium">Automatic updates</p>
+                <p className="text-muted-foreground mt-0.5 text-[11px] leading-4">
+                  Check GitHub Releases for a newer version when JiraSync Hub starts.
+                </p>
+              </div>
+              <Switch
+                aria-label="Automatically check for updates"
+                checked={autoUpdateEnabled}
+                onCheckedChange={handleAutoUpdateChange}
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 w-full text-[13px]"
+              onClick={requestUpdateCheck}
+            >
+              <Download className="mr-1.5 h-3.5 w-3.5" />
+              Check for Updates
+            </Button>
+          </div>
         </div>
       ) : mode === "story-points" ? (
         <div className="space-y-3 pt-1">

@@ -39,6 +39,13 @@ JiraSync Hub คือแอป desktop สำหรับดึง Jira tasks �
 - ถ้าใช้ `.AppImage`: ให้สิทธิ์รันไฟล์ก่อน แล้วเปิดใช้งาน
 - ถ้าใช้ `.deb`: ติดตั้งผ่าน package manager ของ distro
 
+### อัปเดตแอป
+
+- แอปจะตรวจ GitHub Releases อัตโนมัติเมื่อเปิดใช้งาน และแจ้งเวอร์ชันใหม่ที่มุมขวาล่าง
+- กด `Update now` เพื่อดาวน์โหลดและติดตั้ง จากนั้นกด `Restart now` เพื่อเปิดเวอร์ชันใหม่
+- บน Windows ระบบจะดาวน์โหลดก่อน แล้วแสดง `Restart to update` เพราะตัว installer ต้องปิดแอประหว่างติดตั้ง
+- เปิดหรือปิดการตรวจอัปเดตอัตโนมัติ และสั่ง `Check for Updates` เองได้ที่ `Settings`
+
 ## สิ่งที่ต้องเตรียมก่อนใช้งาน
 
 - Jira Cloud instance เช่น `https://your-company.atlassian.net`
@@ -51,7 +58,7 @@ JiraSync Hub คือแอป desktop สำหรับดึง Jira tasks �
 
 ### 1. เพิ่ม Jira instance
 
-1. เปิดแอป แล้วกด `Jira Settings`
+1. เปิดแอป แล้วกด `Settings`
 2. กด `Add Account`
 3. กรอกข้อมูลต่อไปนี้
    - `Display Name` ถ้าต้องการตั้งชื่อให้อ่านง่าย
@@ -78,7 +85,7 @@ JiraSync Hub คือแอป desktop สำหรับดึง Jira tasks �
 
 Story point field ของ Jira แต่ละโปรเจกต์อาจไม่ใช้ custom field เดียวกัน จึงต้องตั้งค่าแยกต่อโปรเจกต์
 
-1. ไปที่ `Jira Settings`
+1. ไปที่ `Settings`
 2. กด `Story Point Fields`
 3. เลือก field ของแต่ละโปรเจกต์
 4. กด `Save`
@@ -193,3 +200,14 @@ src-tauri/target/release/bundle/
 - `macOS`: `.app`, `.dmg`
 - `Windows`: NSIS installer, `.msi`
 - `Linux`: `.AppImage`, `.deb`
+
+### Updater signing สำหรับผู้ดูแล release
+
+Tauri บังคับให้ updater artifacts มีลายเซ็นทุกครั้ง โดย workflow ใช้ GitHub Actions Secret
+ชื่อ `TAURI_SIGNING_PRIVATE_KEY` และ commit เฉพาะ public key ใน `src-tauri/tauri.conf.json`
+
+- private key หลักของโปรเจกต์เก็บนอก repository ที่ `%USERPROFILE%\.tauri\jirasync-hub.key`
+- ต้อง backup private key นี้ในที่ปลอดภัย ห้าม commit หรือแชร์
+- ห้าม generate key ใหม่สำหรับ release ถัดไป เพราะแอปที่ติดตั้งอยู่จะไม่ยอมรับลายเซ็นจาก key ใหม่
+- การ push tag `v*` จะ build signed updater artifacts, `.sig` และ `latest.json` ไปยัง GitHub Release
+- local signed build ใช้ `TAURI_SIGNING_PRIVATE_KEY` ชี้ไปยัง private key ก่อนรัน `bun tauri build`

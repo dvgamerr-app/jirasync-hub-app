@@ -93,20 +93,20 @@ jobs:
 
       # ── Build + create/update GitHub Release ─────────────────────────────
       - name: Build and publish release
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
 
           # ── macOS ad-hoc signing (no Apple Developer cert required) ─────
           APPLE_SIGNING_IDENTITY: "-"
 
-          # ── Tauri updater signing (optional) ────────────────────────────
-          # TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          # TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "JiraSync Hub ${{ github.ref_name }}"
           releaseBody: ${{ needs.changelog.outputs.body }}
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, '-') }} # e.g. v1.0.0-beta → prerelease
+          uploadUpdaterJson: true
+          uploadUpdaterSignatures: true
           args: ${{ matrix.args }}

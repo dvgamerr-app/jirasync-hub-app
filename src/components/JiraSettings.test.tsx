@@ -45,7 +45,8 @@ function createDbMocks() {
 }
 
 // var hoisted as undefined; assigned inside mock.module factory
-let dbMocks: ReturnType<typeof createDbMocks>;
+// eslint-disable-next-line no-var
+var dbMocks: ReturnType<typeof createDbMocks>;
 
 mock.module("@/lib/jira-db", () => {
   dbMocks = createDbMocks();

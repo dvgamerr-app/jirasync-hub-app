@@ -1,6 +1,7 @@
 import { type MouseEvent, useCallback } from "react";
 import { HashRouter, Route, Routes } from "react-router-dom";
 import { TitleBar } from "@/components/TitleBar";
+import { AppUpdater } from "@/components/AppUpdater";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -53,6 +54,7 @@ const App = () => {
     <TooltipProvider>
       <Toaster />
       <Sonner />
+      <AppUpdater />
       <ResizeHandles />
       <div className="bg-background flex h-screen flex-col overflow-hidden">
         {showCustomTitlebar && <TitleBar />}

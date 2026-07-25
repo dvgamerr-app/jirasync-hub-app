@@ -181,7 +181,8 @@ function createMockState() {
 
 // var is hoisted as undefined; assigned inside the mock.module factory
 // so it's available for all subsequent module-level and test code
-let mocked: ReturnType<typeof createMockState>;
+// eslint-disable-next-line no-var
+var mocked: ReturnType<typeof createMockState>;
 
 mock.module("@/lib/jira-db", () => {
   mocked = createMockState();
@@ -193,6 +194,7 @@ mock.module("@/lib/jira-db", () => {
 });
 
 mock.module("@/lib/jira-api", () => ({
+  DEFAULT_STORY_POINT_FIELD_ID: "customfield_10016",
   get updateJiraIssue() {
     return mocked?.updateJiraIssue;
   },

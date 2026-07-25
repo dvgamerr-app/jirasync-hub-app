@@ -280,7 +280,7 @@ describe("Index", () => {
       root.render(<Index />);
     });
 
-    const openSettingsButton = findButton(container, "Jira Settings");
+    const openSettingsButton = findButton(container, "Settings");
     expect(openSettingsButton).toBeDefined();
 
     await act(async () => {

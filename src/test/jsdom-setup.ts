@@ -15,8 +15,6 @@ Object.assign(globalThis, {
   location: win.location,
   history: win.history,
   screen: win.screen,
-  localStorage: win.localStorage,
-  sessionStorage: win.sessionStorage,
   HTMLElement: win.HTMLElement,
   HTMLInputElement: win.HTMLInputElement,
   HTMLDivElement: win.HTMLDivElement,
@@ -53,6 +51,17 @@ Object.assign(globalThis, {
   getComputedStyle: win.getComputedStyle.bind(win),
   requestAnimationFrame: (cb: FrameRequestCallback) => setTimeout(cb, 0),
   cancelAnimationFrame: clearTimeout,
+});
+
+// Node 25+ exposes experimental getter-only storage globals. Define the jsdom
+// instances explicitly so component tests use the same storage as `window`.
+Object.defineProperty(globalThis, "localStorage", {
+  configurable: true,
+  value: win.localStorage,
+});
+Object.defineProperty(globalThis, "sessionStorage", {
+  configurable: true,
+  value: win.sessionStorage,
 });
 
 (

@@ -103,6 +103,8 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(WindowStateBuilder::default().build())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![set_window_theme, encrypt_data, decrypt_data])
         .setup(|app| {
             let window_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())

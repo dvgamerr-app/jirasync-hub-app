@@ -22,6 +22,8 @@
       "allow": [{ "path": "**" }]
     },
     "window-state:default",
-    "http:default"
+    "http:default",
+    "process:default",
+    "updater:default"
   ]
 }

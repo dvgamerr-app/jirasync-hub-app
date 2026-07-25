@@ -166,9 +166,9 @@ describe("MobileSidebar", () => {
     expect(spy).toHaveBeenCalledWith(projectAlpha.id);
   });
 
-  it("clicking Jira Settings calls onOpenSettings", async () => {
+  it("clicking Settings calls onOpenSettings", async () => {
     const settingsBtn = Array.from(container.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("Jira Settings"),
+      b.textContent?.includes("Settings"),
     );
     await act(async () => {
       settingsBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));

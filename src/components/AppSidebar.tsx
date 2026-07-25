@@ -139,7 +139,7 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
             className="text-muted-foreground hover:bg-accent hover:text-accent-foreground flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]"
           >
             <Settings className="h-3.5 w-3.5" />
-            Jira Settings
+            Settings
           </button>
         </div>
       </aside>

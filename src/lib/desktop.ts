@@ -16,11 +16,18 @@ type TauriRuntimeWindow = Window & {
   __TAURI_INTERNALS__?: unknown;
 };
 
-function isTauriRuntime(): boolean {
+export function isTauriRuntime(): boolean {
   return (
     typeof window !== "undefined" &&
     typeof (window as TauriRuntimeWindow).__TAURI_INTERNALS__ !== "undefined"
   );
+}
+
+export function isWindows(): boolean {
+  if (typeof navigator === "undefined") return false;
+
+  if (navigator.platform) return /win/i.test(navigator.platform);
+  return /windows/i.test(navigator.userAgent);
 }
 
 export function isMacOS(): boolean {
