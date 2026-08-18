@@ -15,7 +15,7 @@ jobs:
     outputs:
       body: ${{ steps.cliff.outputs.content }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # need full history for changelog
 
@@ -50,7 +50,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # ── Node.js runtime via Bun ──────────────────────────────────────────
       - name: Setup Bun
