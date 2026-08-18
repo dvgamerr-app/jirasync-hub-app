@@ -4,16 +4,16 @@ Last audited: 2026-05-26
 
 ## Fixed ✅
 
-| Issue | Fix |
-|---|---|
-| `TASK_TYPES`, `SEVERITIES` duplicated in 2 files | Moved to `src/constants/task.ts` |
-| `NO_PENDING_MANDAY = Symbol(...)` duplicated (different values!) | Moved to `src/constants/task.ts` — single shared Symbol |
-| `"customfield_10016"` hardcoded in 2 files | Exported `DEFAULT_STORY_POINT_FIELD_ID` from `jira-api.ts` |
-| Import after function definition in `task-store.ts` | Moved import to top |
-| `NoteField` wrapper component with no logic | Removed — call `NoteFieldEditor` directly |
-| `InlineNote` wrapper component with no logic | Removed — call `InlineNoteEditor` directly |
+| Issue                                                                 | Fix                                                                                                                            |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `TASK_TYPES`, `SEVERITIES` duplicated in 2 files                      | Moved to `src/constants/task.ts`                                                                                               |
+| `NO_PENDING_MANDAY = Symbol(...)` duplicated (different values!)      | Moved to `src/constants/task.ts` — single shared Symbol                                                                        |
+| `"customfield_10016"` hardcoded in 2 files                            | Exported `DEFAULT_STORY_POINT_FIELD_ID` from `jira-api.ts`                                                                     |
+| Import after function definition in `task-store.ts`                   | Moved import to top                                                                                                            |
+| `NoteField` wrapper component with no logic                           | Removed — call `NoteFieldEditor` directly                                                                                      |
+| `InlineNote` wrapper component with no logic                          | Removed — call `InlineNoteEditor` directly                                                                                     |
 | `TaskDetailPanel` subscribed to stable `getTaskById` ref — stale data | Now derives `task`/`project`/`workLogs` inside `useShallow` selector, subscribing to live `tasks`/`projects`/`workLogs` arrays |
-| `QueryClientProvider` + `@tanstack/react-query` unused | Removed `QueryClientProvider` from `App.tsx` |
+| `QueryClientProvider` + `@tanstack/react-query` unused                | Removed `QueryClientProvider` from `App.tsx`                                                                                   |
 
 ## Remaining
 
@@ -22,16 +22,16 @@ Last audited: 2026-05-26
 **`loadScopedCollections` loads ALL records to memory** (`task-store.ts:174`)
 
 All four tables are loaded with `.toArray()` then filtered in JavaScript. Should use Dexie indexed queries:
+
 ```ts
 // Instead of:
 const allTasks = await db.tasks.toArray();
-const tasks = allTasks.filter(t => isTaskIdForAccounts(t.id, accountIds));
+const tasks = allTasks.filter((t) => isTaskIdForAccounts(t.id, accountIds));
 
 // Better:
-const tasks = await db.tasks
-  .where("id").startsWith(`task-${accountId}-`)
-  .toArray();
+const tasks = await db.tasks.where("id").startsWith(`task-${accountId}-`).toArray();
 ```
+
 Impact: Memory usage and load time for large datasets.
 
 **`getFilteredTasks()` computed twice per render**
@@ -47,6 +47,7 @@ After syncing one task, calls `reloadFromDB()` which re-fetches all organization
 **Unused shadcn/ui components**
 
 Installed with shadcn/ui init but not used in the app:
+
 - `src/components/ui/`: `carousel`, `chart`, `calendar`, `drawer`, `input-otp`, `resizable`, `menubar`, `navigation-menu`, `hover-card`, `breadcrumb`, `context-menu`
 - `package.json` packages: `embla-carousel-react`, `recharts`, `react-day-picker`, `vaul`
 
@@ -73,6 +74,7 @@ No error boundary wraps `TaskTable` or `TaskDetailPanel`. A runtime error inside
 **`@tanstack/react-query` still in `package.json`**
 
 `QueryClientProvider` has been removed from `App.tsx` but the package itself is still installed. Run:
+
 ```bash
 bun remove @tanstack/react-query
 ```

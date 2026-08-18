@@ -42,7 +42,9 @@ function buildSearchResponse(
           description: null,
           status: {
             name: status,
-            statusCategory: options.statusCategoryKey ? { key: options.statusCategoryKey } : undefined,
+            statusCategory: options.statusCategoryKey
+              ? { key: options.statusCategoryKey }
+              : undefined,
           },
           issuetype: { name: "Task" },
           priority: { name: "Medium" },

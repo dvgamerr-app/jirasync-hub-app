@@ -16,15 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  X,
-  Clock,
-  CloudOff,
-  Cloud,
-  CloudUpload,
-  ExternalLink,
-  Trash2,
-} from "lucide-react";
+import { X, Clock, CloudOff, Cloud, CloudUpload, ExternalLink, Trash2 } from "lucide-react";
 import { format as formatDate, formatDistanceToNow } from "date-fns";
 import { toast } from "@/hooks/use-toast";
 import { openExternal } from "@/lib/desktop";

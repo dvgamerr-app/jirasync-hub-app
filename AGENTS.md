@@ -99,12 +99,12 @@
 
 ## Useful commands
 
-| Task | Command |
-|---|---|
+| Task       | Command                             |
+| ---------- | ----------------------------------- |
 | Dev server | `bun run dev` + `bun run tauri dev` |
-| Tests | `bun run test` |
-| Lint | `bun run lint` |
-| Type check | `bun run build` (runs `tsc`) |
+| Tests      | `bun run test`                      |
+| Lint       | `bun run lint`                      |
+| Type check | `bun run build` (runs `tsc`)        |
 
 ```bash
 bun tauri dev
@@ -133,6 +133,7 @@ Jira API ──sync──► IndexedDB (Dexie) ──loadFromDB──► Zustand
 ## Known Remaining Debt
 
 High priority — see [docs/technical-debt.md](docs/technical-debt.md#remaining) for details:
+
 1. `loadScopedCollections` loads all DB records to memory (should use Dexie indexed queries)
 2. `getFilteredTasks()` computed twice per render (Index + TaskTable each call it)
 3. `syncTaskToJira` reloads all data after syncing a single task

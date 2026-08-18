@@ -96,7 +96,7 @@ const Carousel = React.forwardRef<
     }
 
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    onSelect(api);
+    queueMicrotask(() => onSelect(api));
     api.on("reInit", onSelect);
     api.on("select", onSelect);
 

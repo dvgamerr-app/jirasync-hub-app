@@ -2,14 +2,14 @@
 
 ## Stack
 
-| Layer | Tech |
-|---|---|
-| Desktop shell | Tauri v2 (Rust) |
-| Frontend | React 19, TypeScript, Vite |
-| Styling | Tailwind CSS v4, shadcn/ui (Radix) |
-| State | Zustand v5 |
-| Local DB | Dexie (IndexedDB) |
-| List rendering | TanStack Virtual v3 |
+| Layer          | Tech                               |
+| -------------- | ---------------------------------- |
+| Desktop shell  | Tauri v2 (Rust)                    |
+| Frontend       | React 19, TypeScript, Vite         |
+| Styling        | Tailwind CSS v4, shadcn/ui (Radix) |
+| State          | Zustand v5                         |
+| Local DB       | Dexie (IndexedDB)                  |
+| List rendering | TanStack Virtual v3                |
 
 ## Offline-First Design
 
@@ -57,17 +57,20 @@ task-{accountId}-{issueKey}
 ## Sync Strategy
 
 ### Pull (Jira → Local)
+
 1. `fetchAssignedJiraData()` — paginated JQL, linked issues, parent epics
 2. `mergeRemoteTaskWithLocalState()` — preserves dirty local fields over remote values
 3. `replaceTaskWorklogs()` — replace Jira-sourced logs, keep `pending_create`/`pending_delete`
 4. `fetchProjectMetadata()` — all projects in parallel (`Promise.allSettled`)
 
 ### Push (Local → Jira)
+
 1. `pushTaskToJira()` — PUT fields + `transitionJiraIssue` for status
 2. `syncTaskWorkLogsToJira()` — create/delete pending worklogs
 3. Mark task `isDirty=false, isSynced=true`
 
 ### WorkLog State Machine
+
 ```
 pending_create ──push──► synced
 pending_create ──delete──► (removed from DB)
@@ -81,11 +84,11 @@ Jira credentials (`JiraAccount`) are stored in `localStorage` encrypted via AES-
 ## Dexie Schema (v1)
 
 ```ts
-organizations: "id, name"
-projects:      "id, orgId, jiraProjectKey"
-tasks:         "id, projectId, jiraTaskId, status, isDirty"
-workLogs:      "id, taskId, logDate"
-syncMeta:      "id"
+organizations: "id, name";
+projects: "id, orgId, jiraProjectKey";
+tasks: "id, projectId, jiraTaskId, status, isDirty";
+workLogs: "id, taskId, logDate";
+syncMeta: "id";
 ```
 
 > **Note:** Only version 1 is defined. Any schema changes require adding a new `this.version(N)` with a migration function.

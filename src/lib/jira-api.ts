@@ -409,19 +409,20 @@ type ProjectMetadata = {
   issueTypes: string[];
 };
 
-async function fetchProjectMetadata(account: JiraAccount, projectKey: string): Promise<ProjectMetadata> {
+async function fetchProjectMetadata(
+  account: JiraAccount,
+  projectKey: string,
+): Promise<ProjectMetadata> {
   const res = await jiraFetch(`project/${encodeURIComponent(projectKey)}/statuses`, account);
   const data = (await res.json()) as JiraProjectIssueTypeStatuses[];
 
-  const statuses = [...new Set(
-    (data ?? []).flatMap((it) =>
-      (it.statuses ?? []).map((s) => s.name ?? "").filter(Boolean),
+  const statuses = [
+    ...new Set(
+      (data ?? []).flatMap((it) => (it.statuses ?? []).map((s) => s.name ?? "").filter(Boolean)),
     ),
-  )];
+  ];
 
-  const issueTypes = [...new Set(
-    (data ?? []).map((it) => it.name ?? "").filter(Boolean),
-  )];
+  const issueTypes = [...new Set((data ?? []).map((it) => it.name ?? "").filter(Boolean))];
 
   return { statuses, issueTypes };
 }
