@@ -6,16 +6,16 @@
   "scripts": {
     "cg:check": "cd ./src-tauri && cargo check",
     "cg:update": "cd ./src-tauri && cargo update && cargo check",
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview",
+    "dev": "bun x --bun vite",
+    "build": "bun x --bun tsc && bun x --bun vite build",
+    "preview": "bun x --bun vite preview",
     "sync:version": "bun scripts/version-tag.mjs",
-    "tauri": "tauri",
-    "lint": "eslint ./src",
-    "lint:fix": "eslint ./src --fix",
-    "format": "prettier --check .",
-    "format:fix": "prettier --write .",
-    "test": "vitest run",
+    "tauri": "bun x --bun tauri",
+    "lint": "bun x --bun eslint ./src",
+    "lint:fix": "bun x --bun eslint ./src --fix",
+    "format": "bun x --bun prettier --check .",
+    "format:fix": "bun x --bun prettier --write .",
+    "test": "bun x --bun vitest run",
     "test:bun": "bun test --isolate"
   },
   "dependencies": {
@@ -100,5 +100,9 @@
     "typescript-eslint": "^8.67.0",
     "vite": "^8.2.2",
     "vitest": "^4.1.11"
+  },
+  "packageManager": "bun@1.3.14",
+  "engines": {
+    "bun": ">=1.3.14"
   }
 }
