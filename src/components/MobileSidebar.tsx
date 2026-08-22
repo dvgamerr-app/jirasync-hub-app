@@ -1,5 +1,5 @@
 import { useTaskStore } from "@/store/task-store";
-import { ChevronDown, FolderKanban, ListTodo, Menu, Settings } from "lucide-react";
+import { ChevronDown, FolderKanban, ListTodo, Menu, Settings, UserRound } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
@@ -12,12 +12,23 @@ interface MobileSidebarProps {
 
 export function MobileSidebar({ onOpenSettings }: MobileSidebarProps) {
   const [open, setOpen] = useState(false);
-  const { organizations, selectedProjectId, setSelectedProject, getVisibleProjects } =
-    useTaskStore();
+  const {
+    organizations,
+    selectedProjectId,
+    setSelectedProject,
+    getVisibleProjects,
+    taskScopeFilter,
+    setTaskScopeFilter,
+  } = useTaskStore();
   const projects = getVisibleProjects();
 
   const handleSelect = (id: string | null) => {
     setSelectedProject(id);
+    setOpen(false);
+  };
+
+  const handleScopeSelect = (scope: "my-work" | "created-by-me") => {
+    setTaskScopeFilter(scope);
     setOpen(false);
   };
 
@@ -34,16 +45,28 @@ export function MobileSidebar({ onOpenSettings }: MobileSidebarProps) {
         </SheetTitle>
         <div className="flex-1 overflow-y-auto p-2">
           <button
-            onClick={() => handleSelect(null)}
+            onClick={() => handleScopeSelect("my-work")}
             className={cn(
               "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]",
-              !selectedProjectId
+              taskScopeFilter === "my-work" && !selectedProjectId
                 ? "bg-primary/10 text-primary font-medium"
                 : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
             )}
           >
             <ListTodo className="h-3.5 w-3.5" />
-            All Tasks
+            My Work
+          </button>
+          <button
+            onClick={() => handleScopeSelect("created-by-me")}
+            className={cn(
+              "mt-0.5 flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]",
+              taskScopeFilter === "created-by-me" && !selectedProjectId
+                ? "bg-primary/10 text-primary font-medium"
+                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+            )}
+          >
+            <UserRound className="h-3.5 w-3.5" />
+            Created by me
           </button>
 
           {organizations.map((org) => {

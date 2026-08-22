@@ -31,7 +31,13 @@ function mockJsonResponse(payload: unknown): Response {
 
 function buildSearchResponse(
   status: string,
-  options: { statusCategoryKey?: string; assigneeDisplayName?: string | null } = {},
+  options: {
+    statusCategoryKey?: string;
+    assigneeDisplayName?: string | null;
+    assigneeAccountId?: string | null;
+    creatorDisplayName?: string | null;
+    creatorAccountId?: string | null;
+  } = {},
 ) {
   return {
     issues: [
@@ -42,16 +48,30 @@ function buildSearchResponse(
           description: null,
           status: {
             name: status,
-            statusCategory: options.statusCategoryKey ? { key: options.statusCategoryKey } : undefined,
+            statusCategory: options.statusCategoryKey
+              ? { key: options.statusCategoryKey }
+              : undefined,
           },
           issuetype: { name: "Task" },
           priority: { name: "Medium" },
           assignee:
             options.assigneeDisplayName === undefined
-              ? { displayName: "Alice" }
+              ? { accountId: options.assigneeAccountId ?? "user-alice", displayName: "Alice" }
               : options.assigneeDisplayName === null
                 ? null
-                : { displayName: options.assigneeDisplayName },
+                : {
+                    accountId:
+                      options.assigneeAccountId ??
+                      `user-${options.assigneeDisplayName.toLowerCase()}`,
+                    displayName: options.assigneeDisplayName,
+                  },
+          creator:
+            options.creatorDisplayName === null
+              ? null
+              : {
+                  accountId: options.creatorAccountId ?? "user-bob",
+                  displayName: options.creatorDisplayName ?? "Bob",
+                },
           customfield_10016: null,
           timetracking: null,
           project: { key: "ALPHA", name: "Project Alpha" },
@@ -119,7 +139,7 @@ describe("fetchAssignedJiraData", () => {
   it("maps statusCategory and flags whether the issue is still assigned to us", async () => {
     httpFetchMock.mockImplementation(async (url: string) => {
       if (url.endsWith("/rest/api/3/myself")) {
-        return mockJsonResponse({ displayName: "Alice" });
+        return mockJsonResponse({ accountId: "user-alice", displayName: "Alice" });
       }
 
       if (url.endsWith("/rest/api/3/search/jql")) {
@@ -146,7 +166,7 @@ describe("fetchAssignedJiraData", () => {
   it("marks isCurrentAssignee true when the issue is still assigned to us", async () => {
     httpFetchMock.mockImplementation(async (url: string) => {
       if (url.endsWith("/rest/api/3/myself")) {
-        return mockJsonResponse({ displayName: "Alice" });
+        return mockJsonResponse({ accountId: "user-alice", displayName: "Alice" });
       }
 
       if (url.endsWith("/rest/api/3/search/jql")) {
@@ -170,5 +190,39 @@ describe("fetchAssignedJiraData", () => {
 
     expect(task.statusCategory).toBe("indeterminate");
     expect(task.isCurrentAssignee).toBe(true);
+  });
+
+  it("queries creator tickets and marks creator and assignee relations independently", async () => {
+    httpFetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/rest/api/3/myself")) {
+        return mockJsonResponse({ accountId: "user-alice", displayName: "Alice" });
+      }
+
+      if (url.endsWith("/rest/api/3/search/jql")) {
+        const body = JSON.parse(String(init?.body)) as { jql: string; fields: string[] };
+        expect(body.jql).toContain("creator = currentUser()");
+        expect(body.fields).toContain("creator");
+        return mockJsonResponse(
+          buildSearchResponse("To Do", {
+            statusCategoryKey: "new",
+            assigneeDisplayName: "Bob",
+            assigneeAccountId: "user-bob",
+            creatorDisplayName: "Alice",
+            creatorAccountId: "user-alice",
+          }),
+        );
+      }
+
+      if (url.endsWith("/rest/api/3/project/ALPHA/statuses")) {
+        return mockJsonResponse([{ statuses: [{ name: "To Do" }] }]);
+      }
+
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const result = await fetchAssignedJiraData(account);
+
+    expect(result.tasks[0].isCreatedByCurrentUser).toBe(true);
+    expect(result.tasks[0].isCurrentAssignee).toBe(false);
   });
 });

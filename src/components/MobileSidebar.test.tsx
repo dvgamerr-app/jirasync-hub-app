@@ -110,6 +110,7 @@ describe("MobileSidebar", () => {
       workLogs: [],
       selectedProjectId: null,
       selectedTaskId: null,
+      taskScopeFilter: "my-work" as const,
       taskStatusFilter: "active" as const,
       searchQuery: "",
       hiddenProjectIds: new Set<string>(),
@@ -133,30 +134,34 @@ describe("MobileSidebar", () => {
     expect(container.textContent).toContain("Project Beta");
   });
 
-  it("shows All Tasks button", () => {
+  it("shows My Work and Created by me buttons", () => {
     const buttons = Array.from(container.querySelectorAll("button"));
-    expect(buttons.some((b) => b.textContent?.includes("All Tasks"))).toBe(true);
+    expect(buttons.some((b) => b.textContent?.includes("My Work"))).toBe(true);
+    expect(buttons.some((b) => b.textContent?.includes("Created by me"))).toBe(true);
   });
 
-  it("clicking All Tasks calls setSelectedProject(null)", async () => {
-    const spy = spyOn(useTaskStore.getState(), "setSelectedProject");
+  it("clicking My Work selects the work scope", async () => {
+    const spy = spyOn(useTaskStore.getState(), "setTaskScopeFilter");
     spies.push(spy);
     // Re-render so component captures the spy
     await act(async () => {
       root.render(<MobileSidebar onOpenSettings={onOpenSettings} />);
     });
-    const allTasksBtn = Array.from(container.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("All Tasks"),
+    const myWorkButton = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("My Work"),
     );
     await act(async () => {
-      allTasksBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      myWorkButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(spy).toHaveBeenCalledWith(null);
+    expect(spy).toHaveBeenCalledWith("my-work");
   });
 
   it("clicking a project calls setSelectedProject with project id", async () => {
     const spy = spyOn(useTaskStore.getState(), "setSelectedProject");
     spies.push(spy);
+    await act(async () => {
+      root.render(<MobileSidebar onOpenSettings={onOpenSettings} />);
+    });
     const alphaBtn = Array.from(container.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("Project Alpha"),
     );

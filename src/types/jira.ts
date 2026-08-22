@@ -34,6 +34,7 @@ export interface Task {
   assignee: string | null;
   statusCategory?: StatusCategory | null;
   isCurrentAssignee?: boolean | null;
+  isCreatedByCurrentUser?: boolean | null;
   refUrl: string | null;
   note: string | null;
   isArchived?: boolean;

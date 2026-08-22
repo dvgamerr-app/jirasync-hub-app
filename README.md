@@ -167,6 +167,13 @@ Story point field ของ Jira แต่ละโปรเจกต์อา�
 - การแก้ไขในเครื่องจะไม่ทับ Jira ทันที
 - แอปจะ push เฉพาะ task ที่มีการเปลี่ยนแปลงจริง
 
+## Architecture และ performance
+
+- IndexedDB เป็นแหล่งข้อมูลหลักของแอป และโหลดข้อมูลแยกตาม Jira account ผ่าน Dexie indexes เพื่อลดการอ่าน record ที่ไม่เกี่ยวข้อง
+- หน้า task คำนวณ filter/sort เพียงครั้งเดียวต่อ state change แล้วส่งผลลัพธ์เดียวกันให้ตารางและ task counter
+- การ push task รายการเดียวจะ reconcile เฉพาะ task และ worklogs ของรายการนั้นใน Zustand store โดยไม่ reload ฐานข้อมูลทั้งหมด
+- Error Boundary ครอบส่วนหลักของแอป เพื่อแสดงหน้ากู้คืนแทนจอว่างเมื่อเกิด runtime error ที่ไม่คาดคิด
+
 ## พัฒนาต่อจาก source
 
 ```bash
@@ -179,8 +186,10 @@ bun tauri dev
 ```bash
 bun lint
 bun format
-bun x vitest run
-cargo check --manifest-path src-tauri/Cargo.toml
+bun test
+bun run build
+bun run cg:check
+bun audit
 ```
 
 ## Build แอป

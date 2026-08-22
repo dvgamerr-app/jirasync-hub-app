@@ -1,5 +1,6 @@
 import { type MouseEvent, useCallback } from "react";
 import { HashRouter, Route, Routes } from "react-router-dom";
+import { AppErrorBoundary } from "@/components/AppErrorBoundary";
 import { TitleBar } from "@/components/TitleBar";
 import { AppUpdater } from "@/components/AppUpdater";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -51,23 +52,25 @@ const App = () => {
   const showCustomTitlebar = !usesNativeMacTitlebar();
 
   return (
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <AppUpdater />
-      <ResizeHandles />
-      <div className="bg-background flex h-screen flex-col overflow-hidden">
-        {showCustomTitlebar && <TitleBar />}
-        <div className="flex-1 overflow-hidden">
-          <HashRouter>
-            <Routes>
-              <Route path="/" element={<Index />} />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </HashRouter>
+    <AppErrorBoundary>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <AppUpdater />
+        <ResizeHandles />
+        <div className="bg-background flex h-screen flex-col overflow-hidden">
+          {showCustomTitlebar && <TitleBar />}
+          <main className="flex-1 overflow-hidden">
+            <HashRouter>
+              <Routes>
+                <Route path="/" element={<Index />} />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </HashRouter>
+          </main>
         </div>
-      </div>
-    </TooltipProvider>
+      </TooltipProvider>
+    </AppErrorBoundary>
   );
 };
 

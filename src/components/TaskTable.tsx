@@ -1,12 +1,4 @@
-import {
-  memo,
-  useRef,
-  useState,
-  useMemo,
-  useCallback,
-  useEffect,
-  type ReactNode,
-} from "react";
+import { memo, useRef, useState, useMemo, useCallback, useEffect, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTaskStore } from "@/store/task-store";
 import { Task, TaskType, Severity } from "@/types/jira";
@@ -14,15 +6,7 @@ import { TASK_TYPES, SEVERITIES, NO_PENDING_MANDAY } from "@/constants/task";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TypeIcon } from "@/components/TypeIcon";
 import { cn } from "@/lib/utils";
-import {
-  ExternalLink,
-  Zap,
-  Info,
-  ChevronsUp,
-  ChevronUp,
-  Equal,
-  ChevronDown,
-} from "lucide-react";
+import { ExternalLink, Zap, Info, ChevronsUp, ChevronUp, Equal, ChevronDown } from "lucide-react";
 import { openExternal } from "@/lib/desktop";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -54,7 +38,6 @@ const FULL_COLUMN_COUNT = 9;
 function hasStoryPointRuleViolation(task: Pick<Task, "type" | "storyLevel">): boolean {
   return task.type !== "Story" && task.storyLevel !== null;
 }
-
 
 function SeverityBadge({ severity }: { severity: Severity | null }) {
   if (!severity || severity === "NA")
@@ -198,10 +181,9 @@ const EpicHeaderRow = memo(function EpicHeaderRow({
   );
 });
 
-export function TaskTable() {
+export function TaskTable({ tasks: allTasks }: { tasks: Task[] }) {
   const {
     selectedTaskId,
-    getFilteredTasks,
     workLogs,
     projects,
     tasks: rawTasks,
@@ -209,14 +191,12 @@ export function TaskTable() {
   } = useTaskStore(
     useShallow((s) => ({
       selectedTaskId: s.selectedTaskId,
-      getFilteredTasks: s.getFilteredTasks,
       workLogs: s.workLogs,
       projects: s.projects,
       tasks: s.tasks,
       selectedProjectId: s.selectedProjectId,
     })),
   );
-  const allTasks = getFilteredTasks();
   const showExtendedColumns = !selectedTaskId;
   const colSpanAll = showExtendedColumns ? FULL_COLUMN_COUNT : COMPACT_COLUMN_COUNT;
 
@@ -318,7 +298,13 @@ export function TaskTable() {
     }
 
     return rows;
-  }, [epicGroups, orphanRoots, totalMinutesByTaskId, rawChildrenByParentKey, filteredChildrenByParentKey]);
+  }, [
+    epicGroups,
+    orphanRoots,
+    totalMinutesByTaskId,
+    rawChildrenByParentKey,
+    filteredChildrenByParentKey,
+  ]);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const handleSelectTask = useCallback((taskId: string) => {
@@ -662,7 +648,11 @@ const TaskRow = memo(function TaskRow({
       {/* Note */}
       {showExtendedColumns && (
         <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
-          <InlineNoteEditor taskId={task.id} initialValue={task.note ?? ""} onUpdate={updateTaskNote} />
+          <InlineNoteEditor
+            taskId={task.id}
+            initialValue={task.note ?? ""}
+            onUpdate={updateTaskNote}
+          />
         </TableCell>
       )}
     </TableRow>

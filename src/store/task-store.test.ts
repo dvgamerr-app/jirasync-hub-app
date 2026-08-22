@@ -51,6 +51,10 @@ function createMockState() {
   const db = {
     organizations: {
       toArray: mock<() => Promise<Organization[]>>(async () => []),
+      bulkGet: mock(async (ids: string[]) => {
+        const rows = await db.organizations.toArray();
+        return ids.map((id) => rows.find((row) => row.id === id));
+      }),
       delete: mock(async () => undefined),
       where: mock(() => ({
         equals: mock(() => ({
@@ -61,10 +65,19 @@ function createMockState() {
     },
     projects: {
       toArray: mock<() => Promise<Project[]>>(async () => []),
-      where: mock(() => ({
-        equals: mock(() => ({
-          toArray: mock<() => Promise<Project[]>>(async () => []),
+      where: mock((field: keyof Project) => ({
+        equals: mock((value: unknown) => ({
+          toArray: mock(async () =>
+            (await db.projects.toArray()).filter((row) => Reflect.get(row, field) === value),
+          ),
           delete: mock(async () => undefined),
+        })),
+        startsWith: mock((prefix: string) => ({
+          toArray: mock(async () =>
+            (await db.projects.toArray()).filter((row) =>
+              String(Reflect.get(row, field)).startsWith(prefix),
+            ),
+          ),
         })),
       })),
     },
@@ -81,6 +94,13 @@ function createMockState() {
           delete: mock(async () => {
             deleteByField(tasks, field, value);
           }),
+        })),
+        startsWith: mock((prefix: string) => ({
+          toArray: mock(async () =>
+            (await db.tasks.toArray()).filter((row) =>
+              String(Reflect.get(row, field)).startsWith(prefix),
+            ),
+          ),
         })),
       })),
       toCollection: mock(() => ({
@@ -112,6 +132,13 @@ function createMockState() {
           delete: mock(async () => {
             deleteByField(workLogs, field, value);
           }),
+        })),
+        startsWith: mock((prefix: string) => ({
+          toArray: mock(async () =>
+            (await db.workLogs.toArray()).filter((row) =>
+              String(Reflect.get(row, field)).startsWith(prefix),
+            ),
+          ),
         })),
       })),
       toCollection: mock(() => ({
@@ -145,6 +172,7 @@ function createMockState() {
     deleteJiraWorkLog.mockReset().mockResolvedValue(undefined);
 
     db.organizations.toArray.mockClear();
+    db.organizations.bulkGet.mockClear();
     db.organizations.delete.mockClear();
     db.organizations.where.mockClear();
     db.projects.toArray.mockClear();
@@ -276,6 +304,7 @@ function seedStore(tasks: Task[], workLogs: WorkLog[], projects: Project[] = [])
     isLoaded: true,
     selectedProjectId: null,
     selectedTaskId: null,
+    taskScopeFilter: "my-work",
     taskStatusFilter: "active",
     taskDetailViewMode: "details",
     reloadFromDB,
@@ -300,6 +329,7 @@ describe("task-store manual worklog sync", () => {
       isLoaded: false,
       selectedProjectId: null,
       selectedTaskId: null,
+      taskScopeFilter: "my-work",
       taskStatusFilter: "active",
       taskDetailViewMode: "details",
       searchQuery: "",
@@ -412,7 +442,19 @@ describe("task-store manual worklog sync", () => {
         isSynced: true,
       }),
     );
-    expect(reloadFromDB).toHaveBeenCalledOnce();
+    expect(reloadFromDB).not.toHaveBeenCalled();
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      id: task.id,
+      isDirty: false,
+      isSynced: true,
+    });
+    expect(useTaskStore.getState().workLogs).toEqual([
+      expect.objectContaining({
+        id: pendingCreate.id,
+        jiraWorklogId: "jira-worklog-new",
+        syncStatus: "synced",
+      }),
+    ]);
   });
 });
 
@@ -427,6 +469,7 @@ describe("task-store task status filters", () => {
       isLoaded: false,
       selectedProjectId: null,
       selectedTaskId: null,
+      taskScopeFilter: "my-work",
       taskStatusFilter: "active",
       taskDetailViewMode: "details",
       searchQuery: "",
@@ -509,6 +552,60 @@ describe("task-store task status filters", () => {
         .getFilteredTasks()
         .map((task) => task.id),
     ).toEqual([reassignedAfterStart.id, stillOurs.id]);
+  });
+
+  it("routes created tickets assigned to us into My Work and other created tickets into Created by me", () => {
+    const project = createProject();
+    const createdAndAssignedToUs = createTask({
+      id: "task-account-1-ALPHA-1",
+      jiraTaskId: "ALPHA-1",
+      isCreatedByCurrentUser: true,
+      isCurrentAssignee: true,
+      createdAt: "2026-03-21T10:00:00.000Z",
+    });
+    const createdForSomeoneElse = createTask({
+      id: "task-account-1-ALPHA-2",
+      jiraTaskId: "ALPHA-2",
+      status: "To Do",
+      statusCategory: "new",
+      isCreatedByCurrentUser: true,
+      isCurrentAssignee: false,
+      createdAt: "2026-03-21T11:00:00.000Z",
+    });
+    const assignedToUsBySomeoneElse = createTask({
+      id: "task-account-1-ALPHA-3",
+      jiraTaskId: "ALPHA-3",
+      isCreatedByCurrentUser: false,
+      isCurrentAssignee: true,
+      createdAt: "2026-03-21T12:00:00.000Z",
+    });
+    seedStore(
+      [createdAndAssignedToUs, createdForSomeoneElse, assignedToUsBySomeoneElse],
+      [],
+      [project],
+    );
+
+    expect(
+      useTaskStore
+        .getState()
+        .getFilteredTasks()
+        .map((task) => task.id),
+    ).toEqual([assignedToUsBySomeoneElse.id, createdAndAssignedToUs.id]);
+
+    useTaskStore.setState({
+      selectedProjectId: project.id,
+      selectedTaskId: createdAndAssignedToUs.id,
+    });
+    useTaskStore.getState().setTaskScopeFilter("created-by-me");
+
+    expect(useTaskStore.getState().selectedProjectId).toBeNull();
+    expect(useTaskStore.getState().selectedTaskId).toBeNull();
+    expect(
+      useTaskStore
+        .getState()
+        .getFilteredTasks()
+        .map((task) => task.id),
+    ).toEqual([createdForSomeoneElse.id]);
   });
 
   it("clears the selected task when it no longer matches the active filter", () => {
@@ -651,6 +748,7 @@ describe("task-store story level rules", () => {
       isLoaded: false,
       selectedProjectId: null,
       selectedTaskId: null,
+      taskScopeFilter: "my-work",
       taskStatusFilter: "active",
       taskDetailViewMode: "details",
       searchQuery: "",

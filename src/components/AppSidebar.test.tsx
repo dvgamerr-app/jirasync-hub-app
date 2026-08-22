@@ -62,6 +62,7 @@ describe("AppSidebar", () => {
       workLogs: [],
       selectedProjectId: null,
       selectedTaskId: null,
+      taskScopeFilter: "my-work" as const,
       taskStatusFilter: "active" as const,
       searchQuery: "",
       hiddenProjectIds: new Set<string>(),
@@ -86,26 +87,33 @@ describe("AppSidebar", () => {
     expect(container.textContent).not.toContain("Project Beta");
   });
 
-  it("clicking All Tasks calls setSelectedProject(null)", async () => {
-    const spy = spyOn(useTaskStore.getState(), "setSelectedProject");
+  it("clicking My Work selects the work scope", async () => {
+    const spy = spyOn(useTaskStore.getState(), "setTaskScopeFilter");
     spies.push(spy);
     await act(async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       useTaskStore.setState({ selectedProjectId: "proj-1" } as any);
       root.render(<AppSidebar onOpenSettings={mock()} />);
     });
-    const allTasksBtn = Array.from(container.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("All Tasks"),
+    const myWorkButton = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("My Work"),
     );
     await act(async () => {
-      allTasksBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      myWorkButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(spy).toHaveBeenCalledWith(null);
+    expect(spy).toHaveBeenCalledWith("my-work");
+  });
+
+  it("shows the Created by me scope", () => {
+    expect(container.textContent).toContain("Created by me");
   });
 
   it("clicking a project calls setSelectedProject with the project id", async () => {
     const spy = spyOn(useTaskStore.getState(), "setSelectedProject");
     spies.push(spy);
+    await act(async () => {
+      root.render(<AppSidebar onOpenSettings={mock()} />);
+    });
     const alphaBtn = Array.from(container.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("Project Alpha"),
     );

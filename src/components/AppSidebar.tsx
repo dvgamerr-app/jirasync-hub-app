@@ -7,6 +7,7 @@ import {
   EyeOff,
   FolderKanban,
   ListTodo,
+  UserRound,
   Settings,
   RefreshCw,
 } from "lucide-react";
@@ -25,6 +26,8 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
     selectedProjectId,
     setSelectedProject,
     getVisibleProjects,
+    taskScopeFilter,
+    setTaskScopeFilter,
     hiddenProjectIds,
     toggleProjectVisibility,
   } = useTaskStore(
@@ -33,6 +36,8 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
       selectedProjectId: s.selectedProjectId,
       setSelectedProject: s.setSelectedProject,
       getVisibleProjects: s.getVisibleProjects,
+      taskScopeFilter: s.taskScopeFilter,
+      setTaskScopeFilter: s.setTaskScopeFilter,
       hiddenProjectIds: s.hiddenProjectIds,
       toggleProjectVisibility: s.toggleProjectVisibility,
     })),
@@ -51,98 +56,108 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
   }, []);
 
   return (
-    <>
-      <aside className="border-border bg-card flex h-full w-[280px] flex-col border-r">
-        {/* Header */}
-        <div className="border-border border-b px-3 py-3">
-          <h2 className="text-[13px] font-semibold">Task Manager</h2>
-        </div>
+    <aside className="border-border bg-card hidden h-full w-[280px] flex-col border-r md:flex">
+      {/* Header */}
+      <div className="border-border border-b px-3 py-3">
+        <h2 className="text-[13px] font-semibold">Task Manager</h2>
+      </div>
 
-        {/* Navigation */}
-        <div className="flex-1 overflow-y-auto p-2">
-          <button
-            onClick={() => startTransition(() => setSelectedProject(null))}
-            className={cn(
-              "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]",
-              !selectedProjectId
-                ? "bg-primary/10 text-primary font-medium"
-                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-            )}
-          >
-            <ListTodo className="h-3.5 w-3.5" />
-            All Tasks
-          </button>
-
-          {organizations.map((org) => {
-            const orgProjects = projects.filter((p) => p.orgId === org.id);
-            if (orgProjects.length === 0) return null;
-            return (
-              <Collapsible key={org.id} defaultOpen className="mt-3">
-                <CollapsibleTrigger className="text-muted-foreground flex w-full items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold tracking-wider uppercase">
-                  <ChevronDown className="h-3 w-3" />
-                  {org.name}
-                </CollapsibleTrigger>
-                <CollapsibleContent className="mt-1 space-y-0.5">
-                  {orgProjects.map((project) => {
-                    const isHidden = hiddenProjectIds.has(project.id);
-                    return (
-                      <button
-                        key={project.id}
-                        onClick={() => startTransition(() => setSelectedProject(project.id))}
-                        className={cn(
-                          "group flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]",
-                          selectedProjectId === project.id
-                            ? "bg-primary/10 text-primary font-medium"
-                            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                          isHidden && "opacity-50",
-                        )}
-                      >
-                        <span
-                          className="shrink-0"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            startTransition(() => toggleProjectVisibility(project.id));
-                          }}
-                        >
-                          {isHidden ? (
-                            <EyeOff className="h-3.5 w-3.5" />
-                          ) : (
-                            <>
-                              <FolderKanban className="h-3.5 w-3.5 group-hover:hidden" />
-                              <Eye className="hidden h-3.5 w-3.5 group-hover:inline-block" />
-                            </>
-                          )}
-                        </span>
-                        <span className="truncate">{project.name}</span>
-                        <span className="text-muted-foreground ml-auto font-mono text-[10px]">
-                          {project.jiraProjectKey}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </CollapsibleContent>
-              </Collapsible>
-            );
-          })}
-        </div>
-
-        {/* Footer */}
-        <div className="border-border space-y-1 border-t px-3 py-2">
-          {lastSync && (
-            <div className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
-              <RefreshCw className="h-3 w-3" />
-              <span>Synced {formatDistanceToNow(new Date(lastSync), { addSuffix: true })}</span>
-            </div>
+      {/* Navigation */}
+      <div className="flex-1 overflow-y-auto p-2">
+        <button
+          onClick={() => startTransition(() => setTaskScopeFilter("my-work"))}
+          className={cn(
+            "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]",
+            taskScopeFilter === "my-work" && !selectedProjectId
+              ? "bg-primary/10 text-primary font-medium"
+              : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
           )}
-          <button
-            onClick={onOpenSettings}
-            className="text-muted-foreground hover:bg-accent hover:text-accent-foreground flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]"
-          >
-            <Settings className="h-3.5 w-3.5" />
-            Settings
-          </button>
-        </div>
-      </aside>
-    </>
+        >
+          <ListTodo className="h-3.5 w-3.5" />
+          My Work
+        </button>
+        <button
+          onClick={() => startTransition(() => setTaskScopeFilter("created-by-me"))}
+          className={cn(
+            "mt-0.5 flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]",
+            taskScopeFilter === "created-by-me" && !selectedProjectId
+              ? "bg-primary/10 text-primary font-medium"
+              : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+          )}
+        >
+          <UserRound className="h-3.5 w-3.5" />
+          Created by me
+        </button>
+
+        {organizations.map((org) => {
+          const orgProjects = projects.filter((p) => p.orgId === org.id);
+          if (orgProjects.length === 0) return null;
+          return (
+            <Collapsible key={org.id} defaultOpen className="mt-3">
+              <CollapsibleTrigger className="text-muted-foreground flex w-full items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold tracking-wider uppercase">
+                <ChevronDown className="h-3 w-3" />
+                {org.name}
+              </CollapsibleTrigger>
+              <CollapsibleContent className="mt-1 space-y-0.5">
+                {orgProjects.map((project) => {
+                  const isHidden = hiddenProjectIds.has(project.id);
+                  return (
+                    <button
+                      key={project.id}
+                      onClick={() => startTransition(() => setSelectedProject(project.id))}
+                      className={cn(
+                        "group flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]",
+                        selectedProjectId === project.id
+                          ? "bg-primary/10 text-primary font-medium"
+                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                        isHidden && "opacity-50",
+                      )}
+                    >
+                      <span
+                        className="shrink-0"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startTransition(() => toggleProjectVisibility(project.id));
+                        }}
+                      >
+                        {isHidden ? (
+                          <EyeOff className="h-3.5 w-3.5" />
+                        ) : (
+                          <>
+                            <FolderKanban className="h-3.5 w-3.5 group-hover:hidden" />
+                            <Eye className="hidden h-3.5 w-3.5 group-hover:inline-block" />
+                          </>
+                        )}
+                      </span>
+                      <span className="truncate">{project.name}</span>
+                      <span className="text-muted-foreground ml-auto font-mono text-[10px]">
+                        {project.jiraProjectKey}
+                      </span>
+                    </button>
+                  );
+                })}
+              </CollapsibleContent>
+            </Collapsible>
+          );
+        })}
+      </div>
+
+      {/* Footer */}
+      <div className="border-border space-y-1 border-t px-3 py-2">
+        {lastSync && (
+          <div className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
+            <RefreshCw className="h-3 w-3" />
+            <span>Synced {formatDistanceToNow(new Date(lastSync), { addSuffix: true })}</span>
+          </div>
+        )}
+        <button
+          onClick={onOpenSettings}
+          className="text-muted-foreground hover:bg-accent hover:text-accent-foreground flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]"
+        >
+          <Settings className="h-3.5 w-3.5" />
+          Settings
+        </button>
+      </div>
+    </aside>
   );
 }

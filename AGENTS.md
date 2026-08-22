@@ -99,12 +99,12 @@
 
 ## Useful commands
 
-| Task | Command |
-|---|---|
+| Task       | Command                             |
+| ---------- | ----------------------------------- |
 | Dev server | `bun run dev` + `bun run tauri dev` |
-| Tests | `bun run test` |
-| Lint | `bun run lint` |
-| Type check | `bun run build` (runs `tsc`) |
+| Tests      | `bun run test`                      |
+| Lint       | `bun run lint`                      |
+| Type check | `bun run build` (runs `tsc`)        |
 
 ```bash
 bun tauri dev
@@ -132,9 +132,6 @@ Jira API ──sync──► IndexedDB (Dexie) ──loadFromDB──► Zustand
 
 ## Known Remaining Debt
 
-High priority — see [docs/technical-debt.md](docs/technical-debt.md#remaining) for details:
-1. `loadScopedCollections` loads all DB records to memory (should use Dexie indexed queries)
-2. `getFilteredTasks()` computed twice per render (Index + TaskTable each call it)
-3. `syncTaskToJira` reloads all data after syncing a single task
-4. No React Error Boundary around `TaskTable` / `TaskDetailPanel`
-5. `@tanstack/react-query` still in `package.json` — run `bun remove @tanstack/react-query`
+See [docs/technical-debt.md](docs/technical-debt.md#remaining) for details. The current backlog is unused shadcn/ui modules, Dexie schema migrations, indirect background-sync UI refresh, the TanStack Virtual lint suppression, and a Fast Refresh warning in `TypeIcon.tsx`.
+
+Resolved on 2026-08-02: account-scoped indexed collection loading, duplicate task filtering, full reload after single-task sync, the missing app error boundary, and unused `@tanstack/react-query`.

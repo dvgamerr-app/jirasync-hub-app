@@ -117,20 +117,19 @@ describe("TaskTable", () => {
     document.body.appendChild(container);
     root = createRoot(container);
     spies = [];
-    // Set raw state - let real getFilteredTasks compute
-
     useTaskStore.setState({
       tasks: [task],
       workLogs,
       projects: [project],
       selectedTaskId: null,
       selectedProjectId: null,
+      taskScopeFilter: "my-work" as const,
       taskStatusFilter: "active" as const,
       searchQuery: "",
       hiddenProjectIds: new Set<string>(),
     } as Partial<TaskStore>);
     await act(async () => {
-      root.render(<TaskTable />);
+      root.render(<TaskTable tasks={[task]} />);
     });
   });
 
@@ -193,7 +192,7 @@ describe("TaskTable", () => {
 
   it("marks rows red when a non-story task still has story points", async () => {
     await act(async () => {
-      root.render(<TaskTable />);
+      root.render(<TaskTable tasks={[task]} />);
     });
     const row = container.querySelector("tbody tr");
     expect(row?.className).toContain("bg-red-50/80");

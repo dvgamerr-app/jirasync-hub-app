@@ -129,6 +129,7 @@ describe("TaskDetailPanel", () => {
       isLoaded: true,
       selectedProjectId: null,
       selectedTaskId: "task-1",
+      taskScopeFilter: "my-work",
       taskStatusFilter: "active",
       taskDetailViewMode: "details",
     });
@@ -152,6 +153,7 @@ describe("TaskDetailPanel", () => {
       isLoaded: false,
       selectedProjectId: null,
       selectedTaskId: null,
+      taskScopeFilter: "my-work",
       taskStatusFilter: "active",
       taskDetailViewMode: "details",
     });

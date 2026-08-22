@@ -76,7 +76,10 @@ async function markStaleTasksAsArchived(
   visibleProjectIds: Set<string>,
   syncedTaskIds: Set<string>,
 ): Promise<void> {
-  const localTasks = await db.tasks.where("projectId").anyOf([...visibleProjectIds]).toArray();
+  const localTasks = await db.tasks
+    .where("projectId")
+    .anyOf([...visibleProjectIds])
+    .toArray();
   const staleIds = localTasks
     .filter((t) => !syncedTaskIds.has(t.id) && !t.isDirty)
     .map((t) => t.id);

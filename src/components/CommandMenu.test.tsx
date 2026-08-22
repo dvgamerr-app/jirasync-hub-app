@@ -81,6 +81,7 @@ describe("CommandMenu", () => {
     useTaskStore.setState({
       tasks: [task],
       projects: [project],
+      taskScopeFilter: "my-work" as const,
       taskStatusFilter: "active" as const,
       selectedProjectId: null,
       searchQuery: "",

@@ -40,11 +40,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "@/hooks/use-toast";
-import {
-  getAutoUpdateEnabled,
-  requestUpdateCheck,
-  setAutoUpdateEnabled,
-} from "@/lib/app-updater";
+import { getAutoUpdateEnabled, requestUpdateCheck, setAutoUpdateEnabled } from "@/lib/app-updater";
 import {
   Loader2,
   CheckCircle2,

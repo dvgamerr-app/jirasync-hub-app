@@ -5,9 +5,7 @@ import {
   getAccountIdFromTask,
   getOrganizationId,
   getProjectIdPrefix,
-  isOrganizationIdForAccounts,
-  isProjectIdForAccounts,
-  isTaskIdForAccounts,
+  getTaskIdPrefix,
 } from "@/lib/jira-ids";
 import {
   updateJiraIssue,
@@ -29,6 +27,7 @@ function getVisibleWorkLogsForTask(workLogs: WorkLog[], taskId: string): WorkLog
 }
 
 export type TaskStatusFilter = "active" | "done" | "all";
+export type TaskScopeFilter = "my-work" | "created-by-me";
 
 export interface TaskStore {
   organizations: Organization[];
@@ -39,6 +38,7 @@ export interface TaskStore {
 
   selectedProjectId: string | null;
   selectedTaskId: string | null;
+  taskScopeFilter: TaskScopeFilter;
   taskStatusFilter: TaskStatusFilter;
   taskDetailViewMode: "details" | "description";
   searchQuery: string;
@@ -46,6 +46,7 @@ export interface TaskStore {
 
   setSelectedProject: (projectId: string | null) => void;
   setSelectedTask: (taskId: string | null) => void;
+  setTaskScopeFilter: (filter: TaskScopeFilter) => void;
   setTaskStatusFilter: (filter: TaskStatusFilter) => void;
   setTaskDetailViewMode: (mode: "details" | "description") => void;
   setSearchQuery: (query: string) => void;
@@ -172,25 +173,41 @@ async function loadScopedCollections(accountIds: string[]): Promise<ScopedTaskCo
     };
   }
 
-  const [allOrganizations, allProjects, allTasks, allWorkLogs] = await Promise.all([
-    db.organizations.toArray(),
-    db.projects.toArray(),
-    db.tasks.toArray(),
-    db.workLogs.toArray(),
+  const [organizationRows, projectGroups] = await Promise.all([
+    db.organizations.bulkGet(accountIds.map(getOrganizationId)),
+    Promise.all(
+      accountIds.map((accountId) =>
+        db.projects.where("id").startsWith(getProjectIdPrefix(accountId)).toArray(),
+      ),
+    ),
   ]);
 
-  const organizations = allOrganizations
-    .filter((org) => isOrganizationIdForAccounts(org.id, accountIds))
+  const organizations = organizationRows
+    .filter((organization): organization is Organization => organization !== undefined)
     .sort((left, right) => compareScopedEntityOrder(left.id, right.id, accountIds, "organization"));
-  const projects = allProjects
-    .filter((project) => isProjectIdForAccounts(project.id, accountIds))
+  const projects = projectGroups
+    .flat()
     .sort((left, right) => compareScopedEntityOrder(left.id, right.id, accountIds, "project"));
   const visibleProjectIds = new Set(projects.map((project) => project.id));
-  const tasks = allTasks.filter(
-    (task) => isTaskIdForAccounts(task.id, accountIds) && visibleProjectIds.has(task.projectId),
-  );
+  const tasks = (
+    await Promise.all(
+      accountIds.map((accountId) =>
+        db.tasks.where("id").startsWith(getTaskIdPrefix(accountId)).toArray(),
+      ),
+    )
+  )
+    .flat()
+    .filter((task) => visibleProjectIds.has(task.projectId));
   const visibleTaskIds = new Set(tasks.map((task) => task.id));
-  const workLogs = allWorkLogs.filter((workLog) => visibleTaskIds.has(workLog.taskId));
+  const workLogs = (
+    await Promise.all(
+      accountIds.map((accountId) =>
+        db.workLogs.where("taskId").startsWith(getTaskIdPrefix(accountId)).toArray(),
+      ),
+    )
+  )
+    .flat()
+    .filter((workLog) => visibleTaskIds.has(workLog.taskId));
 
   return {
     organizations,
@@ -242,8 +259,19 @@ function removeWorkLog(workLogs: WorkLog[], workLogId: string): WorkLog[] {
   return workLogs.filter((workLog) => workLog.id !== workLogId);
 }
 
-function isDoneTask(task: Pick<Task, "status">): boolean {
-  return INACTIVE_STATUSES.has(task.status?.trim().toLowerCase() ?? "");
+function isDoneTask(task: Pick<Task, "status" | "statusCategory">): boolean {
+  return (
+    task.statusCategory === "done" || INACTIVE_STATUSES.has(task.status?.trim().toLowerCase() ?? "")
+  );
+}
+
+function matchesTaskScope(
+  task: Pick<Task, "isCreatedByCurrentUser" | "isCurrentAssignee">,
+  taskScopeFilter: TaskScopeFilter,
+): boolean {
+  const isCreatedForTracking =
+    task.isCreatedByCurrentUser === true && task.isCurrentAssignee === false;
+  return taskScopeFilter === "created-by-me" ? isCreatedForTracking : !isCreatedForTracking;
 }
 
 // A task still in the Jira "To Do" category that is no longer assigned to us was reassigned
@@ -255,12 +283,17 @@ function isStaleReassignedTask(task: Pick<Task, "statusCategory" | "isCurrentAss
 function matchesTaskStatusFilter(
   task: Pick<Task, "status" | "isArchived" | "statusCategory" | "isCurrentAssignee">,
   taskStatusFilter: TaskStatusFilter,
+  taskScopeFilter: TaskScopeFilter,
 ): boolean {
   switch (taskStatusFilter) {
     case "done":
       return isDoneTask(task) && !task.isArchived;
     case "active":
-      return !isDoneTask(task) && !task.isArchived && !isStaleReassignedTask(task);
+      return (
+        !isDoneTask(task) &&
+        !task.isArchived &&
+        (taskScopeFilter === "created-by-me" || !isStaleReassignedTask(task))
+      );
     case "all":
     default:
       return true;
@@ -271,13 +304,45 @@ function getVisibleTasks(
   tasks: Task[],
   selectedProjectId: string | null,
   taskStatusFilter: TaskStatusFilter,
+  taskScopeFilter: TaskScopeFilter,
 ): Task[] {
   const filteredByProject = selectedProjectId
     ? tasks.filter((task) => task.projectId === selectedProjectId)
     : tasks;
 
   return filteredByProject.filter(
-    (task) => task.isEpic === true || matchesTaskStatusFilter(task, taskStatusFilter),
+    (task) =>
+      matchesTaskScope(task, taskScopeFilter) &&
+      ((taskScopeFilter === "my-work" && task.isEpic === true) ||
+        matchesTaskStatusFilter(task, taskStatusFilter, taskScopeFilter)),
+  );
+}
+
+export function filterTasks(
+  tasks: Task[],
+  selectedProjectId: string | null,
+  taskStatusFilter: TaskStatusFilter,
+  searchQuery: string,
+  hiddenProjectIds: Set<string>,
+  taskScopeFilter: TaskScopeFilter = "my-work",
+): Task[] {
+  let filtered = getVisibleTasks(tasks, selectedProjectId, taskStatusFilter, taskScopeFilter);
+  if (!selectedProjectId && hiddenProjectIds.size > 0) {
+    filtered = filtered.filter((task) => !hiddenProjectIds.has(task.projectId));
+  }
+
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  if (normalizedQuery) {
+    filtered = filtered.filter(
+      (task) =>
+        task.jiraTaskId.toLowerCase().includes(normalizedQuery) ||
+        task.title.toLowerCase().includes(normalizedQuery) ||
+        task.description?.toLowerCase().includes(normalizedQuery),
+    );
+  }
+
+  return filtered.sort(
+    (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
   );
 }
 
@@ -285,6 +350,7 @@ function getVisibleProjectIds(
   tasks: Task[],
   projects: Project[],
   taskStatusFilter: TaskStatusFilter,
+  taskScopeFilter: TaskScopeFilter,
 ): Set<string> {
   const knownProjectIds = new Set(projects.map((project) => project.id));
 
@@ -292,7 +358,9 @@ function getVisibleProjectIds(
     tasks
       .filter(
         (task) =>
-          knownProjectIds.has(task.projectId) && matchesTaskStatusFilter(task, taskStatusFilter),
+          knownProjectIds.has(task.projectId) &&
+          matchesTaskScope(task, taskScopeFilter) &&
+          matchesTaskStatusFilter(task, taskStatusFilter, taskScopeFilter),
       )
       .map((task) => task.projectId),
   );
@@ -304,12 +372,20 @@ function getNormalizedSelectionState(
   selectedProjectId: string | null,
   selectedTaskId: string | null,
   taskStatusFilter: TaskStatusFilter,
+  taskScopeFilter: TaskScopeFilter,
 ): Pick<TaskStore, "selectedProjectId" | "selectedTaskId"> {
-  const visibleProjectIds = getVisibleProjectIds(tasks, projects, taskStatusFilter);
+  const visibleProjectIds = getVisibleProjectIds(
+    tasks,
+    projects,
+    taskStatusFilter,
+    taskScopeFilter,
+  );
   const nextSelectedProjectId =
     selectedProjectId && !visibleProjectIds.has(selectedProjectId) ? null : selectedProjectId;
   const visibleTaskIds = new Set(
-    getVisibleTasks(tasks, nextSelectedProjectId, taskStatusFilter).map((task) => task.id),
+    getVisibleTasks(tasks, nextSelectedProjectId, taskStatusFilter, taskScopeFilter).map(
+      (task) => task.id,
+    ),
   );
 
   return {
@@ -363,13 +439,13 @@ async function syncTaskWorkLogsToJira(task: Task, account: JiraAccount): Promise
   );
 }
 
-async function syncDirtyTask(task: Task, accounts: JiraAccount[]): Promise<void> {
+async function syncDirtyTask(task: Task, accounts: JiraAccount[]): Promise<Task | null> {
   const account = getAccountForTask(task, accounts);
-  if (!account) return;
+  if (!account) return null;
 
   await pushTaskToJira(task, accounts);
   await syncTaskWorkLogsToJira(task, account);
-  await persistSyncedTask(task);
+  return persistSyncedTask(task);
 }
 
 const HIDDEN_PROJECTS_KEY = "jirasync-hidden-projects";
@@ -398,6 +474,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       currentState.selectedProjectId,
       currentState.selectedTaskId,
       currentState.taskStatusFilter,
+      currentState.taskScopeFilter,
     );
 
     set({
@@ -418,6 +495,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         state.selectedProjectId,
         state.selectedTaskId,
         state.taskStatusFilter,
+        state.taskScopeFilter,
       );
 
       return {
@@ -436,6 +514,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
 
     selectedProjectId: null,
     selectedTaskId: null,
+    taskScopeFilter: "my-work",
     taskStatusFilter: "active",
     taskDetailViewMode: "details",
     searchQuery: "",
@@ -443,6 +522,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
 
     setSelectedProject: (projectId) => set({ selectedProjectId: projectId, selectedTaskId: null }),
     setSelectedTask: (taskId) => set({ selectedTaskId: taskId }),
+    setTaskScopeFilter: (taskScopeFilter) =>
+      set({ taskScopeFilter, selectedProjectId: null, selectedTaskId: null }),
     setTaskStatusFilter: (taskStatusFilter) =>
       set((state) => {
         const normalizedSelection = getNormalizedSelectionState(
@@ -451,6 +532,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           state.selectedProjectId,
           state.selectedTaskId,
           taskStatusFilter,
+          state.taskScopeFilter,
         );
 
         return {
@@ -531,8 +613,17 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       const task = get().tasks.find((candidate) => candidate.id === taskId);
       if (!task || !task.isDirty) return;
 
-      await syncDirtyTask(task, getJiraAccounts());
-      await get().reloadFromDB();
+      const syncedTask = await syncDirtyTask(task, getJiraAccounts());
+      if (!syncedTask) return;
+
+      const syncedWorkLogs = await db.workLogs.where("taskId").equals(task.id).toArray();
+      set((state) => ({
+        tasks: replaceTask(state.tasks, syncedTask),
+        workLogs: [
+          ...state.workLogs.filter((workLog) => workLog.taskId !== task.id),
+          ...syncedWorkLogs,
+        ],
+      }));
     },
 
     syncAllDirtyTasks: async () => {
@@ -567,28 +658,32 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     getDirtyTaskCount: () => get().tasks.filter((task) => task.isDirty).length,
 
     getFilteredTasks: () => {
-      const { tasks, selectedProjectId, taskStatusFilter, searchQuery, hiddenProjectIds } = get();
-      let filtered = getVisibleTasks(tasks, selectedProjectId, taskStatusFilter);
-      if (!selectedProjectId && hiddenProjectIds.size > 0) {
-        filtered = filtered.filter((task) => !hiddenProjectIds.has(task.projectId));
-      }
-      if (searchQuery.trim()) {
-        const q = searchQuery.trim().toLowerCase();
-        filtered = filtered.filter(
-          (task) =>
-            task.jiraTaskId.toLowerCase().includes(q) ||
-            task.title.toLowerCase().includes(q) ||
-            (task.description && task.description.toLowerCase().includes(q)),
-        );
-      }
-      return filtered.sort(
-        (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
+      const {
+        tasks,
+        selectedProjectId,
+        taskStatusFilter,
+        searchQuery,
+        hiddenProjectIds,
+        taskScopeFilter,
+      } = get();
+      return filterTasks(
+        tasks,
+        selectedProjectId,
+        taskStatusFilter,
+        searchQuery,
+        hiddenProjectIds,
+        taskScopeFilter,
       );
     },
 
     getVisibleProjects: () => {
-      const { projects, tasks, taskStatusFilter } = get();
-      const visibleProjectIds = getVisibleProjectIds(tasks, projects, taskStatusFilter);
+      const { projects, tasks, taskStatusFilter, taskScopeFilter } = get();
+      const visibleProjectIds = getVisibleProjectIds(
+        tasks,
+        projects,
+        taskStatusFilter,
+        taskScopeFilter,
+      );
       return projects.filter((project) => visibleProjectIds.has(project.id));
     },
 

@@ -185,6 +185,7 @@ describe("Index", () => {
       workLogs: [] as WorkLog[],
       selectedTaskId: null,
       selectedProjectId: projectAlpha.id,
+      taskScopeFilter: "my-work" as const,
       taskStatusFilter: "active" as const,
       searchQuery: "",
       hiddenProjectIds: new Set<string>(),
@@ -221,6 +222,23 @@ describe("Index", () => {
     const exportDialog = container.querySelector('[data-testid="export-dialog"]');
     expect(exportDialog?.getAttribute("data-task-count")).toBe("2");
     expect(container.textContent).toContain("Project Alpha");
+  });
+
+  it("keeps Created by me tracking tickets out of worklog export", async () => {
+    const myWorkTask = buildTask("task-account-1-ALPHA-1", projectAlpha.id, "ALPHA-1");
+    const trackingTask = {
+      ...buildTask("task-account-1-ALPHA-2", projectAlpha.id, "ALPHA-2"),
+      isCreatedByCurrentUser: true,
+      isCurrentAssignee: false,
+    };
+    useTaskStore.setState({ tasks: [myWorkTask, trackingTask] } as Partial<TaskStore>);
+
+    await act(async () => {
+      root.render(<Index />);
+    });
+
+    const exportDialog = container.querySelector('[data-testid="export-dialog"]');
+    expect(exportDialog?.getAttribute("data-task-count")).toBe("1");
   });
 
   it("keeps the export button enabled when the selected project has no visible tasks but other tasks exist", async () => {

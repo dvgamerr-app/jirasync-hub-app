@@ -1,13 +1,19 @@
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { TaskTable } from "@/components/TaskTable";
+import { CreatedTicketTable } from "@/components/CreatedTicketTable";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { CommandMenu } from "@/components/CommandMenu";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { MobileSidebar } from "@/components/MobileSidebar";
 import { ExportDialog } from "@/components/ExportDialog";
 import { JiraSettingsDialog } from "@/components/JiraSettings";
-import { type TaskStatusFilter, useTaskStore } from "@/store/task-store";
+import {
+  filterTasks,
+  type TaskScopeFilter,
+  type TaskStatusFilter,
+  useTaskStore,
+} from "@/store/task-store";
 import { useShallow } from "zustand/react/shallow";
 import {
   Search,
@@ -38,6 +44,7 @@ const PUSH_DONE_RESET_MS = 1800;
 function getEmptyMessage(
   hasAnyTasks: boolean,
   taskStatusFilter: TaskStatusFilter,
+  taskScopeFilter: TaskScopeFilter,
   hasJiraAccounts: boolean,
   searchQuery?: string,
 ): string {
@@ -46,6 +53,11 @@ function getEmptyMessage(
     if (!hasJiraAccounts)
       return "Add a Jira instance in Jira Settings to start your first sync and load tasks into this workspace.";
     return "This workspace is still empty. Run Sync to pull tasks from your connected Jira instance.";
+  }
+  if (taskScopeFilter === "created-by-me") {
+    if (taskStatusFilter === "done") return "No created tickets are done yet.";
+    if (taskStatusFilter === "active") return "No active tickets created by this account.";
+    return "No tickets created by this account.";
   }
   if (taskStatusFilter === "done") return "No done tasks match the current project selection.";
   if (taskStatusFilter === "active") return "No active tasks match the current project selection.";
@@ -57,6 +69,7 @@ function EmptyTasksState({
   hasAnyTasks,
   syncing,
   taskStatusFilter,
+  taskScopeFilter,
   searchQuery,
   onOpenSettings,
   onSync,
@@ -65,50 +78,51 @@ function EmptyTasksState({
   hasAnyTasks: boolean;
   syncing: boolean;
   taskStatusFilter: TaskStatusFilter;
+  taskScopeFilter: TaskScopeFilter;
   searchQuery: string;
   onOpenSettings: () => void;
   onSync: () => Promise<void>;
 }) {
   const isSearching = searchQuery.trim().length > 0;
   const title = isSearching ? "ไม่พบผลลัพธ์" : hasAnyTasks ? "No matching tasks" : "No tasks yet";
-  const message = getEmptyMessage(hasAnyTasks, taskStatusFilter, hasJiraAccounts, searchQuery);
+  const message = getEmptyMessage(
+    hasAnyTasks,
+    taskStatusFilter,
+    taskScopeFilter,
+    hasJiraAccounts,
+    searchQuery,
+  );
 
   return (
-    <div className="flex flex-1 items-center justify-center p-6">
-      <div className="border-border bg-card/70 w-full max-w-md rounded-2xl border border-dashed p-8 text-center shadow-sm">
-        <div className="bg-muted mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl">
-          <Server className="text-muted-foreground h-6 w-6" />
-        </div>
-        <h2 className="text-lg font-semibold">{title}</h2>
-        <p className="text-muted-foreground mt-2 text-sm leading-6">{message}</p>
-
-        {!isSearching && (
-          <div className="mt-6 flex flex-wrap justify-center gap-2">
-            {hasJiraAccounts ? (
-              <>
-                <Button
-                  className="h-9 text-[13px]"
-                  onClick={() => void onSync()}
-                  disabled={syncing}
-                >
-                  <RefreshCw className={syncing ? "animate-spin" : ""} />
-                  {syncing ? "Syncing..." : "Sync Now"}
-                </Button>
-                <Button variant="outline" className="h-9 text-[13px]" onClick={onOpenSettings}>
-                  <Settings className="h-4 w-4" />
-                  Settings
-                </Button>
-              </>
-            ) : (
-              <Button className="h-9 text-[13px]" onClick={onOpenSettings}>
-                <Settings className="h-4 w-4" />
-                Add Jira Instance
-              </Button>
-            )}
-          </div>
-        )}
+    <section className="border-border bg-card/70 m-auto w-[calc(100%-3rem)] max-w-md rounded-2xl border border-dashed p-8 text-center shadow-sm">
+      <div className="bg-muted mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl">
+        <Server className="text-muted-foreground h-6 w-6" />
       </div>
-    </div>
+      <h2 className="text-lg font-semibold">{title}</h2>
+      <p className="text-muted-foreground mt-2 text-sm leading-6">{message}</p>
+
+      {!isSearching && (
+        <div className="mt-6 flex flex-wrap justify-center gap-2">
+          {hasJiraAccounts ? (
+            <>
+              <Button className="h-9 text-[13px]" onClick={() => void onSync()} disabled={syncing}>
+                <RefreshCw className={syncing ? "animate-spin" : ""} />
+                {syncing ? "Syncing..." : "Sync Now"}
+              </Button>
+              <Button variant="outline" className="h-9 text-[13px]" onClick={onOpenSettings}>
+                <Settings className="h-4 w-4" />
+                Settings
+              </Button>
+            </>
+          ) : (
+            <Button className="h-9 text-[13px]" onClick={onOpenSettings}>
+              <Settings className="h-4 w-4" />
+              Add Jira Instance
+            </Button>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -117,38 +131,55 @@ const Index = () => {
     tasks: allTasks,
     selectedTaskId,
     selectedProjectId,
-    getFilteredTasks,
     projects,
     workLogs,
     syncAllDirtyTasks,
     getDirtyTaskCount,
     taskStatusFilter,
+    taskScopeFilter,
     loadFromDB,
     reloadFromDB,
     setTaskStatusFilter,
     searchQuery,
     setSearchQuery,
+    hiddenProjectIds,
     isLoaded,
   } = useTaskStore(
     useShallow((s) => ({
       tasks: s.tasks,
       selectedTaskId: s.selectedTaskId,
       selectedProjectId: s.selectedProjectId,
-      getFilteredTasks: s.getFilteredTasks,
       projects: s.projects,
       workLogs: s.workLogs,
       syncAllDirtyTasks: s.syncAllDirtyTasks,
       getDirtyTaskCount: s.getDirtyTaskCount,
       taskStatusFilter: s.taskStatusFilter,
+      taskScopeFilter: s.taskScopeFilter,
       loadFromDB: s.loadFromDB,
       reloadFromDB: s.reloadFromDB,
       setTaskStatusFilter: s.setTaskStatusFilter,
       searchQuery: s.searchQuery,
       setSearchQuery: s.setSearchQuery,
+      hiddenProjectIds: s.hiddenProjectIds,
       isLoaded: s.isLoaded,
     })),
   );
-  const filteredTasks = getFilteredTasks();
+  const filteredTasks = useMemo(
+    () =>
+      filterTasks(
+        allTasks,
+        selectedProjectId,
+        taskStatusFilter,
+        searchQuery,
+        hiddenProjectIds,
+        taskScopeFilter,
+      ),
+    [allTasks, hiddenProjectIds, searchQuery, selectedProjectId, taskScopeFilter, taskStatusFilter],
+  );
+  const exportTasks = useMemo(
+    () => filterTasks(allTasks, null, "all", "", new Set<string>(), "my-work"),
+    [allTasks],
+  );
   const currentProject = projects.find((p) => p.id === selectedProjectId);
   const isMobile = useIsMobile();
   const dirtyCount = getDirtyTaskCount();
@@ -262,15 +293,17 @@ const Index = () => {
 
   return (
     <div className="bg-background flex h-full w-full overflow-hidden">
-      <div className="hidden md:block">
-        <AppSidebar onOpenSettings={() => setSettingsOpen(true)} />
-      </div>
+      <AppSidebar onOpenSettings={() => setSettingsOpen(true)} />
 
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <main className="flex flex-1 flex-col overflow-hidden">
         <header className="border-border flex h-11 shrink-0 items-center justify-between gap-2 border-b px-4">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-[13px] font-semibold">
-              {currentProject ? currentProject.name : "All Tasks"}
+              {currentProject
+                ? currentProject.name
+                : taskScopeFilter === "created-by-me"
+                  ? "Created by me"
+                  : "My Work"}
             </h1>
             <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-[11px] tabular-nums">
               {filteredTasks.length}
@@ -374,7 +407,7 @@ const Index = () => {
               variant="outline"
               size="sm"
               className="h-7 gap-1.5 text-[12px]"
-              disabled={allTasks.length === 0}
+              disabled={exportTasks.length === 0}
               onClick={() => {
                 setExportDialogOpen(true);
               }}
@@ -394,30 +427,37 @@ const Index = () => {
               hasAnyTasks={allTasks.length > 0}
               syncing={syncing}
               taskStatusFilter={taskStatusFilter}
+              taskScopeFilter={taskScopeFilter}
               searchQuery={searchQuery}
               onOpenSettings={() => setSettingsOpen(true)}
               onSync={handleManualSync}
             />
           ) : isMobile ? (
-            selectedTaskId ? (
+            selectedTaskId && taskScopeFilter === "my-work" ? (
               <TaskDetailPanel />
+            ) : taskScopeFilter === "created-by-me" ? (
+              <CreatedTicketTable tasks={filteredTasks} />
             ) : (
-              <TaskTable />
+              <TaskTable tasks={filteredTasks} />
             )
           ) : (
             <>
-              <TaskTable />
-              {selectedTaskId && <TaskDetailPanel />}
+              {taskScopeFilter === "created-by-me" ? (
+                <CreatedTicketTable tasks={filteredTasks} />
+              ) : (
+                <TaskTable tasks={filteredTasks} />
+              )}
+              {taskScopeFilter === "my-work" && selectedTaskId && <TaskDetailPanel />}
             </>
           )}
         </div>
-      </div>
+      </main>
 
       <CommandMenu open={commandMenuOpen} onOpenChange={setCommandMenuOpen} />
       <ExportDialog
         open={exportDialogOpen}
         onOpenChange={setExportDialogOpen}
-        tasks={allTasks}
+        tasks={exportTasks}
         workLogs={workLogs}
         projects={projects}
       />
