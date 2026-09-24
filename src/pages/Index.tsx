@@ -24,14 +24,25 @@ import {
   CheckCircle2,
   Server,
   Settings,
+  Undo2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "@/hooks/use-toast";
 import { onSyncStatus, startBackgroundSync, stopBackgroundSync, syncNow } from "@/lib/sync-service";
 import { getJiraAccounts } from "@/lib/jira-db";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 const TASK_STATUS_FILTERS: Array<{ value: TaskStatusFilter; label: string }> = [
   { value: "active", label: "Active" },
@@ -134,6 +145,7 @@ const Index = () => {
     projects,
     workLogs,
     syncAllDirtyTasks,
+    discardAllDirtyTasks,
     getDirtyTaskCount,
     taskStatusFilter,
     taskScopeFilter,
@@ -152,6 +164,7 @@ const Index = () => {
       projects: s.projects,
       workLogs: s.workLogs,
       syncAllDirtyTasks: s.syncAllDirtyTasks,
+      discardAllDirtyTasks: s.discardAllDirtyTasks,
       getDirtyTaskCount: s.getDirtyTaskCount,
       taskStatusFilter: s.taskStatusFilter,
       taskScopeFilter: s.taskScopeFilter,
@@ -187,6 +200,8 @@ const Index = () => {
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [pushDone, setPushDone] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
@@ -273,13 +288,34 @@ const Index = () => {
         description: `${count} task(s) pushed to Jira`,
       });
       setTimeout(() => setPushDone(false), PUSH_DONE_RESET_MS);
-    } catch {
+    } catch (err: unknown) {
       setPushing(false);
       toast({
         title: "Sync failed",
-        description: "Some tasks could not be synced",
+        description: getErrorMessage(err),
         variant: "destructive",
       });
+    }
+  };
+
+  const handleDiscardAllDirtyTasks = async () => {
+    if (discarding) return;
+    setDiscarding(true);
+    try {
+      await discardAllDirtyTasks();
+      toast({
+        title: "Changes discarded",
+        description: "Unsynced local changes were reverted to Jira",
+      });
+    } catch (err: unknown) {
+      toast({
+        title: "Discard failed",
+        description: getErrorMessage(err),
+        variant: "destructive",
+      });
+    } finally {
+      setDiscarding(false);
+      setDiscardConfirmOpen(false);
     }
   };
 
@@ -308,6 +344,18 @@ const Index = () => {
             <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-[11px] tabular-nums">
               {filteredTasks.length}
             </span>
+            {dirtyCount > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-foreground h-6 gap-1 px-1.5 text-[11px]"
+                disabled={discarding}
+                onClick={() => setDiscardConfirmOpen(true)}
+              >
+                <Undo2 className="h-3 w-3" />
+                Discard all
+              </Button>
+            )}
             <div className="border-border bg-muted/30 flex items-center rounded-md border p-0.5">
               {TASK_STATUS_FILTERS.map((filter) => (
                 <button
@@ -462,6 +510,29 @@ const Index = () => {
         projects={projects}
       />
       <JiraSettingsDialog open={settingsOpen} onOpenChange={handleSettingsOpenChange} />
+      <AlertDialog open={discardConfirmOpen} onOpenChange={setDiscardConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard all local changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {dirtyCount} unsynced task(s) will be reverted to their latest state in Jira. This
+              cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={discarding}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={discarding}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleDiscardAllDirtyTasks();
+              }}
+            >
+              {discarding ? "Discarding..." : "Discard all"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

@@ -37,7 +37,9 @@ mock.module("@tauri-apps/plugin-updater", () => {
   const close = mock(async () => {});
   const check = mock(async () => ({
     version: "0.7.0",
-    body: "Updater test release",
+    body: `### Bug Fixes
+
+- Repair updated CI workflows ([\`63e28ef\`](https://github.com/$GITHUB_REPOSITORY/commit/63e28ef))`,
     download,
     install,
     close,
@@ -103,6 +105,14 @@ describe("AppUpdater", () => {
     });
 
     expect(container.textContent).toContain("Version 0.7.0 is available");
+    expect(container.textContent).toContain("Bug Fixes");
+    expect(container.textContent).not.toContain("###");
+    expect(container.querySelector("h3")?.textContent).toBe("Bug Fixes");
+    expect(container.querySelector("li")?.textContent).toContain("Repair updated CI workflows");
+    expect(container.querySelector("code")?.textContent).toBe("63e28ef");
+    expect(container.querySelector("a")?.getAttribute("href")).toBe(
+      "https://github.com/dvgamerr-app/jirasync-hub-app/commit/63e28ef",
+    );
 
     await act(async () => {
       findButton(container, "Update now")?.click();

@@ -1,0 +1,116 @@
+name: PR Check
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # ─── Frontend: typecheck, lint, test + coverage, build ────────────────────
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Type check
+        run: bun x tsc --noEmit
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Test with coverage
+        run: bun run test:coverage
+
+      - name: Build
+        run: bun run build
+
+      # Requires the repo to be connected on Qlty Cloud; harmless no-op
+      # otherwise, so it never blocks the PR on its own.
+      - name: Publish coverage to Qlty
+        if: always()
+        continue-on-error: true
+        uses: qltysh/qlty-action/coverage@v2
+        with:
+          oidc: true
+          files: coverage/lcov.info
+
+  # ─── Rust: cargo check ─────────────────────────────────────────────────────
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: cargo check
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+  # ─── Qlty: linters, code smells, and metrics on the PR diff ───────────────
+  qlty:
+    runs-on: ubuntu-latest
+    env:
+      QLTY_UPSTREAM: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # qlty needs base branch history to diff against
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Qlty CLI
+        uses: qltysh/qlty-action/install@v1
+
+      - name: Qlty check (new issues only)
+        run: >
+          qlty check --upstream "$QLTY_UPSTREAM"
+          --filter=actionlint,clippy,eslint,osv-scanner,prettier,radarlint-js,rustfmt,trufflehog
+
+      # zizmor flags every unpinned `uses:` tag (this repo's existing style),
+      # so it stays informational instead of blocking every PR that touches
+      # a workflow file.
+      - name: Qlty check - zizmor (informational)
+        continue-on-error: true
+        run: qlty check --upstream "$QLTY_UPSTREAM" --filter=zizmor
+
+      - name: Qlty smells (informational)
+        continue-on-error: true
+        run: qlty smells --upstream "$QLTY_UPSTREAM"
+
+      - name: Qlty metrics (informational)
+        continue-on-error: true
+        run: qlty metrics --upstream "$QLTY_UPSTREAM"

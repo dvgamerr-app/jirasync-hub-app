@@ -57,6 +57,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+const NO_STORY_POINT_FIELD = "__none__";
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -504,15 +506,27 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
                           </div>
                           {dropdownFields.length > 0 ? (
                             <Select
-                              value={currentFieldId}
+                              value={currentFieldId || NO_STORY_POINT_FIELD}
                               onValueChange={(value) =>
-                                setSpFieldMap((prev) => ({ ...prev, [project.id]: value }))
+                                setSpFieldMap((prev) => {
+                                  if (value === NO_STORY_POINT_FIELD) {
+                                    const next = { ...prev };
+                                    delete next[project.id];
+                                    return next;
+                                  }
+                                  return { ...prev, [project.id]: value };
+                                })
                               }
                             >
                               <SelectTrigger className="h-8 w-full text-[12px]">
                                 <SelectValue placeholder="Select field…" />
                               </SelectTrigger>
                               <SelectContent>
+                                <SelectItem value={NO_STORY_POINT_FIELD} className="text-[12px]">
+                                  <span className="text-muted-foreground">
+                                    None — don't track story points
+                                  </span>
+                                </SelectItem>
                                 {dropdownFields.map((f) => (
                                   <SelectItem key={f.id} value={f.id} className="text-[12px]">
                                     <span className="font-medium">{f.name}</span>

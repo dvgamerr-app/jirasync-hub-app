@@ -16,6 +16,14 @@ export function isTauriRuntime(): boolean {
   );
 }
 
+/**
+ * True when running under `bun tauri dev` / `vite dev`, false in a built app
+ * or under Vitest (whose mode is `"test"`, not `"development"`).
+ */
+export function isDevRuntime(): boolean {
+  return import.meta.env.MODE === "development";
+}
+
 export function isWindows(): boolean {
   if (typeof navigator === "undefined") return false;
 
