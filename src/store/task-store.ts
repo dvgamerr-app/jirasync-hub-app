@@ -277,6 +277,35 @@ function isDoneTask(task: Pick<Task, "status" | "statusCategory">): boolean {
   );
 }
 
+function buildChildrenByParentKey(tasks: Task[]): Record<string, Task[]> {
+  const map: Record<string, Task[]> = {};
+  for (const task of tasks) {
+    if (task.isEpic !== true && task.parentKey) {
+      map[task.parentKey] ??= [];
+      map[task.parentKey].push(task);
+    }
+  }
+  return map;
+}
+
+function getDescendants(rootKey: string, childrenByParentKey: Record<string, Task[]>): Task[] {
+  const result: Task[] = [];
+  const queue = [...(childrenByParentKey[rootKey] ?? [])];
+  while (queue.length > 0) {
+    const task = queue.shift()!;
+    result.push(task);
+    queue.push(...(childrenByParentKey[task.jiraTaskId] ?? []));
+  }
+  return result;
+}
+
+// An epic whose subtasks are all done has nothing left to work on — drop it from the
+// active list even though the epic itself is not marked done in Jira.
+function isFullyCompletedEpic(epic: Task, childrenByParentKey: Record<string, Task[]>): boolean {
+  const descendants = getDescendants(epic.jiraTaskId, childrenByParentKey);
+  return descendants.length > 0 && descendants.every((task) => isDoneTask(task));
+}
+
 function matchesTaskScope(
   task: Pick<Task, "isCreatedByCurrentUser" | "isCurrentAssignee">,
   taskScopeFilter: TaskScopeFilter,
@@ -322,11 +351,18 @@ function getVisibleTasks(
     ? tasks.filter((task) => task.projectId === selectedProjectId)
     : tasks;
 
-  return filteredByProject.filter(
+  const visible = filteredByProject.filter(
     (task) =>
       matchesTaskScope(task, taskScopeFilter) &&
       ((taskScopeFilter === "my-work" && task.isEpic === true) ||
         matchesTaskStatusFilter(task, taskStatusFilter, taskScopeFilter)),
+  );
+
+  if (taskStatusFilter !== "active") return visible;
+
+  const childrenByParentKey = buildChildrenByParentKey(filteredByProject);
+  return visible.filter(
+    (task) => task.isEpic !== true || !isFullyCompletedEpic(task, childrenByParentKey),
   );
 }
 
@@ -365,15 +401,11 @@ function getVisibleProjectIds(
   taskScopeFilter: TaskScopeFilter,
 ): Set<string> {
   const knownProjectIds = new Set(projects.map((project) => project.id));
+  const visibleTasks = getVisibleTasks(tasks, null, taskStatusFilter, taskScopeFilter);
 
   return new Set(
-    tasks
-      .filter(
-        (task) =>
-          knownProjectIds.has(task.projectId) &&
-          matchesTaskScope(task, taskScopeFilter) &&
-          matchesTaskStatusFilter(task, taskStatusFilter, taskScopeFilter),
-      )
+    visibleTasks
+      .filter((task) => knownProjectIds.has(task.projectId))
       .map((task) => task.projectId),
   );
 }

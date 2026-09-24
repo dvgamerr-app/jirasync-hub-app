@@ -252,13 +252,11 @@ export function TaskTable({ tasks: allTasks }: { tasks: Task[] }) {
 
     // BFS จาก epic แต่ละตัว เก็บ filtered descendants ทั้งหมด (ทุก level)
     const claimedIds = new Set<string>();
-    const groups = epics
-      .map((epic) => {
-        const subtasks = bfsDescendants(epic.jiraTaskId, filteredChildrenByParentKey);
-        for (const t of subtasks) claimedIds.add(t.jiraTaskId);
-        return { epic, subtasks };
-      })
-      .filter(({ subtasks }) => subtasks.length > 0);
+    const groups = epics.map((epic) => {
+      const subtasks = bfsDescendants(epic.jiraTaskId, filteredChildrenByParentKey);
+      for (const t of subtasks) claimedIds.add(t.jiraTaskId);
+      return { epic, subtasks };
+    });
 
     // orphan roots = ไม่ถูก epic claim และไม่มี parent ใน unclaimed set
     const unclaimed = nonEpics.filter((t) => !claimedIds.has(t.jiraTaskId));
