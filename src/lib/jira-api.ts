@@ -2,6 +2,7 @@ import { getJiraBaseUrl, getStoryPointFieldMap, type JiraAccount } from "./jira-
 import type { Organization, Project, Task, WorkLog } from "@/types/jira";
 import { fetch } from "@tauri-apps/plugin-http";
 import { getOrganizationId, getProjectId, getTaskId } from "@/lib/jira-ids";
+import { getErrorMessage } from "@/lib/utils";
 
 export const DEFAULT_STORY_POINT_FIELD_ID = "customfield_10016";
 const SECONDS_PER_WORKDAY = 8 * 60 * 60; // 8 hours in seconds
@@ -174,11 +175,19 @@ async function jiraFetch(
     headers["Content-Type"] = "application/json";
   }
 
-  const res = await fetch(url, {
-    ...options,
-    credentials: "omit",
-    headers,
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...options,
+      credentials: "omit",
+      headers,
+    });
+  } catch (err: unknown) {
+    // The Tauri http plugin can reject with a bare string (e.g. DNS failure,
+    // TLS error, or a URL blocked by the http capability scope) instead of
+    // an Error, so normalize it into a message that's actually readable.
+    throw new Error(`Could not reach ${url}: ${getErrorMessage(err)}`, { cause: err });
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`Jira API ${res.status}: ${text}`);
@@ -637,6 +646,55 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
   });
 
   return { projects, tasks: cols.tasks, worklogsByTaskId: cols.worklogsByTaskId };
+}
+
+export type FreshJiraTask = { task: Task; workLogs: WorkLog[] };
+
+/**
+ * Re-fetches a single issue straight from Jira, bypassing any local dirty
+ * merge — used to discard unsynced local edits and restore the task/worklogs
+ * to whatever is actually in Jira right now.
+ */
+export async function fetchFreshJiraTask(
+  account: JiraAccount,
+  issueKey: string,
+): Promise<FreshJiraTask> {
+  const currentUser = await fetchJiraMyself(account).catch(() => null);
+  const storyPointFieldMap = getStoryPointFieldMap();
+  const storyPointFieldIds = new Set([DEFAULT_STORY_POINT_FIELD_ID]);
+  for (const fieldId of Object.values(storyPointFieldMap)) {
+    if (fieldId) storyPointFieldIds.add(fieldId);
+  }
+  const fields = [
+    "summary",
+    "status",
+    "issuetype",
+    "priority",
+    "assignee",
+    "creator",
+    "description",
+    "created",
+    "updated",
+    ...storyPointFieldIds,
+    "parent",
+    "worklog",
+    "timetracking",
+    "project",
+    "issuelinks",
+  ];
+
+  const res = await jiraFetch(`issue/${issueKey}?fields=${fields.join(",")}`, account);
+  const issue = (await res.json()) as JiraIssue;
+  const projectKey = issue.fields.project?.key ?? issueKey.split("-")[0];
+  const projectId = getProjectId(account.id, projectKey);
+  const storyPointFieldId = storyPointFieldMap[projectId] ?? DEFAULT_STORY_POINT_FIELD_ID;
+  const task = mapIssueToTask(issue, account, projectKey, storyPointFieldId, currentUser);
+
+  const workLogs = isWorklogTruncated(issue)
+    ? (await fetchAllIssueWorklogs(account, issueKey)).map((wl) => mapJiraWorklog(wl, task.id))
+    : mapWorklogsFromIssue(issue, task.id);
+
+  return { task, workLogs };
 }
 
 function isWorklogTruncated(issue: JiraIssue): boolean {

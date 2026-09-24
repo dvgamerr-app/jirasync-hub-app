@@ -12,7 +12,7 @@ import {
   transitionJiraIssue,
   addJiraWorkLog,
   deleteJiraWorkLog,
-  DEFAULT_STORY_POINT_FIELD_ID,
+  fetchFreshJiraTask,
 } from "@/lib/jira-api";
 import {
   isPendingCreateWorkLog,
@@ -21,6 +21,7 @@ import {
   toSyncedWorkLog,
 } from "@/lib/worklog-sync";
 import { formatMandayEstimate } from "@/lib/worklog-time";
+import { getErrorMessage } from "@/lib/utils";
 
 function getVisibleWorkLogsForTask(workLogs: WorkLog[], taskId: string): WorkLog[] {
   return workLogs.filter((wl) => wl.taskId === taskId && isVisibleWorkLog(wl));
@@ -68,6 +69,7 @@ export interface TaskStore {
 
   syncTaskToJira: (taskId: string) => Promise<void>;
   syncAllDirtyTasks: () => Promise<void>;
+  discardAllDirtyTasks: () => Promise<void>;
   getDirtyTaskCount: () => number;
 
   getFilteredTasks: () => Task[];
@@ -101,11 +103,15 @@ async function pushTaskToJira(task: Task, accounts: JiraAccount[]): Promise<void
   if (!account) return;
 
   const storyPointFieldMap = getStoryPointFieldMap();
-  const storyPointFieldId = storyPointFieldMap[task.projectId] ?? DEFAULT_STORY_POINT_FIELD_ID;
+  const storyPointFieldId = storyPointFieldMap[task.projectId];
 
   const fields: Record<string, unknown> = {};
-  // Always send the story point field — null clears it in Jira
-  fields[storyPointFieldId] = task.storyLevel ?? null;
+  // Only send the story point field when this project has one mapped in Jira
+  // Settings — guessing the default field id makes Jira reject the whole
+  // update (400) for projects where that field isn't on the edit screen.
+  if (storyPointFieldId) {
+    fields[storyPointFieldId] = task.storyLevel ?? null;
+  }
   if (task.severity && task.severity !== "NA" && SEVERITY_TO_PRIORITY[task.severity]) {
     fields.priority = { name: SEVERITY_TO_PRIORITY[task.severity] };
   }
@@ -257,6 +263,10 @@ function replaceWorkLog(workLogs: WorkLog[], nextWorkLog: WorkLog): WorkLog[] {
 
 function removeWorkLog(workLogs: WorkLog[], workLogId: string): WorkLog[] {
   return workLogs.filter((workLog) => workLog.id !== workLogId);
+}
+
+function formatTaskFailures(failures: { jiraId: string; reason: unknown }[]): string {
+  return failures.map((failure) => `${failure.jiraId} (${getErrorMessage(failure.reason)})`).join("; ");
 }
 
 function isDoneTask(task: Pick<Task, "status" | "statusCategory">): boolean {
@@ -446,6 +456,28 @@ async function syncDirtyTask(task: Task, accounts: JiraAccount[]): Promise<Task 
   await pushTaskToJira(task, accounts);
   await syncTaskWorkLogsToJira(task, account);
   return persistSyncedTask(task);
+}
+
+async function replaceTaskWorkLogsWithFresh(taskId: string, freshWorkLogs: WorkLog[]): Promise<void> {
+  const existing = await db.workLogs.where("taskId").equals(taskId).toArray();
+  await db.transaction("rw", db.workLogs, async () => {
+    if (existing.length > 0) await db.workLogs.bulkDelete(existing.map((workLog) => workLog.id));
+    if (freshWorkLogs.length > 0) await db.workLogs.bulkPut(freshWorkLogs);
+  });
+}
+
+async function discardDirtyTask(task: Task, accounts: JiraAccount[]): Promise<Task | null> {
+  const account = getAccountForTask(task, accounts);
+  if (!account) return null;
+
+  const { task: freshTask, workLogs: freshWorkLogs } = await fetchFreshJiraTask(
+    account,
+    task.jiraTaskId,
+  );
+  const restored: Task = { ...freshTask, isArchived: task.isArchived };
+  await persistTask(restored);
+  await replaceTaskWorkLogsWithFresh(task.id, freshWorkLogs);
+  return restored;
 }
 
 const HIDDEN_PROJECTS_KEY = "jirasync-hidden-projects";
@@ -649,9 +681,38 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       await get().reloadFromDB();
 
       if (failures.length > 0) {
-        const failedList = failures.map((failure) => failure.jiraId).join(", ");
+        const failedList = formatTaskFailures(failures);
         console.warn(`Some tasks failed to sync: ${failedList}`);
         throw new Error(`Some tasks failed to sync: ${failedList}`);
+      }
+    },
+
+    discardAllDirtyTasks: async () => {
+      const dirtyTasks = get().tasks.filter((task) => task.isDirty);
+      if (dirtyTasks.length === 0) return;
+
+      const accounts = getJiraAccounts();
+      const settled = await Promise.allSettled(
+        dirtyTasks.map((task) => discardDirtyTask(task, accounts)),
+      );
+
+      const failures: { jiraId: string; reason: unknown }[] = [];
+      settled.forEach((result, index) => {
+        if (result.status === "rejected") {
+          failures.push({
+            jiraId: dirtyTasks[index].jiraTaskId,
+            reason: result.reason,
+          });
+          console.error(`Discard failed for ${dirtyTasks[index].jiraTaskId}:`, result.reason);
+        }
+      });
+
+      await get().reloadFromDB();
+
+      if (failures.length > 0) {
+        const failedList = formatTaskFailures(failures);
+        console.warn(`Some tasks failed to discard: ${failedList}`);
+        throw new Error(`Some tasks failed to discard: ${failedList}`);
       }
     },
 

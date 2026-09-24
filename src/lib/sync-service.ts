@@ -3,6 +3,7 @@ import { fetchAssignedJiraData, fetchJiraOrganization } from "./jira-api";
 import type { Task, WorkLog } from "@/types/jira";
 import { getOrganizationId } from "@/lib/jira-ids";
 import { isPendingDeleteWorkLog } from "@/lib/worklog-sync";
+import { getErrorMessage } from "@/lib/utils";
 
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let isSyncing = false;
@@ -169,7 +170,7 @@ export async function syncNow(): Promise<void> {
     );
   } catch (err: unknown) {
     console.error("Sync failed:", err);
-    notify("error", err instanceof Error ? err.message : "Sync failed");
+    notify("error", getErrorMessage(err));
     throw err;
   } finally {
     isSyncing = false;
@@ -177,7 +178,7 @@ export async function syncNow(): Promise<void> {
       syncPending = false;
       syncNow().catch((err: unknown) => {
         console.error("Pending sync failed:", err);
-        notify("error", err instanceof Error ? err.message : "Sync failed");
+        notify("error", getErrorMessage(err));
       });
     }
   }
