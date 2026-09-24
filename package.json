@@ -16,7 +16,8 @@
     "format": "bun x --bun prettier --check .",
     "format:fix": "bun x --bun prettier --write .",
     "test": "bun x --bun vitest run",
-    "test:bun": "bun test --isolate"
+    "test:bun": "bun test --isolate",
+    "test:coverage": "bun test --isolate --coverage --coverage-reporter=lcov --coverage-dir=coverage"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.20",

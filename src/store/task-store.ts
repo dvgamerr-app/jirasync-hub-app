@@ -266,7 +266,9 @@ function removeWorkLog(workLogs: WorkLog[], workLogId: string): WorkLog[] {
 }
 
 function formatTaskFailures(failures: { jiraId: string; reason: unknown }[]): string {
-  return failures.map((failure) => `${failure.jiraId} (${getErrorMessage(failure.reason)})`).join("; ");
+  return failures
+    .map((failure) => `${failure.jiraId} (${getErrorMessage(failure.reason)})`)
+    .join("; ");
 }
 
 function isDoneTask(task: Pick<Task, "status" | "statusCategory">): boolean {
@@ -458,7 +460,10 @@ async function syncDirtyTask(task: Task, accounts: JiraAccount[]): Promise<Task 
   return persistSyncedTask(task);
 }
 
-async function replaceTaskWorkLogsWithFresh(taskId: string, freshWorkLogs: WorkLog[]): Promise<void> {
+async function replaceTaskWorkLogsWithFresh(
+  taskId: string,
+  freshWorkLogs: WorkLog[],
+): Promise<void> {
   const existing = await db.workLogs.where("taskId").equals(taskId).toArray();
   await db.transaction("rw", db.workLogs, async () => {
     if (existing.length > 0) await db.workLogs.bulkDelete(existing.map((workLog) => workLog.id));

@@ -70,7 +70,16 @@ name = "clippy"
 [[plugin]]
 name = "eslint"
 package_file = "package.json"
-package_filters = ["eslint", "jest", "prettier"]
+package_filters = [
+  "eslint",
+  "@eslint/js",
+  "globals",
+  "eslint-plugin-react-hooks",
+  "eslint-plugin-react-refresh",
+  "typescript-eslint",
+  "jest",
+  "prettier",
+]
 
 [[plugin]]
 name = "osv-scanner"
@@ -89,3 +98,10 @@ name = "trufflehog"
 
 [[plugin]]
 name = "zizmor"
+mode = "comment"
+
+[[plugin]]
+name = "rustfmt"
+
+[[plugin]]
+name = "radarlint-js"
