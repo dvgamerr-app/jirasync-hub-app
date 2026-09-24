@@ -4,12 +4,13 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { CheckCircle2, Download, Loader2, RefreshCw, RotateCcw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { ReleaseNotes } from "@/components/ReleaseNotes";
 import {
   AUTO_UPDATE_CHANGED_EVENT,
   getAutoUpdateEnabled,
   UPDATE_CHECK_REQUEST_EVENT,
 } from "@/lib/app-updater";
-import { isTauriRuntime, isWindows } from "@/lib/desktop";
+import { isDevRuntime, isTauriRuntime, isWindows } from "@/lib/desktop";
 
 type UpdatePhase =
   | "hidden"
@@ -58,7 +59,7 @@ export function AppUpdater() {
 
   const checkForUpdates = useCallback(
     async (manual: boolean) => {
-      if (!isTauriRuntime() || checkingRef.current) return;
+      if (!isTauriRuntime() || isDevRuntime() || checkingRef.current) return;
 
       checkingRef.current = true;
       clearTransientTimer();
@@ -196,7 +197,7 @@ export function AppUpdater() {
     <aside
       aria-live="polite"
       aria-label="Application update"
-      className="border-border bg-background fixed right-4 bottom-4 z-[110] w-[min(380px,calc(100vw-2rem))] rounded-xl border p-4 shadow-2xl"
+      className="border-border bg-background fixed right-4 bottom-4 z-[110] w-[min(440px,calc(100vw-2rem))] rounded-xl border p-4 shadow-2xl"
     >
       <button
         type="button"
@@ -236,9 +237,13 @@ export function AppUpdater() {
           </p>
 
           {phase === "available" && (
-            <p className="text-muted-foreground mt-1 max-h-16 overflow-hidden text-xs leading-5">
-              {releaseNotes || "Download the latest version of JiraSync Hub."}
-            </p>
+            <div className="text-muted-foreground mt-2 max-h-40 overflow-y-auto pr-1 text-xs leading-5">
+              {releaseNotes ? (
+                <ReleaseNotes markdown={releaseNotes} />
+              ) : (
+                <p>Download the latest version of JiraSync Hub.</p>
+              )}
+            </div>
           )}
           {phase === "ready-to-install" && (
             <p className="text-muted-foreground mt-1 text-xs leading-5">
