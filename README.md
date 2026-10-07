@@ -20,6 +20,9 @@ JiraSync Hub คือแอป desktop สำหรับดึง Jira tasks �
 2. เปิดไฟล์ `.exe` หรือ `.msi`
 3. ติดตั้งตามขั้นตอนของตัวติดตั้ง
 
+ถ้าต้องการเปิดแอปโดยไม่ติดตั้ง ให้ดาวน์โหลด `JiraSync Hub_<version>_windows_x64.exe`
+แล้วเปิดไฟล์ได้โดยตรง (เครื่องต้องมี Microsoft Edge WebView2 Runtime)
+
 ### macOS
 
 1. ดาวน์โหลดไฟล์ `.dmg` จากหน้า Releases
@@ -219,4 +222,5 @@ Tauri บังคับให้ updater artifacts มีลายเซ็น�
 - ต้อง backup private key นี้ในที่ปลอดภัย ห้าม commit หรือแชร์
 - ห้าม generate key ใหม่สำหรับ release ถัดไป เพราะแอปที่ติดตั้งอยู่จะไม่ยอมรับลายเซ็นจาก key ใหม่
 - การ push tag `v*` จะ build signed updater artifacts, `.sig` และ `latest.json` ไปยัง GitHub Release
+- Windows จะมีไฟล์ `.exe` สำหรับเปิดโดยตรงเพิ่มด้วย โดย build แยกด้วย `--no-bundle`
 - local signed build ใช้ `TAURI_SIGNING_PRIVATE_KEY` ชี้ไปยัง private key ก่อนรัน `bun tauri build`

@@ -43,7 +43,7 @@ jobs:
           - platform: ubuntu-22.04
             args: ""
 
-          # Windows (NSIS installer + MSI)
+          # Windows (NSIS installer + MSI + standalone EXE)
           - platform: windows-latest
             args: ""
 
@@ -93,6 +93,7 @@ jobs:
 
       # ── Build + create/update GitHub Release ─────────────────────────────
       - name: Build and publish release
+        id: release
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -113,6 +114,22 @@ jobs:
           uploadUpdaterJson: true
           uploadUpdaterSignatures: true
           args: ${{ matrix.args }}
+
+      # Build separately so the standalone binary has no installer bundle type.
+      - name: Build and upload standalone Windows EXE
+        if: matrix.platform == 'windows-latest'
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          releaseId: ${{ steps.release.outputs.releaseId }}
+          tagName: ${{ github.ref_name }}
+          releaseDraft: true
+          args: --no-bundle
+          uploadPlainBinary: true
+          uploadUpdaterJson: false
+          uploadUpdaterSignatures: false
+          releaseAssetNamePattern: "[name]_[version]_windows_[arch][ext]"
 
   # ─── Step 3: Publish only after every platform is ready ─────────────────
   publish:
