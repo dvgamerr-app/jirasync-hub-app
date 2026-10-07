@@ -93,7 +93,6 @@ jobs:
 
       # ── Build + create/update GitHub Release ─────────────────────────────
       - name: Build and publish release
-        id: release
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -116,20 +115,23 @@ jobs:
           args: ${{ matrix.args }}
 
       # Build separately so the standalone binary has no installer bundle type.
-      - name: Build and upload standalone Windows EXE
+      - name: Build standalone Windows EXE
         if: matrix.platform == 'windows-latest'
-        uses: tauri-apps/tauri-action@v1
+        run: bun tauri build --no-bundle
+
+      # Upload only the plain binary; tauri-action would rediscover installers
+      # left in target/release/bundle by the first build and upload them again.
+      - name: Upload standalone Windows EXE
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          releaseId: ${{ steps.release.outputs.releaseId }}
-          tagName: ${{ github.ref_name }}
-          releaseDraft: true
-          args: --no-bundle
-          uploadPlainBinary: true
-          uploadUpdaterJson: false
-          uploadUpdaterSignatures: false
-          releaseAssetNamePattern: "[name]_[version]_windows_[arch][ext]"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $config = Get-Content -LiteralPath 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json
+          $assetName = "$($config.productName)_$($config.version)_windows_x64.exe"
+          $assetPath = Join-Path $env:RUNNER_TEMP $assetName
+          Copy-Item -LiteralPath 'src-tauri/target/release/jirasync-hub-app.exe' -Destination $assetPath
+          gh release upload "$env:GITHUB_REF_NAME" "$assetPath" --repo "$env:GITHUB_REPOSITORY" --clobber
 
   # ─── Step 3: Publish only after every platform is ready ─────────────────
   publish:
