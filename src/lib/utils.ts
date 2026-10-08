@@ -23,3 +23,24 @@ export function getErrorMessage(err: unknown): string {
     return String(err);
   }
 }
+
+/**
+ * Like `Promise.all(items.map(fn))` but never runs more than `limit` calls at once, so a large
+ * batch (e.g. one request per Jira issue) cannot trip Jira's rate limiting.
+ */
+export async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}

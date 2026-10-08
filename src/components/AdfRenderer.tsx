@@ -6,6 +6,8 @@
  */
 import { Fragment } from "react";
 import { cn } from "@/lib/utils";
+import { getSafeExternalUrl } from "@/lib/adf-content";
+import { openExternal } from "@/lib/desktop";
 import { Info, FileText, AlertTriangle, AlertCircle, CheckCircle2 } from "lucide-react";
 
 // ── ADF types ─────────────────────────────────────────────────────────────────
@@ -62,14 +64,19 @@ function applyMarks(text: string, marks?: AdfMark[]): React.ReactNode {
         node = <u>{node}</u>;
         break;
       case "link": {
-        const href = mark.attrs?.href as string | undefined;
+        const href = getSafeExternalUrl(mark.attrs?.href);
+        // Unsafe schemes (javascript:, file:…) render as plain text instead of a link.
+        if (!href) break;
         node = (
           <a
             href={href}
             className="text-primary underline hover:opacity-80"
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              // A webview can't be trusted to hand target=_blank links to the system browser.
+              e.preventDefault();
+              e.stopPropagation();
+              void openExternal(href);
+            }}
           >
             {node}
           </a>
@@ -310,14 +317,24 @@ function renderNode(node: AdfNode, key: number): React.ReactNode {
     case "inlineCard":
     case "blockCard": {
       const url = node.attrs?.url as string;
+      const safeUrl = getSafeExternalUrl(url);
+      if (!safeUrl) {
+        return (
+          <span key={key} className="text-muted-foreground text-[13px] break-all">
+            {url}
+          </span>
+        );
+      }
       return (
         <a
           key={key}
-          href={url}
+          href={safeUrl}
           className="text-primary text-[13px] break-all underline hover:opacity-80"
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void openExternal(safeUrl);
+          }}
         >
           {url}
         </a>

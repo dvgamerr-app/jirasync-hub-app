@@ -7,6 +7,7 @@ import {
   removeJiraAccount,
   getStoryPointFieldMap,
   saveStoryPointFieldMap,
+  validateJiraInstanceUrl,
   db,
   type JiraAccount,
 } from "@/lib/jira-db";
@@ -19,7 +20,7 @@ import {
 } from "@/lib/jira-api";
 import { startBackgroundSync, stopBackgroundSync } from "@/lib/sync-service";
 import { openExternal } from "@/lib/desktop";
-import { getOrganizationId } from "@/lib/jira-ids";
+import { getOrganizationId, getTaskIdPrefix } from "@/lib/jira-ids";
 import type { Project } from "@/types/jira";
 import {
   Dialog,
@@ -35,6 +36,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -87,6 +98,10 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
   const [draggingAccountId, setDraggingAccountId] = useState<string | null>(null);
   const [dragOverAccountId, setDragOverAccountId] = useState<string | null>(null);
   const [autoUpdateEnabled, setAutoUpdateEnabledState] = useState(() => getAutoUpdateEnabled());
+  const [pendingDelete, setPendingDelete] = useState<{
+    account: JiraAccount;
+    unsyncedCount: number;
+  } | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -96,6 +111,7 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
       setEditing(null);
       setForm(emptyForm);
       setStatus("idle");
+      setPendingDelete(null);
       setAutoUpdateEnabledState(getAutoUpdateEnabled());
     }
   }, [open]);
@@ -228,7 +244,20 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
     setMode("edit");
   };
 
+  // Removing an account deletes its local tasks and worklogs, so confirm first — and say how
+  // much unpushed work would be lost with it.
+  const requestDelete = async (account: JiraAccount) => {
+    const unsyncedCount = await db.tasks
+      .where("id")
+      .startsWith(getTaskIdPrefix(account.id))
+      .filter((task) => task.isDirty)
+      .count()
+      .catch(() => 0);
+    setPendingDelete({ account, unsyncedCount });
+  };
+
   const handleDelete = async (id: string) => {
+    setPendingDelete(null);
     try {
       await removeJiraAccount(id);
       refresh();
@@ -311,7 +340,8 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
     setMode("list");
   };
 
-  const isFormValid = Boolean(form.instanceUrl && form.email && form.apiToken);
+  const instanceUrlError = validateJiraInstanceUrl(form.instanceUrl);
+  const isFormValid = Boolean(form.instanceUrl && form.email && form.apiToken && !instanceUrlError);
 
   const handleAutoUpdateChange = (enabled: boolean) => {
     setAutoUpdateEnabledState(enabled);
@@ -391,13 +421,15 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
                       <p className="text-muted-foreground truncate text-[11px]">{acc.email}</p>
                     </div>
                     <button
+                      aria-label={`Edit ${acc.name || acc.instanceUrl}`}
                       onClick={() => startEdit(acc)}
                       className="text-muted-foreground hover:bg-accent hover:text-accent-foreground shrink-0 rounded p-1"
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
                     <button
-                      onClick={() => handleDelete(acc.id)}
+                      aria-label={`Remove ${acc.name || acc.instanceUrl}`}
+                      onClick={() => void requestDelete(acc)}
                       className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive shrink-0 rounded p-1"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -602,7 +634,13 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
                 setStatus("idle");
               }}
             />
-            <p className="text-muted-foreground text-[11px]">Subdomain or full URL</p>
+            {instanceUrlError ? (
+              <p role="alert" className="text-destructive text-[11px]">
+                {instanceUrlError}
+              </p>
+            ) : (
+              <p className="text-muted-foreground text-[11px]">Subdomain or full URL</p>
+            )}
           </div>
 
           <div className="space-y-1.5">
@@ -704,6 +742,39 @@ function JiraSettingsDialogContent({ open }: { open: boolean }) {
           </div>
         </div>
       )}
+
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setPendingDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Remove {pendingDelete?.account.name || pendingDelete?.account.instanceUrl}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This deletes the account and all of its tasks and worklogs from this computer. Nothing
+              is deleted in Jira.
+              {pendingDelete && pendingDelete.unsyncedCount > 0 && (
+                <strong className="text-destructive mt-2 block">
+                  {pendingDelete.unsyncedCount} task(s) have changes that were not pushed to Jira
+                  yet and will be lost.
+                </strong>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => pendingDelete && void handleDelete(pendingDelete.account.id)}
+            >
+              Remove account
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DialogContent>
   );
 }

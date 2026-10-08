@@ -2,11 +2,13 @@ import { getJiraBaseUrl, getStoryPointFieldMap, type JiraAccount } from "./jira-
 import type { Organization, Project, Task, WorkLog } from "@/types/jira";
 import { fetch } from "@tauri-apps/plugin-http";
 import { getOrganizationId, getProjectId, getTaskId } from "@/lib/jira-ids";
-import { getErrorMessage } from "@/lib/utils";
+import { getErrorMessage, mapWithConcurrency } from "@/lib/utils";
 
 export const DEFAULT_STORY_POINT_FIELD_ID = "customfield_10016";
 const SECONDS_PER_WORKDAY = 8 * 60 * 60; // 8 hours in seconds
 const LINKED_ISSUES_BATCH_SIZE = 50;
+/** Max simultaneous per-issue worklog requests during a pull. */
+const WORKLOG_FETCH_CONCURRENCY = 4;
 
 const SEVERITY_PATTERNS: [RegExp, Task["severity"]][] = [
   [/critical|highest|blocker/, "Critical"],
@@ -43,6 +45,7 @@ type JiraProjectField = {
 
 type JiraWorklog = {
   id: string;
+  author?: JiraUser | null;
   timeSpentSeconds?: number | null;
   started: string;
   comment?: JiraTextContent;
@@ -146,6 +149,8 @@ type AssignedJiraData = {
   projects: Project[];
   tasks: Task[];
   worklogsByTaskId: Record<string, WorkLog[]>;
+  /** Tasks whose complete worklog list could not be fetched; their local worklogs must be kept. */
+  worklogFetchFailedTaskIds: string[];
 };
 
 function getAuthHeader(account: JiraAccount): string {
@@ -505,10 +510,29 @@ function processIssueIntoCollections(
   const task = mapIssueToTask(issue, account, projectKey, storyPointFieldId, cols.currentUser);
   cols.tasks.push(task);
 
-  resolveWorklogs(issue.key, task.id, issue, cols.worklogsByTaskId, cols.truncatedIssueKeys);
+  resolveWorklogs(
+    issue.key,
+    task.id,
+    issue,
+    cols.worklogsByTaskId,
+    cols.truncatedIssueKeys,
+    cols.currentUser,
+  );
 }
 
-export async function fetchAssignedJiraData(account: JiraAccount): Promise<AssignedJiraData> {
+export type FetchAssignedOptions = {
+  /**
+   * Incremental pull: only issues updated within the last N minutes. Relative JQL durations are
+   * used on purpose — absolute date-times are interpreted in the Jira user's profile time zone.
+   * Omit for a full pull of everything the user is or was involved in.
+   */
+  updatedWithinMinutes?: number;
+};
+
+export async function fetchAssignedJiraData(
+  account: JiraAccount,
+  options: FetchAssignedOptions = {},
+): Promise<AssignedJiraData> {
   const currentUser = await fetchJiraMyself(account).catch(() => null);
   const storyPointFieldMap = getStoryPointFieldMap();
   // Collect all unique story-point field IDs configured for this account's projects.
@@ -517,7 +541,13 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
     if (fieldId) storyPointFieldIds.add(fieldId);
   }
 
-  const jql = `(assignee = currentUser() OR assignee was currentUser() OR creator = currentUser()) ORDER BY updated DESC`;
+  const involvement =
+    "(assignee = currentUser() OR assignee was currentUser() OR creator = currentUser())";
+  const updatedFilter =
+    options.updatedWithinMinutes !== undefined
+      ? ` AND updated >= -${Math.max(1, Math.ceil(options.updatedWithinMinutes))}m`
+      : "";
+  const jql = `${involvement}${updatedFilter} ORDER BY updated DESC`;
   const fields = [
     "summary",
     "status",
@@ -618,7 +648,12 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
     }
   }
 
-  await fetchTruncatedWorklogs(account, cols.truncatedIssueKeys, cols.worklogsByTaskId);
+  const worklogFetchFailedTaskIds = await fetchTruncatedWorklogs(
+    account,
+    cols.truncatedIssueKeys,
+    cols.worklogsByTaskId,
+    cols.currentUser,
+  );
 
   const collectedProjects = Array.from(cols.projectMap.values());
   const projectMetaResults = await Promise.allSettled(
@@ -645,7 +680,12 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
     };
   });
 
-  return { projects, tasks: cols.tasks, worklogsByTaskId: cols.worklogsByTaskId };
+  return {
+    projects,
+    tasks: cols.tasks,
+    worklogsByTaskId: cols.worklogsByTaskId,
+    worklogFetchFailedTaskIds,
+  };
 }
 
 export type FreshJiraTask = { task: Task; workLogs: WorkLog[] };
@@ -691,8 +731,10 @@ export async function fetchFreshJiraTask(
   const task = mapIssueToTask(issue, account, projectKey, storyPointFieldId, currentUser);
 
   const workLogs = isWorklogTruncated(issue)
-    ? (await fetchAllIssueWorklogs(account, issueKey)).map((wl) => mapJiraWorklog(wl, task.id))
-    : mapWorklogsFromIssue(issue, task.id);
+    ? (await fetchAllIssueWorklogs(account, issueKey)).map((wl) =>
+        mapJiraWorklog(wl, task.id, currentUser),
+      )
+    : mapWorklogsFromIssue(issue, task.id, currentUser);
 
   return { task, workLogs };
 }
@@ -703,7 +745,17 @@ function isWorklogTruncated(issue: JiraIssue): boolean {
   return (wl.total ?? 0) > (wl.worklogs?.length ?? 0);
 }
 
-function mapJiraWorklog(wl: JiraWorklog, taskId: string): WorkLog {
+function isOwnJiraWorklog(wl: JiraWorklog, currentUser: JiraMyselfResponse | null): boolean | null {
+  const authorId = wl.author?.accountId;
+  if (!currentUser?.accountId || !authorId) return null;
+  return authorId === currentUser.accountId;
+}
+
+function mapJiraWorklog(
+  wl: JiraWorklog,
+  taskId: string,
+  currentUser: JiraMyselfResponse | null = null,
+): WorkLog {
   return {
     id: `wl-jira-${wl.id}`,
     taskId,
@@ -713,11 +765,19 @@ function mapJiraWorklog(wl: JiraWorklog, taskId: string): WorkLog {
     createdAt: wl.started,
     jiraWorklogId: wl.id,
     syncStatus: "synced",
+    authorName: wl.author?.displayName ?? null,
+    isOwn: isOwnJiraWorklog(wl, currentUser),
   };
 }
 
-function mapWorklogsFromIssue(issue: JiraIssue, taskId: string): WorkLog[] {
-  return (issue.fields.worklog?.worklogs ?? []).map((wl) => mapJiraWorklog(wl, taskId));
+function mapWorklogsFromIssue(
+  issue: JiraIssue,
+  taskId: string,
+  currentUser: JiraMyselfResponse | null,
+): WorkLog[] {
+  return (issue.fields.worklog?.worklogs ?? []).map((wl) =>
+    mapJiraWorklog(wl, taskId, currentUser),
+  );
 }
 
 async function fetchAllIssueWorklogs(
@@ -750,12 +810,13 @@ function resolveWorklogs(
   issue: JiraIssue,
   worklogsByTaskId: Record<string, WorkLog[]>,
   truncatedIssueKeys: Map<string, string>,
+  currentUser: JiraMyselfResponse | null,
 ): void {
   if (isWorklogTruncated(issue)) {
     truncatedIssueKeys.set(issueKey, taskId);
     return;
   }
-  const worklogs = mapWorklogsFromIssue(issue, taskId);
+  const worklogs = mapWorklogsFromIssue(issue, taskId, currentUser);
   if (worklogs.length > 0) worklogsByTaskId[taskId] = worklogs;
 }
 
@@ -763,19 +824,25 @@ async function fetchTruncatedWorklogs(
   account: JiraAccount,
   truncatedIssueKeys: Map<string, string>,
   worklogsByTaskId: Record<string, WorkLog[]>,
-): Promise<void> {
-  if (truncatedIssueKeys.size === 0) return;
-  await Promise.all(
-    Array.from(truncatedIssueKeys.entries()).map(async ([issueKey, taskId]) => {
+  currentUser: JiraMyselfResponse | null,
+): Promise<string[]> {
+  const failedTaskIds: string[] = [];
+  if (truncatedIssueKeys.size === 0) return failedTaskIds;
+  await mapWithConcurrency(
+    Array.from(truncatedIssueKeys.entries()),
+    WORKLOG_FETCH_CONCURRENCY,
+    async ([issueKey, taskId]) => {
       try {
         const allWorklogs = await fetchAllIssueWorklogs(account, issueKey);
-        const mapped = allWorklogs.map((wl) => mapJiraWorklog(wl, taskId));
+        const mapped = allWorklogs.map((wl) => mapJiraWorklog(wl, taskId, currentUser));
         if (mapped.length > 0) worklogsByTaskId[taskId] = mapped;
       } catch (error: unknown) {
         console.warn(`Failed fetching full worklogs for ${issueKey}:`, error);
+        failedTaskIds.push(taskId);
       }
-    }),
+    },
   );
+  return failedTaskIds;
 }
 
 function mapPriorityToSeverity(priority: string | null | undefined): Task["severity"] {
@@ -793,6 +860,19 @@ export async function updateJiraIssue(
     method: "PUT",
     body: JSON.stringify({ fields }),
   });
+}
+
+/** Status names the issue can move to right now, according to its workflow. */
+export async function fetchJiraTransitionTargets(
+  account: JiraAccount,
+  issueKey: string,
+): Promise<string[]> {
+  const res = await jiraFetch(`issue/${issueKey}/transitions`, account);
+  const data = (await res.json()) as JiraTransitionsResponse;
+  const names = (data.transitions ?? [])
+    .map((transition) => transition.to?.name ?? transition.name ?? "")
+    .filter(Boolean);
+  return [...new Set(names)];
 }
 
 // Transition issue status
@@ -840,6 +920,24 @@ export async function addJiraWorkLog(
   });
   const data = (await res.json()) as JiraCreatedWorklogResponse;
   return data.id ?? null;
+}
+
+// Add a plain-text comment to a Jira issue
+export async function addJiraComment(
+  account: JiraAccount,
+  issueKey: string,
+  text: string,
+): Promise<void> {
+  await jiraFetch(`issue/${issueKey}/comment`, account, {
+    method: "POST",
+    body: JSON.stringify({
+      body: {
+        type: "doc",
+        version: 1,
+        content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+      },
+    }),
+  });
 }
 
 // Delete a work log from Jira

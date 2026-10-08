@@ -224,7 +224,7 @@ describe("Index", () => {
     expect(container.textContent).toContain("Project Alpha");
   });
 
-  it("keeps Created by me tracking tickets out of worklog export", async () => {
+  it("passes Created by me tracking tickets to the export so time logged on them is included", async () => {
     const myWorkTask = buildTask("task-account-1-ALPHA-1", projectAlpha.id, "ALPHA-1");
     const trackingTask = {
       ...buildTask("task-account-1-ALPHA-2", projectAlpha.id, "ALPHA-2"),
@@ -237,8 +237,10 @@ describe("Index", () => {
       root.render(<Index />);
     });
 
+    // Export rows are built from my own worklogs only, so a tracking ticket with none adds no row
+    // while one I logged time on (even though it is assigned to someone else) is exported.
     const exportDialog = container.querySelector('[data-testid="export-dialog"]');
-    expect(exportDialog?.getAttribute("data-task-count")).toBe("1");
+    expect(exportDialog?.getAttribute("data-task-count")).toBe("2");
   });
 
   it("keeps the export button enabled when the selected project has no visible tasks but other tasks exist", async () => {

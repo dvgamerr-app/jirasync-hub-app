@@ -55,6 +55,64 @@ fn decrypt_data(ciphertext: String) -> Result<String, String> {
     String::from_utf8(plaintext).map_err(|e| e.to_string())
 }
 
+// ── OS credential store (Windows Credential Manager / macOS Keychain) ───────────────────────
+// Jira API tokens live here instead of in localStorage. On platforms without a supported store
+// every command returns an error and the frontend falls back to its previous storage.
+const KEYRING_SERVICE: &str = "com.scg.wedo.jirasync-hub";
+
+#[cfg(any(windows, target_os = "macos"))]
+fn secret_entry(account: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(KEYRING_SERVICE, &format!("jira-token:{account}")).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn store_secret(account: String, secret: String) -> Result<(), String> {
+    #[cfg(any(windows, target_os = "macos"))]
+    {
+        secret_entry(&account)?
+            .set_password(&secret)
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = (account, secret, KEYRING_SERVICE);
+        Err("OS keychain is not supported on this platform".into())
+    }
+}
+
+#[tauri::command]
+fn get_secret(account: String) -> Result<Option<String>, String> {
+    #[cfg(any(windows, target_os = "macos"))]
+    {
+        match secret_entry(&account)?.get_password() {
+            Ok(secret) => Ok(Some(secret)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = account;
+        Err("OS keychain is not supported on this platform".into())
+    }
+}
+
+#[tauri::command]
+fn delete_secret(account: String) -> Result<(), String> {
+    #[cfg(any(windows, target_os = "macos"))]
+    {
+        match secret_entry(&account)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = account;
+        Err("OS keychain is not supported on this platform".into())
+    }
+}
+
 #[cfg(target_os = "macos")]
 use tauri::TitleBarStyle;
 
@@ -92,8 +150,10 @@ fn set_window_theme(_window: tauri::WebviewWindow, _is_dark: bool) {}
 const WINDOW_TITLE: &str = "JiraSync Hub";
 const WINDOW_WIDTH: f64 = 1280.0;
 const WINDOW_HEIGHT: f64 = 800.0;
-const MIN_WINDOW_WIDTH: f64 = 1200.0;
-const MIN_WINDOW_HEIGHT: f64 = 800.0;
+// Small enough for a 1366x768 laptop (or a 1920x1080 screen scaled to 150%) so the window
+// never has to be taller than the screen.
+const MIN_WINDOW_WIDTH: f64 = 1000.0;
+const MIN_WINDOW_HEIGHT: f64 = 600.0;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -105,7 +165,14 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![set_window_theme, encrypt_data, decrypt_data])
+        .invoke_handler(tauri::generate_handler![
+            set_window_theme,
+            encrypt_data,
+            decrypt_data,
+            store_secret,
+            get_secret,
+            delete_secret
+        ])
         .setup(|app| {
             let window_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title(WINDOW_TITLE)

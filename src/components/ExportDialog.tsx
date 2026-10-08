@@ -16,7 +16,7 @@ import { openPath } from "@tauri-apps/plugin-opener";
 import { fetchJiraMyselfDisplayName } from "@/lib/jira-api";
 import { getJiraAccounts, type JiraAccount } from "@/lib/jira-db";
 import { getAccountIdFromTask } from "@/lib/jira-ids";
-import { isVisibleWorkLog } from "@/lib/worklog-sync";
+import { isCountedWorkLog, isPendingCreateWorkLog } from "@/lib/worklog-sync";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -52,6 +52,10 @@ const CSV_HEADER = [
 
 const MINUTES_PER_MANDAY = 8 * 60;
 
+// Excel only reads a UTF-8 CSV as UTF-8 (instead of the local ANSI code page, which garbles Thai
+// notes and project names) when the file starts with a byte-order mark.
+const UTF8_BOM = "﻿";
+
 function formatMinutesLong(minutes: number): string {
   const WEEK = 5 * 8 * 60; // 2400 min
   const DAY = MINUTES_PER_MANDAY;
@@ -80,6 +84,9 @@ type ExportRow = {
   severity: string;
   storyPoint: string;
   timeSpentMinutes: number;
+  /** How many of the summed worklogs (and minutes) are not on Jira yet. */
+  pendingLogCount: number;
+  pendingMinutes: number;
   type: string;
 };
 
@@ -167,7 +174,9 @@ function createExportRows(tasks: Task[], workLogs: WorkLog[], projects: Project[
 
   const rowMap = new Map<string, ExportRow>();
 
-  for (const log of workLogs.filter(isVisibleWorkLog)) {
+  // Only the connected user's own time is exported — teammates' worklogs on shared tickets
+  // would otherwise inflate Usage Time and the speed rate.
+  for (const log of workLogs.filter(isCountedWorkLog)) {
     const task = taskById.get(log.taskId);
     if (!task) continue;
 
@@ -177,9 +186,14 @@ function createExportRows(tasks: Task[], workLogs: WorkLog[], projects: Project[
     const periodValue = format(date, "yyyy-MM");
     const key = `${task.id}::${periodValue}`;
 
+    const isPending = isPendingCreateWorkLog(log);
     const existing = rowMap.get(key);
     if (existing) {
       existing.timeSpentMinutes += log.timeSpentMinutes;
+      if (isPending) {
+        existing.pendingLogCount += 1;
+        existing.pendingMinutes += log.timeSpentMinutes;
+      }
     } else {
       const project = projectById.get(task.projectId);
       rowMap.set(key, {
@@ -195,6 +209,8 @@ function createExportRows(tasks: Task[], workLogs: WorkLog[], projects: Project[
         severity: task.severity ?? "NA",
         storyPoint: task.storyLevel?.toString() ?? "",
         timeSpentMinutes: log.timeSpentMinutes,
+        pendingLogCount: isPending ? 1 : 0,
+        pendingMinutes: isPending ? log.timeSpentMinutes : 0,
         type: task.type ?? "",
       });
     }
@@ -297,15 +313,20 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
     setCopiedPeriodValue("");
   }, [open, exportPeriods]);
 
-  const { matchingRows, totalMinutes, capacityMinutes, totalMandayMinutes } = useMemo(() => {
-    const rows = exportRows.filter((row) => row.periodValue === selectedPeriodValue);
-    return {
-      matchingRows: rows,
-      totalMinutes: rows.reduce((sum, row) => sum + row.timeSpentMinutes, 0),
-      capacityMinutes: workingDaysInMonth(selectedPeriodValue) * MINUTES_PER_MANDAY,
-      totalMandayMinutes: calculateMandayMinutesForPeriod(tasks, exportRows, selectedPeriodValue),
-    };
-  }, [exportRows, selectedPeriodValue, tasks]);
+  const { matchingRows, totalMinutes, capacityMinutes, totalMandayMinutes, pending } =
+    useMemo(() => {
+      const rows = exportRows.filter((row) => row.periodValue === selectedPeriodValue);
+      return {
+        matchingRows: rows,
+        pending: {
+          count: rows.reduce((sum, row) => sum + row.pendingLogCount, 0),
+          minutes: rows.reduce((sum, row) => sum + row.pendingMinutes, 0),
+        },
+        totalMinutes: rows.reduce((sum, row) => sum + row.timeSpentMinutes, 0),
+        capacityMinutes: workingDaysInMonth(selectedPeriodValue) * MINUTES_PER_MANDAY,
+        totalMandayMinutes: calculateMandayMinutesForPeriod(tasks, exportRows, selectedPeriodValue),
+      };
+    }, [exportRows, selectedPeriodValue, tasks]);
   const selectedPeriodLabel =
     exportPeriods.find((period) => period.value === selectedPeriodValue)?.label ?? "";
   const hasSavedCurrentPeriod = Boolean(savedFileName) && savedPeriodValue === selectedPeriodValue;
@@ -384,7 +405,7 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
       const fileName = getDisplayFileName(filePath);
       const fullNamesByAccountId = await getFullNamesByAccountId(matchingRows);
       const csvContent = buildCsv(matchingRows, fullNamesByAccountId);
-      await writeTextFile(filePath, csvContent);
+      await writeTextFile(filePath, UTF8_BOM + csvContent);
 
       setSavedFileName(fileName);
       setSavedFilePath(filePath);
@@ -476,6 +497,12 @@ export function ExportDialog({ open, onOpenChange, projects, tasks, workLogs }: 
                   </span>
                 </p>
               </>
+            )}
+            {matchingRows.length > 0 && pending.count > 0 && (
+              <p data-testid="export-unsynced" className="text-warning mt-2 text-xs font-medium">
+                {pending.count} worklog(s) ({formatMinutesLong(pending.minutes)}) in this month are
+                not pushed to Jira yet — push first if the export should match Jira.
+              </p>
             )}
             {matchingRows.length === 0 && (
               <p className="text-muted-foreground mt-1 text-xs">

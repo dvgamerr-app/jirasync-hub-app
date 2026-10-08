@@ -65,7 +65,7 @@ JiraSync Hub คือแอป desktop สำหรับดึง Jira tasks �
 2. กด `Add Account`
 3. กรอกข้อมูลต่อไปนี้
    - `Display Name` ถ้าต้องการตั้งชื่อให้อ่านง่าย
-   - `Jira Instance URL` ใส่ได้ทั้ง subdomain เช่น `acme` หรือ URL เต็มเช่น `https://acme.atlassian.net`
+   - `Jira Instance URL` ใส่ได้ทั้ง subdomain เช่น `acme` หรือ URL เต็มเช่น `https://acme.atlassian.net` (รองรับเฉพาะ Atlassian Cloud `*.atlassian.net` ด้วย https)
    - `Email`
    - `API Token`
 4. กด `Test` เพื่อตรวจสอบการเชื่อมต่อ
@@ -73,7 +73,7 @@ JiraSync Hub คือแอป desktop สำหรับดึง Jira tasks �
 
 หมายเหตุ:
 
-- ข้อมูล credentials ถูกเก็บไว้ในเครื่องเท่านั้น
+- ข้อมูล credentials ถูกเก็บไว้ในเครื่องเท่านั้น: API token เก็บใน Windows Credential Manager / macOS Keychain (Linux ยังเก็บแบบเข้ารหัสในแอป)
 - สามารถเพิ่มได้มากกว่า 1 Jira account
 
 ### 2. ดึงข้อมูลครั้งแรกจาก Jira
@@ -108,7 +108,7 @@ Story point field ของ Jira แต่ละโปรเจกต์อา�
 - `Status`
 - `Story Level`
 - `Mandays`
-- `Note`
+- `Note` (เก็บในเครื่องเท่านั้น ไม่ส่งขึ้น Jira; กด "Post as Jira comment" ถ้าต้องการส่งเป็น comment)
 - `Worklogs`
 
 ข้อสำคัญ:
@@ -123,9 +123,18 @@ Story point field ของ Jira แต่ละโปรเจกต์อา�
 - `Story Level` -> Jira story point field ที่เลือกไว้ของโปรเจกต์นั้น
 - `Severity` -> Jira priority
 - `Mandays` -> Jira original estimate / timetracking
-- `Status` -> Jira transition
-- `Note` -> Jira `description`
+- `Type` -> Jira issue type
+- `Status` -> Jira transition (ถ้าเปลี่ยนสถานะไม่ได้ตาม workflow จะแจ้งสาเหตุ และ task ยังค้างเป็น dirty)
 - `Worklogs` ที่เพิ่มหรือลบ -> Jira worklog
+
+แอปจะส่ง **เฉพาะ field ที่คุณแก้จริง** เท่านั้น เช่น ถ้าแก้แค่ log เวลา จะไม่มีการแตะ priority, story point หรือ description ของ ticket
+
+เกร็ดการกรอก:
+
+- ช่อง `Mandays` พิมพ์ตัวเลขเปล่าได้ (`2` = 2 วัน) หรือ `1d 4h 30m` — มีบรรทัด preview บอกว่าตีความเป็นเท่าไร
+- ช่อง `Log Time` ตัวเลขเปล่า = ชั่วโมง (`30` = 30 ชั่วโมง, ใช้ `30m` สำหรับนาที) และจะเตือนถ้าเกิน 24 ชั่วโมง
+- worklog ของเพื่อนร่วมทีมบน ticket เดียวกันจะแสดงเป็นอ่านอย่างเดียว และไม่ถูกนับในเวลา, Export หรือ Speed rate ของคุณ
+- ปุ่ม `Discard` ใน task ที่ยังไม่ได้ push จะคืนค่าจาก Jira (รวมทิ้ง worklog ที่ยังไม่ push); ปุ่ม `Discard all` ด้านบนทำกับทุก task
 
 ถ้า task เดิมมี Jira description อยู่แล้ว และระบบดึงมาได้ จะสามารถเปิดดูได้จากปุ่ม `Show Description`
 
@@ -152,7 +161,7 @@ Story point field ของ Jira แต่ละโปรเจกต์อา�
 2. เลือกเดือนที่ต้องการ export
 3. กด `Copy CSV` เพื่อคัดลอก หรือ `Save CSV` เพื่อบันทึกไฟล์
 
-ข้อมูล export จะอิงจาก worklogs ของเดือนที่เลือก และออกเป็น CSV สำหรับใช้งานต่อได้ทันที โดยมีข้อมูลหลักเช่น
+ข้อมูล export จะอิงจาก worklogs **ของคุณเอง** ในเดือนที่เลือก (รวม ticket ที่คุณสร้างแต่ assign ให้คนอื่น ถ้าคุณ log เวลาไว้) ไฟล์ที่ Save เป็น UTF-8 พร้อม BOM เพื่อให้ Excel อ่านภาษาไทยได้ถูกต้อง และมีคำเตือนถ้ามี worklog ที่ยังไม่ได้ push ขึ้น Jira ออกเป็น CSV สำหรับใช้งานต่อได้ทันที โดยมีข้อมูลหลักเช่น
 
 - Full name
 - Project
@@ -190,10 +199,13 @@ bun tauri dev
 bun lint
 bun format
 bun test
+bun run test:e2e
 bun run build
 bun run cg:check
 bun audit
 ```
+
+`bun run test:e2e` รัน Playwright กับ UI จริงโดยใช้ Jira จำลอง (ไม่ต้องมี Tauri หรือบัญชี Jira) ครั้งแรกต้องติดตั้ง browser ด้วย `bun x playwright install chromium`
 
 ## Build แอป
 
