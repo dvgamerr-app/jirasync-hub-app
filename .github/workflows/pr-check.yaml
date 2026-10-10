@@ -63,6 +63,15 @@ jobs:
       - name: Install Chromium
         run: bun x playwright install --with-deps chromium
 
+      - name: DEBUG vite probe (temporary)
+        continue-on-error: true
+        run: |
+          (DEBUG='vite:*' bun x --bun vite --mode e2e --host 127.0.0.1 --port 1425 > /tmp/vite.log 2>&1 &)
+          sleep 10
+          curl -sv -m 40 http://127.0.0.1:1425/ 2>&1 | head -30 || true
+          echo "--- vite log"; tail -60 /tmp/vite.log
+          pkill -f 'vite --mode e2e' || true
+
       - name: Playwright tests
         env:
           DEBUG: pw:webserver
