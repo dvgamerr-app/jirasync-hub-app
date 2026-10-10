@@ -18,13 +18,13 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2.12.2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
-tauri-plugin-http = "2.6"
+tauri-plugin-http = "2.8.1"
 tauri-plugin-opener = "2"
 tauri-plugin-process = "2"
-tauri-plugin-updater = "2"
+tauri-plugin-updater = "2.13.2"
 tauri-plugin-window-state = "2"
 machine-uid = "0.6"
 aes-gcm = "0.11"
