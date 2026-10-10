@@ -44,6 +44,47 @@ jobs:
           oidc: true
           files: coverage/lcov.info
 
+  # ─── Frontend e2e: Playwright drives the real UI against a fake Jira ──────
+  # No Tauri runtime or real Jira is needed: `vite --mode e2e` swaps the Tauri
+  # APIs for browser shims (see e2e/shims) and requests go to e2e/fake-jira.ts.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Install Chromium
+        run: bun x playwright install --with-deps chromium
+
+      - name: Start e2e dev server
+        run: |
+          bun x --bun vite --mode e2e --host 127.0.0.1 --port 1425 > vite.log 2>&1 &
+          for _ in $(seq 1 60); do
+            curl -sf -m 5 -o /dev/null http://127.0.0.1:1425/ && exit 0
+            sleep 2
+          done
+          echo "dev server did not become ready"; cat vite.log; exit 1
+
+      - name: Playwright tests
+        env:
+          E2E_EXTERNAL_SERVER: "1"
+        run: bun run test:e2e
+
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: test-results
+          retention-days: 7
+
   # ─── Rust: cargo check ─────────────────────────────────────────────────────
   rust:
     runs-on: ubuntu-latest

@@ -27,9 +27,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { LogWorkModal } from "@/components/LogWorkModal";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { formatMandays, formatMinutes, parseTimeInput } from "@/lib/worklog-time";
-import { isVisibleWorkLog } from "@/lib/worklog-sync";
-import { INACTIVE_STATUSES } from "@/store/task-store";
+import { formatMandays, formatMinutes, parseMandayInput } from "@/lib/worklog-time";
+import { isCountedWorkLog } from "@/lib/worklog-sync";
+import { getSelectableStatuses, isDoneTask } from "@/store/task-store";
 import { useShallow } from "zustand/react/shallow";
 
 const COMPACT_COLUMN_COUNT = 4;
@@ -59,10 +59,6 @@ function SeverityBadge({ severity }: { severity: Severity | null }) {
       </TooltipContent>
     </Tooltip>
   );
-}
-
-function isDoneTask(status: string | null | undefined): boolean {
-  return INACTIVE_STATUSES.has(status?.trim().toLowerCase() ?? "");
 }
 
 function bfsDescendants(rootKey: string, childrenMap: Record<string, Task[]>): Task[] {
@@ -188,6 +184,7 @@ export function TaskTable({ tasks: allTasks }: { tasks: Task[] }) {
     projects,
     tasks: rawTasks,
     selectedProjectId,
+    transitionOptions,
   } = useTaskStore(
     useShallow((s) => ({
       selectedTaskId: s.selectedTaskId,
@@ -195,6 +192,7 @@ export function TaskTable({ tasks: allTasks }: { tasks: Task[] }) {
       projects: s.projects,
       tasks: s.tasks,
       selectedProjectId: s.selectedProjectId,
+      transitionOptions: s.transitionOptions,
     })),
   );
   const showExtendedColumns = !selectedTaskId;
@@ -202,7 +200,7 @@ export function TaskTable({ tasks: allTasks }: { tasks: Task[] }) {
 
   const totalMinutesByTaskId = useMemo(
     () =>
-      workLogs.filter(isVisibleWorkLog).reduce<Record<string, number>>((acc, wl) => {
+      workLogs.filter(isCountedWorkLog).reduce<Record<string, number>>((acc, wl) => {
         acc[wl.taskId] = (acc[wl.taskId] ?? 0) + wl.timeSpentMinutes;
         return acc;
       }, {}),
@@ -279,7 +277,8 @@ export function TaskTable({ tasks: allTasks }: { tasks: Task[] }) {
 
     for (const { epic, subtasks } of epicGroups) {
       const rawDesc = bfsDescendants(epic.jiraTaskId, rawChildrenByParentKey);
-      const doneCount = rawDesc.filter((t) => isDoneTask(t.status)).length;
+      // statusCategory is Jira's own notion of "done" — covers Resolved, Released, custom names…
+      const doneCount = rawDesc.filter((t) => isDoneTask(t)).length;
       const pct = rawDesc.length > 0 ? Math.round((doneCount / rawDesc.length) * 100) : 0;
       const totalManday = subtasks.reduce((sum, t) => sum + (t.mandays ?? 0), 0);
       const epicTotalMinutes = subtasks.reduce(
@@ -433,7 +432,11 @@ export function TaskTable({ tasks: allTasks }: { tasks: Task[] }) {
                       task={row.task}
                       isSelected={row.task.id === selectedTaskId}
                       showExtendedColumns={showExtendedColumns}
-                      statuses={statusesByProjectId.get(row.task.projectId) ?? []}
+                      statuses={getSelectableStatuses(
+                        statusesByProjectId.get(row.task.projectId) ?? [],
+                        row.task.status,
+                        transitionOptions[row.task.id]?.statuses,
+                      )}
                       issueTypes={issueTypesByProjectId.get(row.task.projectId) ?? []}
                       totalMinutes={totalMinutesByTaskId[row.task.id] ?? 0}
                       onSelect={handleSelectTask}
@@ -487,6 +490,7 @@ const TaskRow = memo(function TaskRow({
     updateTaskSeverity,
     updateTaskNote,
     updateTaskMandays,
+    loadTransitionOptions,
   } = useTaskStore(
     useShallow((s) => ({
       updateTaskStatus: s.updateTaskStatus,
@@ -495,10 +499,14 @@ const TaskRow = memo(function TaskRow({
       updateTaskSeverity: s.updateTaskSeverity,
       updateTaskNote: s.updateTaskNote,
       updateTaskMandays: s.updateTaskMandays,
+      loadTransitionOptions: s.loadTransitionOptions,
     })),
   );
   const hasStoryPointViolation = hasStoryPointRuleViolation(task);
   const displayIssueTypes = issueTypes.length > 0 ? issueTypes : TASK_TYPES;
+  // Tickets that used to be mine (or are linked to mine) but now belong to someone else stay in
+  // My Work for reference — make that obvious so time is not logged on the wrong ticket.
+  const isAssignedToSomeoneElse = task.isCurrentAssignee === false;
 
   return (
     <TableRow
@@ -507,6 +515,7 @@ const TaskRow = memo(function TaskRow({
         "group h-10 cursor-pointer",
         hasStoryPointViolation &&
           "bg-red-50/80 hover:bg-red-50 dark:bg-red-950/20 dark:hover:bg-red-950/30",
+        isAssignedToSomeoneElse && "opacity-70",
         task.isDirty && "bg-yellow-50 dark:bg-yellow-900/20",
         isSelected && "border-l-primary bg-primary/5 border-l-2",
       )}
@@ -541,6 +550,14 @@ const TaskRow = memo(function TaskRow({
       <TableCell className="py-1.5" onClick={() => onSelect(task.id)}>
         <div className="flex items-center gap-1.5">
           <span className="line-clamp-1 text-[13px] leading-tight font-medium">{task.title}</span>
+          {isAssignedToSomeoneElse && (
+            <span
+              data-testid="assignee-other"
+              className="bg-muted text-muted-foreground shrink-0 rounded px-1.5 py-0.5 text-[10px] whitespace-nowrap"
+            >
+              {task.assignee ?? "Unassigned"}
+            </span>
+          )}
           {task.refUrl && (
             <button
               type="button"
@@ -579,7 +596,13 @@ const TaskRow = memo(function TaskRow({
       </TableCell>
       {/* Status */}
       <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
-        <Select value={task.status ?? ""} onValueChange={(v) => updateTaskStatus(task.id, v)}>
+        <Select
+          value={task.status ?? ""}
+          onValueChange={(v) => updateTaskStatus(task.id, v)}
+          onOpenChange={(open) => {
+            if (open) void loadTransitionOptions(task.id);
+          }}
+        >
           <SelectTrigger className="h-7 w-full min-w-0 border-none bg-transparent p-0 text-left shadow-none focus:ring-0 [&>span]:min-w-0 [&>span]:flex-1 [&>span]:overflow-hidden [&>svg]:h-3 [&>svg]:w-3">
             <SelectValue>
               <StatusBadge status={task.status} truncate />
@@ -686,7 +709,7 @@ function InlineManday({
       return;
     }
 
-    const mins = parseTimeInput(trimmed);
+    const mins = parseMandayInput(trimmed);
     if (mins == null) {
       setRaw(formatMandayValue(value));
       return;

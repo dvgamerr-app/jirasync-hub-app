@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "@/hooks/use-toast";
-import { parseTimeInput } from "@/lib/worklog-time";
+import { describeMinutes, parseTimeInput } from "@/lib/worklog-time";
 import { cn } from "@/lib/utils";
 
 export type LogWorkPayload = {
@@ -24,12 +24,17 @@ interface LogWorkModalProps {
   variant?: "button" | "inline";
 }
 
+const MINUTES_PER_DAY = 24 * 60;
+
 export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModalProps) {
   const [open, setOpen] = useState(false);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [timeInput, setTimeInput] = useState("");
   const [date, setDate] = useState<Date>(new Date());
   const [comment, setComment] = useState("");
+
+  const typedTime = timeInput.trim();
+  const typedMinutes = typedTime ? parseTimeInput(typedTime) : null;
 
   const handleSubmit = () => {
     const minutes = parseTimeInput(timeInput);
@@ -127,6 +132,21 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
               if (e.key === "Enter") handleSubmit();
             }}
           />
+          {typedTime &&
+            (typedMinutes == null ? (
+              <p role="alert" className="text-destructive text-[11px]">
+                Not recognised — use 1d 2h 30m, 2h or 90m.
+              </p>
+            ) : (
+              <p data-testid="logwork-preview" className="text-muted-foreground text-[11px]">
+                = {describeMinutes(typedMinutes)}
+                {typedMinutes > MINUTES_PER_DAY && (
+                  <span className="text-warning block">
+                    That is more than 24h. A plain number means hours — write 30m for minutes.
+                  </span>
+                )}
+              </p>
+            ))}
         </div>
 
         <div className="space-y-1.5">

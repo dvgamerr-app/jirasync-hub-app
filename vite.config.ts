@@ -7,7 +7,20 @@ const host = process.env.TAURI_DEV_HOST;
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
 // https://vite.dev/config/
-export default defineConfig(async () => ({
+// `vite --mode e2e` swaps every Tauri API for a browser shim so Playwright can drive the
+// real UI against a fake Jira (see e2e/). These aliases never apply to dev/prod builds.
+const e2eShim = (name: string) => path.resolve(rootDir, "e2e/shims", name);
+const e2eAliases = {
+  "@tauri-apps/api/core": e2eShim("tauri-core.ts"),
+  "@tauri-apps/plugin-http": e2eShim("plugin-http.ts"),
+  "@tauri-apps/plugin-dialog": e2eShim("plugin-dialog.ts"),
+  "@tauri-apps/plugin-fs": e2eShim("plugin-fs.ts"),
+  "@tauri-apps/plugin-opener": e2eShim("plugin-opener.ts"),
+  "@tauri-apps/plugin-updater": e2eShim("plugin-updater.ts"),
+  "@tauri-apps/plugin-process": e2eShim("plugin-process.ts"),
+};
+
+export default defineConfig(async ({ mode }) => ({
   plugins: [react()],
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
@@ -15,6 +28,7 @@ export default defineConfig(async () => ({
   resolve: {
     alias: {
       "@": path.resolve(rootDir, "src"),
+      ...(mode === "e2e" ? e2eAliases : {}),
     },
   },
   build: {
@@ -34,7 +48,6 @@ export default defineConfig(async () => ({
           if (
             id.includes("node_modules/react") &&
             !id.includes("node_modules/recharts") &&
-            !id.includes("node_modules/react-resizable-panels") &&
             !id.includes("node_modules/react-day-picker")
           ) {
             return "vendor-react";
@@ -43,12 +56,8 @@ export default defineConfig(async () => ({
             id.includes("node_modules/@radix-ui") ||
             id.includes("node_modules/lucide-react") ||
             id.includes("node_modules/cmdk") ||
-            id.includes("node_modules/vaul") ||
             id.includes("node_modules/sonner") ||
-            id.includes("node_modules/react-resizable-panels") ||
-            id.includes("node_modules/react-day-picker") ||
-            id.includes("node_modules/embla-carousel") ||
-            id.includes("node_modules/input-otp")
+            id.includes("node_modules/react-day-picker")
           ) {
             return "vendor-ui";
           }

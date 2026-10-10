@@ -1,5 +1,17 @@
 import { create } from "zustand";
-import { Organization, Project, Task, WorkLog, StoryLevel, TaskType, Severity } from "@/types/jira";
+import {
+  DirtyField,
+  Organization,
+  Project,
+  Task,
+  WorkLog,
+  StoryLevel,
+  TaskType,
+  Severity,
+} from "@/types/jira";
+import { isSyncLockHeld, runExclusiveSync } from "@/lib/sync-lock";
+import type { SyncResult } from "@/lib/sync-service";
+import { getDescriptionSearchText } from "@/lib/adf-content";
 import { db, getJiraAccounts, getStoryPointFieldMap, type JiraAccount } from "@/lib/jira-db";
 import {
   getAccountIdFromTask,
@@ -11,10 +23,14 @@ import {
   updateJiraIssue,
   transitionJiraIssue,
   addJiraWorkLog,
+  addJiraComment,
   deleteJiraWorkLog,
   fetchFreshJiraTask,
+  fetchJiraTransitionTargets,
 } from "@/lib/jira-api";
 import {
+  isCountedWorkLog,
+  isOwnWorkLog,
   isPendingCreateWorkLog,
   isPendingDeleteWorkLog,
   isVisibleWorkLog,
@@ -42,6 +58,10 @@ export interface TaskStore {
   taskScopeFilter: TaskScopeFilter;
   taskStatusFilter: TaskStatusFilter;
   taskDetailViewMode: "details" | "description";
+  /** Statuses each task can move to in Jira right now (loaded lazily; absent = unknown). */
+  transitionOptions: Record<string, { statuses: string[]; fetchedAt: number }>;
+  /** How many push/discard operations are queued behind a running sync (0 = none waiting). */
+  waitingForSync: number;
   searchQuery: string;
   hiddenProjectIds: Set<string>;
 
@@ -55,6 +75,9 @@ export interface TaskStore {
 
   loadFromDB: () => Promise<void>;
   reloadFromDB: () => Promise<void>;
+  loadTransitionOptions: (taskId: string) => Promise<void>;
+  /** Merge what a pull just wrote to IndexedDB straight into state (no DB read). */
+  applySyncResult: (result: SyncResult) => void;
 
   updateTaskStatus: (taskId: string, status: string) => void;
   updateTaskStoryLevel: (taskId: string, level: StoryLevel | null) => void;
@@ -62,13 +85,17 @@ export interface TaskStore {
   updateTaskType: (taskId: string, type: TaskType | null) => void;
   updateTaskSeverity: (taskId: string, severity: Severity | null) => void;
   updateTaskRefUrl: (taskId: string, refUrl: string | null) => void;
+  /** The note is local-only: saving it never marks the task dirty or touches Jira. */
   updateTaskNote: (taskId: string, note: string | null) => void;
+  /** Explicitly send text to Jira as a new comment (one-off; not synced state). */
+  postNoteAsComment: (taskId: string, text: string) => Promise<void>;
 
   addWorkLog: (log: Omit<WorkLog, "id" | "createdAt">) => void;
   removeWorkLog: (logId: string) => void;
 
   syncTaskToJira: (taskId: string) => Promise<void>;
   syncAllDirtyTasks: () => Promise<void>;
+  discardTask: (taskId: string) => Promise<void>;
   discardAllDirtyTasks: () => Promise<void>;
   getDirtyTaskCount: () => number;
 
@@ -88,6 +115,46 @@ const SEVERITY_TO_PRIORITY: Record<string, string> = {
   Low: "Low",
 };
 
+const TRANSITION_CACHE_MS = 60_000;
+
+/**
+ * Statuses to offer for a task: what its workflow allows from Jira's current status, plus the
+ * status currently shown (it may be an unpushed local choice). Unknown → every project status.
+ */
+export function getSelectableStatuses(
+  projectStatuses: string[],
+  currentStatus: string | null,
+  reachable: string[] | undefined,
+): string[] {
+  if (!reachable) return projectStatuses;
+  return [...new Set([...(currentStatus ? [currentStatus] : []), ...reachable])];
+}
+
+function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  return Object.fromEntries(Object.entries(record).filter(([entryKey]) => entryKey !== key));
+}
+
+function upsertById<T extends { id: string }>(current: T[], incoming: T[]): T[] {
+  const byId = new Map(current.map((item) => [item.id, item]));
+  for (const item of incoming) byId.set(item.id, item);
+  return [...byId.values()];
+}
+
+/** Logs and collects the rejected results of a per-task batch (push or discard). */
+function collectTaskFailures(
+  settled: PromiseSettledResult<unknown>[],
+  tasks: Task[],
+  action: string,
+): { jiraId: string; reason: unknown }[] {
+  const failures: { jiraId: string; reason: unknown }[] = [];
+  for (const [index, result] of settled.entries()) {
+    if (result.status !== "rejected") continue;
+    failures.push({ jiraId: tasks[index].jiraTaskId, reason: result.reason });
+    console.error(`${action} failed for ${tasks[index].jiraTaskId}:`, result.reason);
+  }
+  return failures;
+}
+
 export const INACTIVE_STATUSES = new Set(["done", "closed", "cancelled", "cancel", "canceled"]);
 
 type ScopedTaskCollections = Pick<TaskStore, "organizations" | "projects" | "tasks" | "workLogs">;
@@ -98,6 +165,31 @@ function getAccountForTask(task: Task, accounts: JiraAccount[]): JiraAccount | u
   return accounts.find((a) => a.id === accountId);
 }
 
+// Fields a user can edit locally. refUrl is tracked so a pull does not overwrite it, but it is
+// never sent to Jira.
+const TRACKED_FIELDS: ReadonlySet<DirtyField> = new Set<DirtyField>([
+  "status",
+  "type",
+  "severity",
+  "storyLevel",
+  "mandays",
+  "refUrl",
+]);
+
+/**
+ * Dirty fields after applying `updates` to `task`. A dirty task without `dirtyFields` is a
+ * legacy record from before per-field tracking: keep it "everything is dirty".
+ */
+function nextDirtyFields(task: Task, updates: Partial<Task>): DirtyField[] | undefined {
+  if (task.isDirty && task.dirtyFields === undefined) return undefined;
+  const changed = (Object.keys(updates) as DirtyField[]).filter((key) => TRACKED_FIELDS.has(key));
+  return [...new Set([...(task.dirtyFields ?? []), ...changed])];
+}
+
+function isFieldDirty(task: Pick<Task, "dirtyFields">, field: DirtyField): boolean {
+  return task.dirtyFields === undefined || task.dirtyFields.includes(field);
+}
+
 async function pushTaskToJira(task: Task, accounts: JiraAccount[]): Promise<void> {
   const account = getAccountForTask(task, accounts);
   if (!account) return;
@@ -105,26 +197,45 @@ async function pushTaskToJira(task: Task, accounts: JiraAccount[]): Promise<void
   const storyPointFieldMap = getStoryPointFieldMap();
   const storyPointFieldId = storyPointFieldMap[task.projectId];
 
+  // Send only what the user actually edited. Re-sending untouched fields would overwrite
+  // changes made in Jira meanwhile and can alter data the app does not model faithfully
+  // (e.g. a story point of 8 that the UI cannot represent, or a priority outside the 4 levels).
   const fields: Record<string, unknown> = {};
   // Only send the story point field when this project has one mapped in Jira
   // Settings — guessing the default field id makes Jira reject the whole
   // update (400) for projects where that field isn't on the edit screen.
-  if (storyPointFieldId) {
+  if (storyPointFieldId && isFieldDirty(task, "storyLevel")) {
     fields[storyPointFieldId] = task.storyLevel ?? null;
   }
-  if (task.severity && task.severity !== "NA" && SEVERITY_TO_PRIORITY[task.severity]) {
+  if (
+    isFieldDirty(task, "severity") &&
+    task.severity &&
+    task.severity !== "NA" &&
+    SEVERITY_TO_PRIORITY[task.severity]
+  ) {
     fields.priority = { name: SEVERITY_TO_PRIORITY[task.severity] };
+  } else if (
+    task.dirtyFields !== undefined &&
+    isFieldDirty(task, "severity") &&
+    (!task.severity || task.severity === "NA")
+  ) {
+    // "NA" has no Jira priority: clear it explicitly. Projects that require a priority reject
+    // this with a 400, which surfaces as a push error instead of a silent no-op.
+    fields.priority = null;
   }
-  if (task.note !== null) {
-    fields.description = {
-      type: "doc",
-      version: 1,
-      content: [{ type: "paragraph", content: [{ type: "text", text: task.note }] }],
-    };
+  if (isFieldDirty(task, "type") && task.type) {
+    fields.issuetype = { name: task.type };
   }
 
   // If mandays set, convert to Jira timetracking originalEstimate
-  if (typeof task.mandays === "number" && !isNaN(task.mandays)) {
+  if (isFieldDirty(task, "mandays") && task.mandays === null && task.dirtyFields !== undefined) {
+    // The estimate was cleared locally: clear it in Jira too (an empty estimate string).
+    fields.timetracking = { originalEstimate: "" };
+  } else if (
+    isFieldDirty(task, "mandays") &&
+    typeof task.mandays === "number" &&
+    !isNaN(task.mandays)
+  ) {
     const { str: estimateStr, seconds } = formatMandayEstimate(task.mandays);
     fields.timetracking = {
       originalEstimate: estimateStr,
@@ -132,18 +243,30 @@ async function pushTaskToJira(task: Task, accounts: JiraAccount[]): Promise<void
     };
   }
 
-  try {
-    await updateJiraIssue(account, task.jiraTaskId, fields);
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`Failed updating issue ${task.jiraTaskId}:`, err);
-    throw new Error(`Failed updating ${task.jiraTaskId}: ${message}`, { cause: err });
+  if (Object.keys(fields).length > 0) {
+    try {
+      await updateJiraIssue(account, task.jiraTaskId, fields);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`Failed updating issue ${task.jiraTaskId}:`, err);
+      throw new Error(`Failed updating ${task.jiraTaskId}: ${message}`, { cause: err });
+    }
   }
 
-  if (task.status) {
-    await transitionJiraIssue(account, task.jiraTaskId, task.status).catch((err: unknown) => {
+  if (task.status && isFieldDirty(task, "status")) {
+    try {
+      await transitionJiraIssue(account, task.jiraTaskId, task.status);
+    } catch (err: unknown) {
       console.warn(`Transition failed for ${task.jiraTaskId} → "${task.status}":`, err);
-    });
+      // A legacy dirty record (no dirtyFields) re-sends its status even when it never changed;
+      // Jira then has no transition to the current status. That is not a user-facing failure.
+      if (task.dirtyFields === undefined) return;
+      // Surface this: the task must stay unsynced so the user sees the status was not applied.
+      throw new Error(
+        `Could not move ${task.jiraTaskId} to "${task.status}": ${getErrorMessage(err)}`,
+        { cause: err },
+      );
+    }
   }
 }
 
@@ -257,6 +380,11 @@ function replaceTask(tasks: Task[], nextTask: Task): Task[] {
   return tasks.map((task) => (task.id === nextTask.id ? nextTask : task));
 }
 
+/** Swaps all of one task's worklogs for a fresh set read back from IndexedDB. */
+function replaceTaskWorkLogs(workLogs: WorkLog[], taskId: string, fresh: WorkLog[]): WorkLog[] {
+  return [...workLogs.filter((workLog) => workLog.taskId !== taskId), ...fresh];
+}
+
 function replaceWorkLog(workLogs: WorkLog[], nextWorkLog: WorkLog): WorkLog[] {
   return workLogs.map((workLog) => (workLog.id === nextWorkLog.id ? nextWorkLog : workLog));
 }
@@ -271,7 +399,7 @@ function formatTaskFailures(failures: { jiraId: string; reason: unknown }[]): st
     .join("; ");
 }
 
-function isDoneTask(task: Pick<Task, "status" | "statusCategory">): boolean {
+export function isDoneTask(task: Pick<Task, "status" | "statusCategory">): boolean {
   return (
     task.statusCategory === "done" || INACTIVE_STATUSES.has(task.status?.trim().toLowerCase() ?? "")
   );
@@ -385,7 +513,7 @@ export function filterTasks(
       (task) =>
         task.jiraTaskId.toLowerCase().includes(normalizedQuery) ||
         task.title.toLowerCase().includes(normalizedQuery) ||
-        task.description?.toLowerCase().includes(normalizedQuery),
+        getDescriptionSearchText(task.description).includes(normalizedQuery),
     );
   }
 
@@ -439,19 +567,33 @@ function getNormalizedSelectionState(
 }
 
 function markDirtyAndPersist(task: Task, updates: Partial<Task>): Task {
-  const updated = {
+  const updated: Task = {
     ...task,
     ...updates,
+    dirtyFields: nextDirtyFields(task, updates),
     isDirty: true,
     isSynced: false,
-    updatedAt: new Date().toISOString(),
+    // Strictly increasing, so two edits in the same millisecond still differ (the push compares it).
+    updatedAt: new Date(Math.max(Date.now(), (Date.parse(task.updatedAt) || 0) + 1)).toISOString(),
   };
   persistTaskInBackground(updated);
   return updated;
 }
 
-async function persistSyncedTask(task: Task): Promise<Task> {
-  const synced: Task = { ...task, isDirty: false, isSynced: true };
+async function persistSyncedTask(task: Task, latest?: Task): Promise<Task> {
+  // The user kept editing while the push was in flight. `task` is the snapshot that was sent,
+  // so writing it back as "synced" would erase those newer edits. Keep the newer, still-dirty
+  // record; its (idempotent) fields are simply pushed again next time.
+  if (latest && latest.updatedAt !== task.updatedAt) return latest;
+
+  // The note is saved without bumping updatedAt, so carry over whatever it is now.
+  const synced: Task = {
+    ...task,
+    note: latest ? latest.note : task.note,
+    isDirty: false,
+    isSynced: true,
+    dirtyFields: [],
+  };
   await persistTask(synced);
   return synced;
 }
@@ -483,13 +625,30 @@ async function syncTaskWorkLogsToJira(task: Task, account: JiraAccount): Promise
   );
 }
 
-async function syncDirtyTask(task: Task, accounts: JiraAccount[]): Promise<Task | null> {
+async function syncDirtyTask(
+  task: Task,
+  accounts: JiraAccount[],
+  getLatest: (taskId: string) => Task | undefined,
+): Promise<Task | null> {
   const account = getAccountForTask(task, accounts);
   if (!account) return null;
 
-  await pushTaskToJira(task, accounts);
-  await syncTaskWorkLogsToJira(task, account);
-  return persistSyncedTask(task);
+  // Fields and worklogs are independent in Jira: a rejected field update (no edit permission,
+  // blocked transition) must not stop the user's logged time from being pushed.
+  const errors: string[] = [];
+  try {
+    await pushTaskToJira(task, accounts);
+  } catch (err: unknown) {
+    errors.push(getErrorMessage(err));
+  }
+  try {
+    await syncTaskWorkLogsToJira(task, account);
+  } catch (err: unknown) {
+    errors.push(`Worklog sync failed for ${task.jiraTaskId}: ${getErrorMessage(err)}`);
+  }
+  if (errors.length > 0) throw new Error(errors.join("; "));
+
+  return persistSyncedTask(task, getLatest(task.id));
 }
 
 async function replaceTaskWorkLogsWithFresh(
@@ -511,7 +670,8 @@ async function discardDirtyTask(task: Task, accounts: JiraAccount[]): Promise<Ta
     account,
     task.jiraTaskId,
   );
-  const restored: Task = { ...freshTask, isArchived: task.isArchived };
+  // The note is local-only: Jira never held it, so restoring from Jira must not erase it.
+  const restored: Task = { ...freshTask, isArchived: task.isArchived, note: task.note };
   await persistTask(restored);
   await replaceTaskWorkLogsWithFresh(task.id, freshWorkLogs);
   return restored;
@@ -553,6 +713,20 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     });
   };
 
+  // Push/discard share one lock with pull. When a pull is running the caller queues behind it, so
+  // expose that (waitingForSync) instead of leaving the UI looking frozen.
+  const runLocked = <T>(operation: () => Promise<T>): Promise<T> => {
+    const mustWait = isSyncLockHeld();
+    if (mustWait) set((state) => ({ waitingForSync: state.waitingForSync + 1 }));
+    return runExclusiveSync(async () => {
+      if (mustWait) set((state) => ({ waitingForSync: state.waitingForSync - 1 }));
+      return operation();
+    });
+  };
+
+  const getLatestTask = (taskId: string): Task | undefined =>
+    get().tasks.find((task) => task.id === taskId);
+
   const updateTask = (taskId: string, updates: Partial<Task>) => {
     set((state) => {
       const tasks = state.tasks.map((task) =>
@@ -586,6 +760,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     taskScopeFilter: "my-work",
     taskStatusFilter: "active",
     taskDetailViewMode: "details",
+    transitionOptions: {},
+    waitingForSync: 0,
     searchQuery: "",
     hiddenProjectIds: loadHiddenProjectIds(),
 
@@ -628,6 +804,78 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       await refreshStoreFromDB(false);
     },
 
+    loadTransitionOptions: async (taskId) => {
+      const task = get().tasks.find((candidate) => candidate.id === taskId);
+      if (!task) return;
+      const cached = get().transitionOptions[taskId];
+      if (cached && Date.now() - cached.fetchedAt < TRANSITION_CACHE_MS) return;
+      const account = getAccountForTask(task, getJiraAccounts());
+      if (!account) return;
+      try {
+        const statuses = await fetchJiraTransitionTargets(account, task.jiraTaskId);
+        set((state) => ({
+          transitionOptions: {
+            ...state.transitionOptions,
+            [taskId]: { statuses, fetchedAt: Date.now() },
+          },
+        }));
+      } catch (error) {
+        // Offline or no permission: the dropdown keeps offering every project status.
+        console.warn(`Could not load transitions for ${task.jiraTaskId}:`, error);
+      }
+    },
+
+    applySyncResult: (result) =>
+      set((state) => {
+        const accountIds = getJiraAccounts().map((account) => account.id);
+        const removedTasks = new Set(result.removedTaskIds);
+        const removedProjects = new Set(result.removedProjectIds);
+        const archived = new Set(result.archivedTaskIds);
+
+        const organizations = upsertById(state.organizations, result.organizations).sort(
+          (left, right) => compareScopedEntityOrder(left.id, right.id, accountIds, "organization"),
+        );
+        const projects = upsertById(
+          state.projects.filter((project) => !removedProjects.has(project.id)),
+          result.projects,
+        ).sort((left, right) => compareScopedEntityOrder(left.id, right.id, accountIds, "project"));
+        const knownProjectIds = new Set(projects.map((project) => project.id));
+
+        const tasks = upsertById(
+          state.tasks
+            .filter((task) => !removedTasks.has(task.id))
+            .map((task) => (archived.has(task.id) ? { ...task, isArchived: true } : task)),
+          result.tasks,
+        ).filter((task) => knownProjectIds.has(task.projectId));
+
+        const replacedLogTasks = new Set([...result.workLogTaskIds, ...result.removedTaskIds]);
+        const workLogs = [
+          ...state.workLogs.filter((workLog) => !replacedLogTasks.has(workLog.taskId)),
+          ...result.workLogs,
+        ];
+
+        const changedTaskIds = new Set(result.tasks.map((task) => task.id));
+        const transitionOptions = Object.fromEntries(
+          Object.entries(state.transitionOptions).filter(([taskId]) => !changedTaskIds.has(taskId)),
+        );
+
+        return {
+          organizations,
+          projects,
+          tasks,
+          workLogs,
+          transitionOptions,
+          ...getNormalizedSelectionState(
+            tasks,
+            projects,
+            state.selectedProjectId,
+            state.selectedTaskId,
+            state.taskStatusFilter,
+            state.taskScopeFilter,
+          ),
+        };
+      }),
+
     updateTaskStatus: (taskId, status) => updateTask(taskId, { status }),
     updateTaskStoryLevel: (taskId, level) => {
       const task = get().tasks.find((candidate) => candidate.id === taskId);
@@ -639,7 +887,25 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     updateTaskType: (taskId, type) => updateTask(taskId, { type }),
     updateTaskSeverity: (taskId, severity) => updateTask(taskId, { severity }),
     updateTaskRefUrl: (taskId, refUrl) => updateTask(taskId, { refUrl }),
-    updateTaskNote: (taskId, note) => updateTask(taskId, { note }),
+    updateTaskNote: (taskId, note) =>
+      set((state) => ({
+        tasks: state.tasks.map((task) => {
+          if (task.id !== taskId) return task;
+          // Deliberately not markDirtyAndPersist: a note has nothing to push.
+          const updated: Task = { ...task, note };
+          persistTaskInBackground(updated);
+          return updated;
+        }),
+      })),
+
+    postNoteAsComment: async (taskId, text) => {
+      const task = get().tasks.find((candidate) => candidate.id === taskId);
+      const body = text.trim();
+      if (!task || !body) return;
+      const account = getAccountForTask(task, getJiraAccounts());
+      if (!account) throw new Error("This ticket's Jira account is no longer configured");
+      await addJiraComment(account, task.jiraTaskId, body);
+    },
 
     addWorkLog: (log) => {
       const newLog: WorkLog = {
@@ -661,7 +927,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
 
     removeWorkLog: (logId) => {
       const log = get().workLogs.find((workLog) => workLog.id === logId);
-      if (!log) return;
+      // Worklogs logged by teammates are read-only: deleting them would remove their time in Jira.
+      if (!log || !isOwnWorkLog(log)) return;
 
       set((state) => {
         const task = state.tasks.find((t) => t.id === log.taskId);
@@ -678,80 +945,81 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       });
     },
 
-    syncTaskToJira: async (taskId) => {
-      const task = get().tasks.find((candidate) => candidate.id === taskId);
-      if (!task || !task.isDirty) return;
+    syncTaskToJira: (taskId) =>
+      runLocked(async () => {
+        const task = get().tasks.find((candidate) => candidate.id === taskId);
+        if (!task?.isDirty) return;
 
-      const syncedTask = await syncDirtyTask(task, getJiraAccounts());
-      if (!syncedTask) return;
+        const syncedTask = await syncDirtyTask(task, getJiraAccounts(), getLatestTask);
+        if (!syncedTask) return;
 
-      const syncedWorkLogs = await db.workLogs.where("taskId").equals(task.id).toArray();
-      set((state) => ({
-        tasks: replaceTask(state.tasks, syncedTask),
-        workLogs: [
-          ...state.workLogs.filter((workLog) => workLog.taskId !== task.id),
-          ...syncedWorkLogs,
-        ],
-      }));
-    },
+        const syncedWorkLogs = await db.workLogs.where("taskId").equals(task.id).toArray();
+        set((state) => ({
+          tasks: replaceTask(state.tasks, syncedTask),
+          workLogs: replaceTaskWorkLogs(state.workLogs, task.id, syncedWorkLogs),
+          transitionOptions: withoutKey(state.transitionOptions, task.id),
+        }));
+      }),
 
-    syncAllDirtyTasks: async () => {
-      const dirtyTasks = get().tasks.filter((task) => task.isDirty);
-      if (dirtyTasks.length === 0) return;
+    syncAllDirtyTasks: () =>
+      runLocked(async () => {
+        const dirtyTasks = get().tasks.filter((task) => task.isDirty);
+        if (dirtyTasks.length === 0) return;
 
-      const accounts = getJiraAccounts();
-      const settled = await Promise.allSettled(
-        dirtyTasks.map((task) => syncDirtyTask(task, accounts)),
-      );
+        const accounts = getJiraAccounts();
+        const settled = await Promise.allSettled(
+          dirtyTasks.map((task) => syncDirtyTask(task, accounts, getLatestTask)),
+        );
 
-      const failures: { jiraId: string; reason: unknown }[] = [];
-      settled.forEach((result, index) => {
-        if (result.status === "rejected") {
-          failures.push({
-            jiraId: dirtyTasks[index].jiraTaskId,
-            reason: result.reason,
-          });
-          console.error(`Sync failed for ${dirtyTasks[index].jiraTaskId}:`, result.reason);
+        const failures = collectTaskFailures(settled, dirtyTasks, "Sync");
+
+        await get().reloadFromDB();
+        set({ transitionOptions: {} });
+
+        if (failures.length > 0) {
+          const failedList = formatTaskFailures(failures);
+          console.warn(`Some tasks failed to sync: ${failedList}`);
+          throw new Error(`Some tasks failed to sync: ${failedList}`);
         }
-      });
+      }),
 
-      await get().reloadFromDB();
+    discardTask: (taskId) =>
+      runLocked(async () => {
+        const task = get().tasks.find((candidate) => candidate.id === taskId);
+        if (!task?.isDirty) return;
 
-      if (failures.length > 0) {
-        const failedList = formatTaskFailures(failures);
-        console.warn(`Some tasks failed to sync: ${failedList}`);
-        throw new Error(`Some tasks failed to sync: ${failedList}`);
-      }
-    },
+        const restored = await discardDirtyTask(task, getJiraAccounts());
+        if (!restored) return;
 
-    discardAllDirtyTasks: async () => {
-      const dirtyTasks = get().tasks.filter((task) => task.isDirty);
-      if (dirtyTasks.length === 0) return;
+        const freshWorkLogs = await db.workLogs.where("taskId").equals(taskId).toArray();
+        set((state) => ({
+          tasks: replaceTask(state.tasks, restored),
+          workLogs: replaceTaskWorkLogs(state.workLogs, taskId, freshWorkLogs),
+          transitionOptions: withoutKey(state.transitionOptions, taskId),
+        }));
+      }),
 
-      const accounts = getJiraAccounts();
-      const settled = await Promise.allSettled(
-        dirtyTasks.map((task) => discardDirtyTask(task, accounts)),
-      );
+    discardAllDirtyTasks: () =>
+      runLocked(async () => {
+        const dirtyTasks = get().tasks.filter((task) => task.isDirty);
+        if (dirtyTasks.length === 0) return;
 
-      const failures: { jiraId: string; reason: unknown }[] = [];
-      settled.forEach((result, index) => {
-        if (result.status === "rejected") {
-          failures.push({
-            jiraId: dirtyTasks[index].jiraTaskId,
-            reason: result.reason,
-          });
-          console.error(`Discard failed for ${dirtyTasks[index].jiraTaskId}:`, result.reason);
+        const accounts = getJiraAccounts();
+        const settled = await Promise.allSettled(
+          dirtyTasks.map((task) => discardDirtyTask(task, accounts)),
+        );
+
+        const failures = collectTaskFailures(settled, dirtyTasks, "Discard");
+
+        await get().reloadFromDB();
+        set({ transitionOptions: {} });
+
+        if (failures.length > 0) {
+          const failedList = formatTaskFailures(failures);
+          console.warn(`Some tasks failed to discard: ${failedList}`);
+          throw new Error(`Some tasks failed to discard: ${failedList}`);
         }
-      });
-
-      await get().reloadFromDB();
-
-      if (failures.length > 0) {
-        const failedList = formatTaskFailures(failures);
-        console.warn(`Some tasks failed to discard: ${failedList}`);
-        throw new Error(`Some tasks failed to discard: ${failedList}`);
-      }
-    },
+      }),
 
     getDirtyTaskCount: () => get().tasks.filter((task) => task.isDirty).length,
 
@@ -798,9 +1066,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     getTaskById: (taskId) => get().tasks.find((task) => task.id === taskId),
     getProjectById: (projectId) => get().projects.find((project) => project.id === projectId),
     getTotalTimeForTask: (taskId) =>
-      getVisibleWorkLogsForTask(get().workLogs, taskId).reduce(
-        (sum, workLog) => sum + workLog.timeSpentMinutes,
-        0,
-      ),
+      getVisibleWorkLogsForTask(get().workLogs, taskId)
+        .filter(isCountedWorkLog)
+        .reduce((sum, workLog) => sum + workLog.timeSpentMinutes, 0),
   };
 });

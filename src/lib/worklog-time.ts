@@ -62,3 +62,22 @@ export function formatMandayEstimate(mandays: number): { str: string; seconds: n
   if (m > 0) parts.push(`${m}m`);
   return { str: parts.join(" ") || "0m", seconds };
 }
+
+/**
+ * Parses a manday estimate. Same syntax as `parseTimeInput` ("1d 4h 30m"), except that a bare
+ * number means *days* — "2" is two days — because the field is called Mandays. (In Log Work a
+ * bare number means hours.) Returns minutes, or null when the text is not recognised.
+ */
+export function parseMandayInput(input: string): number | null {
+  const trimmed = input.trim();
+  if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+    return Math.round(parseFloat(trimmed) * MINUTES_PER_DAY) || null;
+  }
+  return parseTimeInput(trimmed);
+}
+
+/** "= 2d (16h)" style helper used to show how typed text was understood. */
+export function describeMinutes(minutes: number): string {
+  const hours = Math.round((minutes / MINUTES_PER_HOUR) * 10) / 10;
+  return `${formatMinutes(minutes)} (${hours}h)`;
+}

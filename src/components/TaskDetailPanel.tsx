@@ -1,11 +1,16 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { useTaskStore } from "@/store/task-store";
+import { getSelectableStatuses, useTaskStore } from "@/store/task-store";
 import { useShallow } from "zustand/react/shallow";
 import { StatusBadge } from "@/components/StatusBadge";
 import { StoryLevel, TaskType, Severity } from "@/types/jira";
-import { inferTypeIcon } from "@/components/TypeIcon";
+import { inferTypeIcon } from "@/components/infer-type-icon";
 import { TASK_TYPES, SEVERITIES, STORY_LEVEL_OPTIONS, NO_PENDING_MANDAY } from "@/constants/task";
-import { isVisibleWorkLog } from "@/lib/worklog-sync";
+import {
+  isCountedWorkLog,
+  isOwnWorkLog,
+  isPendingCreateWorkLog,
+  isVisibleWorkLog,
+} from "@/lib/worklog-sync";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -16,17 +21,34 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { X, Clock, CloudOff, Cloud, CloudUpload, ExternalLink, Trash2 } from "lucide-react";
+import { X, Clock, CloudOff, Cloud, CloudUpload, ExternalLink, Trash2, Undo2 } from "lucide-react";
 import { format as formatDate, formatDistanceToNow } from "date-fns";
 import { toast } from "@/hooks/use-toast";
 import { openExternal } from "@/lib/desktop";
 import { hasAdfContent } from "@/lib/adf-content";
 import { LogWorkModal } from "@/components/LogWorkModal";
 import { AdfRenderer } from "@/components/AdfRenderer";
-import { formatMandays, formatMinutes, parseTimeInput } from "@/lib/worklog-time";
-import { cn } from "@/lib/utils";
+import {
+  describeMinutes,
+  formatMandays,
+  formatMinutes,
+  parseMandayInput,
+} from "@/lib/worklog-time";
+import { cn, getErrorMessage } from "@/lib/utils";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export function TaskDetailPanel() {
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
   const {
     selectedTaskId,
     setSelectedTask,
@@ -39,9 +61,14 @@ export function TaskDetailPanel() {
     updateTaskType,
     updateTaskSeverity,
     updateTaskNote,
+    postNoteAsComment,
     addWorkLog,
     removeWorkLog,
     syncTaskToJira,
+    discardTask,
+    waitingForSync,
+    transitionOptions,
+    loadTransitionOptions,
     taskDetailViewMode,
     setTaskDetailViewMode,
   } = useTaskStore(
@@ -57,9 +84,14 @@ export function TaskDetailPanel() {
       updateTaskType: s.updateTaskType,
       updateTaskSeverity: s.updateTaskSeverity,
       updateTaskNote: s.updateTaskNote,
+      postNoteAsComment: s.postNoteAsComment,
       addWorkLog: s.addWorkLog,
       removeWorkLog: s.removeWorkLog,
       syncTaskToJira: s.syncTaskToJira,
+      discardTask: s.discardTask,
+      waitingForSync: s.waitingForSync,
+      transitionOptions: s.transitionOptions,
+      loadTransitionOptions: s.loadTransitionOptions,
       taskDetailViewMode: s.taskDetailViewMode,
       setTaskDetailViewMode: s.setTaskDetailViewMode,
     })),
@@ -77,7 +109,21 @@ export function TaskDetailPanel() {
     [task, projects],
   );
 
-  const statuses = useMemo(() => project?.availableStatuses ?? [], [project]);
+  const reachableStatuses = task ? transitionOptions[task.id]?.statuses : undefined;
+  const statuses = useMemo(
+    () =>
+      getSelectableStatuses(
+        project?.availableStatuses ?? [],
+        task?.status ?? null,
+        reachableStatuses,
+      ),
+    [project, task?.status, reachableStatuses],
+  );
+
+  const selectedId = task?.id;
+  useEffect(() => {
+    if (selectedId) void loadTransitionOptions(selectedId);
+  }, [selectedId, loadTransitionOptions]);
   const issueTypes = useMemo(() => project?.availableIssueTypes ?? [], [project]);
 
   const workLogs = useMemo(
@@ -91,6 +137,13 @@ export function TaskDetailPanel() {
   );
 
   if (!selectedTaskId || !task) return null;
+
+  const ownMinutes = workLogs
+    .filter(isCountedWorkLog)
+    .reduce((sum, wl) => sum + wl.timeSpentMinutes, 0);
+  const othersMinutes = workLogs
+    .filter((wl) => !isOwnWorkLog(wl))
+    .reduce((sum, wl) => sum + wl.timeSpentMinutes, 0);
 
   const displayIssueTypes = issueTypes.length > 0 ? issueTypes : TASK_TYPES;
   const hasDescription = hasAdfContent(task.description);
@@ -258,7 +311,22 @@ export function TaskDetailPanel() {
       </div>
 
       {/* Note */}
-      <NoteFieldEditor initialValue={task.note ?? ""} onSave={(v) => updateTaskNote(task.id, v)} />
+      <NoteFieldEditor
+        initialValue={task.note ?? ""}
+        onSave={(v) => updateTaskNote(task.id, v)}
+        onPostComment={async (text) => {
+          try {
+            await postNoteAsComment(task.id, text);
+            toast({ title: "Comment posted", description: `Added to ${task.jiraTaskId} in Jira` });
+          } catch (err: unknown) {
+            toast({
+              title: "Could not post comment",
+              description: getErrorMessage(err),
+              variant: "destructive",
+            });
+          }
+        }}
+      />
 
       {/* Timestamps */}
       <div className="text-muted-foreground flex gap-4 text-[11px]">
@@ -278,7 +346,10 @@ export function TaskDetailPanel() {
 
         {workLogs.length > 0 && (
           <div className="text-muted-foreground text-[12px]">
-            Total: {formatMinutes(workLogs.reduce((sum, wl) => sum + wl.timeSpentMinutes, 0))}
+            Total: {formatMinutes(ownMinutes)}
+            {othersMinutes > 0 && (
+              <span data-testid="others-total"> · Others: {formatMinutes(othersMinutes)}</span>
+            )}
           </div>
         )}
 
@@ -287,9 +358,25 @@ export function TaskDetailPanel() {
             <p className="text-muted-foreground text-[12px]">No work logged yet</p>
           ) : (
             workLogs.map((wl) => (
-              <div key={wl.id} className="border-border bg-muted/20 rounded-md border px-3 py-2">
+              <div
+                key={wl.id}
+                data-testid={isOwnWorkLog(wl) ? "worklog-own" : "worklog-other"}
+                className={cn(
+                  "border-border bg-muted/20 rounded-md border px-3 py-2",
+                  !isOwnWorkLog(wl) && "opacity-70",
+                )}
+              >
                 <div className="text-muted-foreground mb-2 text-[11px]">
                   {formatWorkLogDate(wl.logDate)}
+                  {!isOwnWorkLog(wl) && <span> · by {wl.authorName ?? "another user"}</span>}
+                  {isOwnWorkLog(wl) && isPendingCreateWorkLog(wl) && (
+                    <span
+                      data-testid="worklog-pending"
+                      className="bg-warning/15 text-warning ml-2 rounded px-1.5 py-0.5 text-[10px] font-medium"
+                    >
+                      Not pushed
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex items-start justify-between gap-2">
@@ -301,14 +388,16 @@ export function TaskDetailPanel() {
                       <p className="text-muted-foreground text-[12px]">{wl.comment}</p>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    className="text-muted-foreground hover:text-destructive mt-0.5"
-                    onClick={() => removeWorkLog(wl.id)}
-                    title="Delete work log"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
+                  {isOwnWorkLog(wl) && (
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-destructive mt-0.5"
+                      onClick={() => removeWorkLog(wl.id)}
+                      title="Delete work log"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
                 </div>
               </div>
             ))
@@ -358,17 +447,28 @@ export function TaskDetailPanel() {
               onClick={async () => {
                 try {
                   await syncTaskToJira(task.id);
-                } catch {
+                } catch (err: unknown) {
                   toast({
                     title: "Sync failed",
-                    description: `Could not sync ${task.jiraTaskId}`,
+                    description: `Could not sync ${task.jiraTaskId}: ${getErrorMessage(err)}`,
                     variant: "destructive",
                   });
                 }
               }}
             >
               <CloudUpload className="h-3 w-3" />
-              Sync
+              {waitingForSync > 0 ? "Waiting for sync…" : "Sync"}
+            </Button>
+          )}
+          {task.isDirty && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground h-6 gap-1 px-2 text-[11px]"
+              onClick={() => setDiscardOpen(true)}
+            >
+              <Undo2 className="h-3 w-3" />
+              Discard
             </Button>
           )}
         </div>
@@ -404,6 +504,43 @@ export function TaskDetailPanel() {
           {activeView === "description" ? descriptionContent : detailContent}
         </div>
       </div>
+
+      <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard changes to {task.jiraTaskId}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Unsynced edits and unpushed worklogs on this task are replaced by its current state in
+              Jira. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={discarding}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={discarding}
+              onClick={(e) => {
+                e.preventDefault();
+                setDiscarding(true);
+                discardTask(task.id)
+                  .then(() => toast({ title: "Changes discarded", description: task.jiraTaskId }))
+                  .catch((err: unknown) =>
+                    toast({
+                      title: "Discard failed",
+                      description: `Could not restore ${task.jiraTaskId}: ${getErrorMessage(err)}`,
+                      variant: "destructive",
+                    }),
+                  )
+                  .finally(() => {
+                    setDiscarding(false);
+                    setDiscardOpen(false);
+                  });
+              }}
+            >
+              {discarding ? "Discarding..." : "Discard"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -430,7 +567,7 @@ function MandayInput({
       onSave(null);
       return;
     }
-    const mins = parseTimeInput(inputRaw);
+    const mins = parseMandayInput(inputRaw);
     if (mins != null) {
       const newVal = mins / 480;
       if (newVal !== value) {
@@ -440,39 +577,57 @@ function MandayInput({
     }
   };
 
+  const typed = editing ? raw.trim() : "";
+  const typedMinutes = typed ? parseMandayInput(typed) : null;
+
   return (
-    <Input
-      className={`h-8 text-[13px] ${dirty ? "border-warning ring-warning/50 ring-1" : ""}`}
-      placeholder="e.g. 1d 4h 30m"
-      value={editing ? raw : display}
-      onFocus={() => {
-        setPendingSourceValue(NO_PENDING_MANDAY);
-        setRaw(display);
-        setEditing(true);
-      }}
-      onChange={(e) => setRaw(e.target.value)}
-      onBlur={() => commit(raw)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          (e.target as HTMLElement).blur();
-        }
-        if (e.key === "Escape") {
+    <div className="space-y-1">
+      <Input
+        className={`h-8 text-[13px] ${dirty ? "border-warning ring-warning/50 ring-1" : ""}`}
+        placeholder="e.g. 1d 4h 30m"
+        value={editing ? raw : display}
+        onFocus={() => {
+          setPendingSourceValue(NO_PENDING_MANDAY);
           setRaw(display);
-          setEditing(false);
-        }
-      }}
-    />
+          setEditing(true);
+        }}
+        onChange={(e) => setRaw(e.target.value)}
+        onBlur={() => commit(raw)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            (e.target as HTMLElement).blur();
+          }
+          if (e.key === "Escape") {
+            setRaw(display);
+            setEditing(false);
+          }
+        }}
+      />
+      {typed &&
+        (typedMinutes == null ? (
+          <p role="alert" className="text-destructive text-[11px]">
+            Not recognised — try 1d 4h 30m, or a plain number of days.
+          </p>
+        ) : (
+          <p data-testid="manday-preview" className="text-muted-foreground text-[11px]">
+            = {describeMinutes(typedMinutes)}
+          </p>
+        ))}
+    </div>
   );
 }
 
 function NoteFieldEditor({
   initialValue,
   onSave,
+  onPostComment,
 }: {
   initialValue: string;
   onSave: (v: string | null) => void;
+  onPostComment: (text: string) => Promise<void>;
 }) {
   const [current, setCurrent] = useState(initialValue);
+  const [posting, setPosting] = useState(false);
   const originalRef = useRef(initialValue);
   const isFocusedRef = useRef(false);
 
@@ -494,9 +649,22 @@ function NoteFieldEditor({
 
   return (
     <div className="space-y-1.5">
-      <label className="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
-        Note
-      </label>
+      <div className="flex items-center justify-between">
+        <label className="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
+          Note <span className="font-normal normal-case">(local only)</span>
+        </label>
+        <button
+          type="button"
+          disabled={posting || !current.trim()}
+          className="text-muted-foreground hover:text-foreground text-[11px] underline disabled:no-underline disabled:opacity-40"
+          onClick={() => {
+            setPosting(true);
+            void onPostComment(current).finally(() => setPosting(false));
+          }}
+        >
+          {posting ? "Posting…" : "Post as Jira comment"}
+        </button>
+      </div>
       <Textarea
         className="resize-none text-[13px]"
         rows={2}

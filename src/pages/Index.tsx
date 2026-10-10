@@ -40,7 +40,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "@/hooks/use-toast";
-import { onSyncStatus, startBackgroundSync, stopBackgroundSync, syncNow } from "@/lib/sync-service";
+import {
+  onSyncResult,
+  onSyncStatus,
+  startBackgroundSync,
+  stopBackgroundSync,
+  syncNow,
+} from "@/lib/sync-service";
 import { getJiraAccounts } from "@/lib/jira-db";
 import { cn, getErrorMessage } from "@/lib/utils";
 
@@ -151,6 +157,8 @@ const Index = () => {
     taskScopeFilter,
     loadFromDB,
     reloadFromDB,
+    applySyncResult,
+    waitingForSync,
     setTaskStatusFilter,
     searchQuery,
     setSearchQuery,
@@ -170,6 +178,8 @@ const Index = () => {
       taskScopeFilter: s.taskScopeFilter,
       loadFromDB: s.loadFromDB,
       reloadFromDB: s.reloadFromDB,
+      applySyncResult: s.applySyncResult,
+      waitingForSync: s.waitingForSync,
       setTaskStatusFilter: s.setTaskStatusFilter,
       searchQuery: s.searchQuery,
       setSearchQuery: s.setSearchQuery,
@@ -189,10 +199,9 @@ const Index = () => {
       ),
     [allTasks, hiddenProjectIds, searchQuery, selectedProjectId, taskScopeFilter, taskStatusFilter],
   );
-  const exportTasks = useMemo(
-    () => filterTasks(allTasks, null, "all", "", new Set<string>(), "my-work"),
-    [allTasks],
-  );
+  // Export every ticket I logged time on — including ones I created that are now assigned to
+  // someone else (the "Created by me" view). Rows only exist for tasks with my own worklogs.
+  const exportTasks = allTasks;
   const currentProject = projects.find((p) => p.id === selectedProjectId);
   const isMobile = useIsMobile();
   const dirtyCount = getDirtyTaskCount();
@@ -250,12 +259,13 @@ const Index = () => {
       if (status === "syncing") setSyncing(true);
       else setSyncing(false);
 
-      if (status === "success") {
-        void reloadFromDB();
-      } else if (status === "error") {
+      if (status === "error") {
         toast({ title: "Sync Failed", description: message, variant: "destructive" });
       }
     });
+
+    // The pull hands over exactly what it wrote, so the store never has to re-read IndexedDB.
+    const unsubResult = onSyncResult(applySyncResult);
 
     if (getJiraAccounts().length > 0) {
       startBackgroundSync();
@@ -263,13 +273,15 @@ const Index = () => {
 
     return () => {
       unsub();
+      unsubResult();
       stopBackgroundSync();
     };
-  }, [isLoaded, reloadFromDB]);
+  }, [isLoaded, applySyncResult]);
 
   const handleManualSync = async () => {
     try {
-      await syncNow();
+      // A manual sync is authoritative: re-read everything (the hourly one is incremental).
+      await syncNow({ full: true });
     } catch {
       // error is reported via the onSyncStatus listener; no additional handling needed here
     }
@@ -425,6 +437,11 @@ const Index = () => {
               <span className="hidden sm:inline">Sync</span>
             </Button>
 
+            {waitingForSync > 0 && (
+              <span role="status" className="text-muted-foreground text-[11px] whitespace-nowrap">
+                Waiting for sync…
+              </span>
+            )}
             {(dirtyCount > 0 || pushDone) && (
               <Button
                 variant="outline"
@@ -437,6 +454,7 @@ const Index = () => {
                       : ""
                 }`}
                 disabled={pushing || pushDone}
+                aria-label={pushDone ? "Pushed to Jira" : `Push ${dirtyCount} change(s) to Jira`}
                 onClick={() => void handlePushDirtyTasks()}
               >
                 {pushDone ? (

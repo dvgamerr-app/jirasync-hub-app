@@ -59,15 +59,17 @@ task-{accountId}-{issueKey}
 ### Pull (Jira → Local)
 
 1. `fetchAssignedJiraData()` — paginated JQL, linked issues, parent epics
-2. `mergeRemoteTaskWithLocalState()` — preserves dirty local fields over remote values
+2. `mergeRemoteTaskWithLocalState()` — preserves only the fields listed in `dirtyFields` (plus the local note) over remote values; each account is pulled in its own try/catch
 3. `replaceTaskWorklogs()` — replace Jira-sourced logs, keep `pending_create`/`pending_delete`
 4. `fetchProjectMetadata()` — all projects in parallel (`Promise.allSettled`)
 
 ### Push (Local → Jira)
 
-1. `pushTaskToJira()` — PUT fields + `transitionJiraIssue` for status
-2. `syncTaskWorkLogsToJira()` — create/delete pending worklogs
-3. Mark task `isDirty=false, isSynced=true`
+All of push, pull and discard run inside `runExclusiveSync()` (`src/lib/sync-lock.ts`) so they never overlap.
+
+1. `pushTaskToJira()` — PUT only the fields in `task.dirtyFields` (a legacy dirty record without it sends everything) + `transitionJiraIssue` when `status` is dirty; failures throw
+2. `syncTaskWorkLogsToJira()` — create/delete pending worklogs (runs even if step 1 failed)
+3. If both succeeded and the task was not edited meanwhile (`updatedAt` unchanged) mark `isDirty=false, isSynced=true, dirtyFields=[]`; otherwise keep the newer dirty record
 
 ### WorkLog State Machine
 

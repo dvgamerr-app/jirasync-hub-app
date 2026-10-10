@@ -1,5 +1,15 @@
 Same as @AGENTS.md
 
+## Reliability + e2e log — 2026-10-08
+
+- Added Playwright e2e (`e2e/`, `bun run test:e2e`) driving the real UI against a fake Jira; every fix below has positive + negative tests and was verified by mutation (reverting the fix turns its tests red).
+- Push now sends only edited fields (`Task.dirtyFields`), pushes `Type`, surfaces failed transitions, pushes worklogs independently, and keeps edits made during a push; pull/push/discard share `runExclusiveSync`.
+- Worklogs have `isOwn`/`authorName` (teammates' time no longer counted/exported/deletable); failed worklog fetches and stale-project cleanup no longer destroy local data; per-account sync errors with a readable 401.
+- UI: confirm account removal, Instance URL validation, Mandays bare number = days with previews, per-task Discard, "Not pushed" badge, assignee tag, safe description links, description search on text, epic progress by status category, CSV BOM + unpushed warning, min window 1000x600.
+- Open items (need a product decision / real-Tauri testing) are listed under _Remaining_ in `docs/technical-debt.md`.
+
+Validation: `bun test --isolate` (185 pass), `bun run lint`, `bun x tsc --noEmit`, `bun run test:e2e`, `cargo check`.
+
 ## Optimization log — 2026-08-02
 
 - Replaced full-table IndexedDB reads in `loadScopedCollections` with account-scoped Dexie index queries.

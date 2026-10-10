@@ -2,11 +2,13 @@ import { getJiraBaseUrl, getStoryPointFieldMap, type JiraAccount } from "./jira-
 import type { Organization, Project, Task, WorkLog } from "@/types/jira";
 import { fetch } from "@tauri-apps/plugin-http";
 import { getOrganizationId, getProjectId, getTaskId } from "@/lib/jira-ids";
-import { getErrorMessage } from "@/lib/utils";
+import { getErrorMessage, mapWithConcurrency } from "@/lib/utils";
 
 export const DEFAULT_STORY_POINT_FIELD_ID = "customfield_10016";
 const SECONDS_PER_WORKDAY = 8 * 60 * 60; // 8 hours in seconds
 const LINKED_ISSUES_BATCH_SIZE = 50;
+/** Max simultaneous per-issue worklog requests during a pull. */
+const WORKLOG_FETCH_CONCURRENCY = 4;
 
 const SEVERITY_PATTERNS: [RegExp, Task["severity"]][] = [
   [/critical|highest|blocker/, "Critical"],
@@ -43,6 +45,7 @@ type JiraProjectField = {
 
 type JiraWorklog = {
   id: string;
+  author?: JiraUser | null;
   timeSpentSeconds?: number | null;
   started: string;
   comment?: JiraTextContent;
@@ -146,9 +149,15 @@ type AssignedJiraData = {
   projects: Project[];
   tasks: Task[];
   worklogsByTaskId: Record<string, WorkLog[]>;
+  /** Tasks whose complete worklog list could not be fetched; their local worklogs must be kept. */
+  worklogFetchFailedTaskIds: string[];
 };
 
+export const TOKEN_UNAVAILABLE_MESSAGE =
+  "The API token for this account could not be read from the OS keychain (it may be missing, or access was denied — macOS asks for permission, and asks again after an app update). Open Settings and enter the API token again, and choose Always Allow if the system asks.";
+
 function getAuthHeader(account: JiraAccount): string {
+  if (!account.apiToken) throw new Error(TOKEN_UNAVAILABLE_MESSAGE);
   return "Basic " + btoa(`${account.email}:${account.apiToken}`);
 }
 
@@ -505,20 +514,32 @@ function processIssueIntoCollections(
   const task = mapIssueToTask(issue, account, projectKey, storyPointFieldId, cols.currentUser);
   cols.tasks.push(task);
 
-  resolveWorklogs(issue.key, task.id, issue, cols.worklogsByTaskId, cols.truncatedIssueKeys);
+  resolveWorklogs(
+    issue.key,
+    task.id,
+    issue,
+    cols.worklogsByTaskId,
+    cols.truncatedIssueKeys,
+    cols.currentUser,
+  );
 }
 
-export async function fetchAssignedJiraData(account: JiraAccount): Promise<AssignedJiraData> {
-  const currentUser = await fetchJiraMyself(account).catch(() => null);
-  const storyPointFieldMap = getStoryPointFieldMap();
-  // Collect all unique story-point field IDs configured for this account's projects.
+export type FetchAssignedOptions = {
+  /**
+   * Incremental pull: only issues updated within the last N minutes. Relative JQL durations are
+   * used on purpose — absolute date-times are interpreted in the Jira user's profile time zone.
+   * Omit for a full pull of everything the user is or was involved in.
+   */
+  updatedWithinMinutes?: number;
+};
+
+function buildIssueFields(storyPointFieldMap: Record<string, string>): string[] {
+  // Every story-point field configured for any project, plus the default.
   const storyPointFieldIds = new Set([DEFAULT_STORY_POINT_FIELD_ID]);
   for (const fieldId of Object.values(storyPointFieldMap)) {
     if (fieldId) storyPointFieldIds.add(fieldId);
   }
-
-  const jql = `(assignee = currentUser() OR assignee was currentUser() OR creator = currentUser()) ORDER BY updated DESC`;
-  const fields = [
+  return [
     "summary",
     "status",
     "issuetype",
@@ -535,21 +556,19 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
     "project",
     "issuelinks",
   ];
+}
 
-  const cols: IssueCollections = {
-    projectMap: new Map(),
-    statusSetByProjectId: new Map(),
-    tasks: [],
-    worklogsByTaskId: {},
-    truncatedIssueKeys: new Map(),
-    fetchedKeys: new Set(),
-    storyPointFieldMap,
-    currentUser,
-  };
+/** Pages through the main JQL query; returns the keys of issues linked from the results. */
+async function fetchMainQueryIssues(
+  account: JiraAccount,
+  jql: string,
+  fields: string[],
+  cols: IssueCollections,
+): Promise<Set<string>> {
   const linkedKeys = new Set<string>();
   let nextPageToken: string | undefined;
 
-  while (true) {
+  do {
     const body: Record<string, unknown> = { jql, maxResults: 100, fields };
     if (nextPageToken) body.nextPageToken = nextPageToken;
 
@@ -567,65 +586,49 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
       }
     }
 
-    if (data.isLast) break;
-    nextPageToken = data.nextPageToken;
-    if (!nextPageToken) break;
-  }
+    nextPageToken = data.isLast ? undefined : data.nextPageToken;
+  } while (nextPageToken);
 
-  // Fetch linked issues that weren't already returned by the main query
-  const unfetchedLinkedKeys = Array.from(linkedKeys).filter((k) => !cols.fetchedKeys.has(k));
-  if (unfetchedLinkedKeys.length > 0) {
-    for (let i = 0; i < unfetchedLinkedKeys.length; i += LINKED_ISSUES_BATCH_SIZE) {
-      const batch = unfetchedLinkedKeys.slice(i, i + LINKED_ISSUES_BATCH_SIZE);
-      const linkedJql = `issueKey in (${batch.map((k) => `"${k}"`).join(",")})`;
-      try {
-        const res = await jiraFetch("search/jql", account, {
-          method: "POST",
-          body: JSON.stringify({ jql: linkedJql, maxResults: LINKED_ISSUES_BATCH_SIZE, fields }),
-        });
-        const data = (await res.json()) as JiraSearchResponse;
-        for (const issue of data.issues ?? []) {
-          if (!cols.fetchedKeys.has(issue.key)) processIssueIntoCollections(issue, account, cols);
-        }
-      } catch (error: unknown) {
-        console.warn("Failed fetching linked issues batch:", error);
+  return linkedKeys;
+}
+
+/** Fetches issues by key (linked issues, parent epics). A failed batch is skipped, not fatal. */
+async function fetchIssuesByKeys(
+  account: JiraAccount,
+  keys: string[],
+  fields: string[],
+  cols: IssueCollections,
+  label: string,
+): Promise<void> {
+  for (let i = 0; i < keys.length; i += LINKED_ISSUES_BATCH_SIZE) {
+    const batch = keys.slice(i, i + LINKED_ISSUES_BATCH_SIZE);
+    const quotedKeys = batch.map((k) => JSON.stringify(k)).join(",");
+    const jql = `issueKey in (${quotedKeys})`;
+    try {
+      const res = await jiraFetch("search/jql", account, {
+        method: "POST",
+        body: JSON.stringify({ jql, maxResults: LINKED_ISSUES_BATCH_SIZE, fields }),
+      });
+      const data = (await res.json()) as JiraSearchResponse;
+      for (const issue of data.issues ?? []) {
+        if (!cols.fetchedKeys.has(issue.key)) processIssueIntoCollections(issue, account, cols);
       }
+    } catch (error: unknown) {
+      console.warn(`Failed fetching ${label} batch:`, error);
     }
   }
+}
 
-  // Fetch parent epics not returned by the main JQL (they may not be assigned to the user)
-  const unfetchedParentKeys = cols.tasks
-    .filter((t) => t.parentKey && !cols.fetchedKeys.has(t.parentKey))
-    .map((t) => t.parentKey as string)
-    .filter((key, i, arr) => arr.indexOf(key) === i);
-
-  if (unfetchedParentKeys.length > 0) {
-    for (let i = 0; i < unfetchedParentKeys.length; i += LINKED_ISSUES_BATCH_SIZE) {
-      const batch = unfetchedParentKeys.slice(i, i + LINKED_ISSUES_BATCH_SIZE);
-      const epicJql = `issueKey in (${batch.map((k) => `"${k}"`).join(",")})`;
-      try {
-        const res = await jiraFetch("search/jql", account, {
-          method: "POST",
-          body: JSON.stringify({ jql: epicJql, maxResults: LINKED_ISSUES_BATCH_SIZE, fields }),
-        });
-        const data = (await res.json()) as JiraSearchResponse;
-        for (const issue of data.issues ?? []) {
-          if (!cols.fetchedKeys.has(issue.key)) processIssueIntoCollections(issue, account, cols);
-        }
-      } catch (error: unknown) {
-        console.warn("Failed fetching parent epics batch:", error);
-      }
-    }
-  }
-
-  await fetchTruncatedWorklogs(account, cols.truncatedIssueKeys, cols.worklogsByTaskId);
-
+async function attachProjectMetadata(
+  account: JiraAccount,
+  cols: IssueCollections,
+): Promise<Project[]> {
   const collectedProjects = Array.from(cols.projectMap.values());
   const projectMetaResults = await Promise.allSettled(
     collectedProjects.map((project) => fetchProjectMetadata(account, project.jiraProjectKey)),
   );
 
-  const projects = collectedProjects.map((project, index) => {
+  return collectedProjects.map((project, index) => {
     const metaResult = projectMetaResults[index];
     if (metaResult.status === "rejected") {
       console.warn(
@@ -644,8 +647,61 @@ export async function fetchAssignedJiraData(account: JiraAccount): Promise<Assig
       availableIssueTypes: meta?.issueTypes ?? [],
     };
   });
+}
 
-  return { projects, tasks: cols.tasks, worklogsByTaskId: cols.worklogsByTaskId };
+export async function fetchAssignedJiraData(
+  account: JiraAccount,
+  options: FetchAssignedOptions = {},
+): Promise<AssignedJiraData> {
+  const currentUser = await fetchJiraMyself(account).catch(() => null);
+  const storyPointFieldMap = getStoryPointFieldMap();
+  const fields = buildIssueFields(storyPointFieldMap);
+
+  const involvement =
+    "(assignee = currentUser() OR assignee was currentUser() OR creator = currentUser())";
+  const updatedFilter =
+    options.updatedWithinMinutes !== undefined
+      ? ` AND updated >= -${Math.max(1, Math.ceil(options.updatedWithinMinutes))}m`
+      : "";
+  const jql = `${involvement}${updatedFilter} ORDER BY updated DESC`;
+
+  const cols: IssueCollections = {
+    projectMap: new Map(),
+    statusSetByProjectId: new Map(),
+    tasks: [],
+    worklogsByTaskId: {},
+    truncatedIssueKeys: new Map(),
+    fetchedKeys: new Set(),
+    storyPointFieldMap,
+    currentUser,
+  };
+
+  const linkedKeys = await fetchMainQueryIssues(account, jql, fields, cols);
+
+  // Fetch linked issues that weren't already returned by the main query
+  const unfetchedLinkedKeys = Array.from(linkedKeys).filter((k) => !cols.fetchedKeys.has(k));
+  await fetchIssuesByKeys(account, unfetchedLinkedKeys, fields, cols, "linked issues");
+
+  // Fetch parent epics not returned by the main JQL (they may not be assigned to the user)
+  const unfetchedParentKeys = cols.tasks
+    .filter((t) => t.parentKey && !cols.fetchedKeys.has(t.parentKey))
+    .map((t) => t.parentKey as string)
+    .filter((key, i, arr) => arr.indexOf(key) === i);
+  await fetchIssuesByKeys(account, unfetchedParentKeys, fields, cols, "parent epics");
+
+  const worklogFetchFailedTaskIds = await fetchTruncatedWorklogs(
+    account,
+    cols.truncatedIssueKeys,
+    cols.worklogsByTaskId,
+    cols.currentUser,
+  );
+
+  return {
+    projects: await attachProjectMetadata(account, cols),
+    tasks: cols.tasks,
+    worklogsByTaskId: cols.worklogsByTaskId,
+    worklogFetchFailedTaskIds,
+  };
 }
 
 export type FreshJiraTask = { task: Task; workLogs: WorkLog[] };
@@ -661,27 +717,7 @@ export async function fetchFreshJiraTask(
 ): Promise<FreshJiraTask> {
   const currentUser = await fetchJiraMyself(account).catch(() => null);
   const storyPointFieldMap = getStoryPointFieldMap();
-  const storyPointFieldIds = new Set([DEFAULT_STORY_POINT_FIELD_ID]);
-  for (const fieldId of Object.values(storyPointFieldMap)) {
-    if (fieldId) storyPointFieldIds.add(fieldId);
-  }
-  const fields = [
-    "summary",
-    "status",
-    "issuetype",
-    "priority",
-    "assignee",
-    "creator",
-    "description",
-    "created",
-    "updated",
-    ...storyPointFieldIds,
-    "parent",
-    "worklog",
-    "timetracking",
-    "project",
-    "issuelinks",
-  ];
+  const fields = buildIssueFields(storyPointFieldMap);
 
   const res = await jiraFetch(`issue/${issueKey}?fields=${fields.join(",")}`, account);
   const issue = (await res.json()) as JiraIssue;
@@ -691,8 +727,10 @@ export async function fetchFreshJiraTask(
   const task = mapIssueToTask(issue, account, projectKey, storyPointFieldId, currentUser);
 
   const workLogs = isWorklogTruncated(issue)
-    ? (await fetchAllIssueWorklogs(account, issueKey)).map((wl) => mapJiraWorklog(wl, task.id))
-    : mapWorklogsFromIssue(issue, task.id);
+    ? (await fetchAllIssueWorklogs(account, issueKey)).map((wl) =>
+        mapJiraWorklog(wl, task.id, currentUser),
+      )
+    : mapWorklogsFromIssue(issue, task.id, currentUser);
 
   return { task, workLogs };
 }
@@ -703,7 +741,17 @@ function isWorklogTruncated(issue: JiraIssue): boolean {
   return (wl.total ?? 0) > (wl.worklogs?.length ?? 0);
 }
 
-function mapJiraWorklog(wl: JiraWorklog, taskId: string): WorkLog {
+function isOwnJiraWorklog(wl: JiraWorklog, currentUser: JiraMyselfResponse | null): boolean | null {
+  const authorId = wl.author?.accountId;
+  if (!currentUser?.accountId || !authorId) return null;
+  return authorId === currentUser.accountId;
+}
+
+function mapJiraWorklog(
+  wl: JiraWorklog,
+  taskId: string,
+  currentUser: JiraMyselfResponse | null = null,
+): WorkLog {
   return {
     id: `wl-jira-${wl.id}`,
     taskId,
@@ -713,11 +761,19 @@ function mapJiraWorklog(wl: JiraWorklog, taskId: string): WorkLog {
     createdAt: wl.started,
     jiraWorklogId: wl.id,
     syncStatus: "synced",
+    authorName: wl.author?.displayName ?? null,
+    isOwn: isOwnJiraWorklog(wl, currentUser),
   };
 }
 
-function mapWorklogsFromIssue(issue: JiraIssue, taskId: string): WorkLog[] {
-  return (issue.fields.worklog?.worklogs ?? []).map((wl) => mapJiraWorklog(wl, taskId));
+function mapWorklogsFromIssue(
+  issue: JiraIssue,
+  taskId: string,
+  currentUser: JiraMyselfResponse | null,
+): WorkLog[] {
+  return (issue.fields.worklog?.worklogs ?? []).map((wl) =>
+    mapJiraWorklog(wl, taskId, currentUser),
+  );
 }
 
 async function fetchAllIssueWorklogs(
@@ -750,12 +806,13 @@ function resolveWorklogs(
   issue: JiraIssue,
   worklogsByTaskId: Record<string, WorkLog[]>,
   truncatedIssueKeys: Map<string, string>,
+  currentUser: JiraMyselfResponse | null,
 ): void {
   if (isWorklogTruncated(issue)) {
     truncatedIssueKeys.set(issueKey, taskId);
     return;
   }
-  const worklogs = mapWorklogsFromIssue(issue, taskId);
+  const worklogs = mapWorklogsFromIssue(issue, taskId, currentUser);
   if (worklogs.length > 0) worklogsByTaskId[taskId] = worklogs;
 }
 
@@ -763,19 +820,25 @@ async function fetchTruncatedWorklogs(
   account: JiraAccount,
   truncatedIssueKeys: Map<string, string>,
   worklogsByTaskId: Record<string, WorkLog[]>,
-): Promise<void> {
-  if (truncatedIssueKeys.size === 0) return;
-  await Promise.all(
-    Array.from(truncatedIssueKeys.entries()).map(async ([issueKey, taskId]) => {
+  currentUser: JiraMyselfResponse | null,
+): Promise<string[]> {
+  const failedTaskIds: string[] = [];
+  if (truncatedIssueKeys.size === 0) return failedTaskIds;
+  await mapWithConcurrency(
+    Array.from(truncatedIssueKeys.entries()),
+    WORKLOG_FETCH_CONCURRENCY,
+    async ([issueKey, taskId]) => {
       try {
         const allWorklogs = await fetchAllIssueWorklogs(account, issueKey);
-        const mapped = allWorklogs.map((wl) => mapJiraWorklog(wl, taskId));
+        const mapped = allWorklogs.map((wl) => mapJiraWorklog(wl, taskId, currentUser));
         if (mapped.length > 0) worklogsByTaskId[taskId] = mapped;
       } catch (error: unknown) {
         console.warn(`Failed fetching full worklogs for ${issueKey}:`, error);
+        failedTaskIds.push(taskId);
       }
-    }),
+    },
   );
+  return failedTaskIds;
 }
 
 function mapPriorityToSeverity(priority: string | null | undefined): Task["severity"] {
@@ -793,6 +856,19 @@ export async function updateJiraIssue(
     method: "PUT",
     body: JSON.stringify({ fields }),
   });
+}
+
+/** Status names the issue can move to right now, according to its workflow. */
+export async function fetchJiraTransitionTargets(
+  account: JiraAccount,
+  issueKey: string,
+): Promise<string[]> {
+  const res = await jiraFetch(`issue/${issueKey}/transitions`, account);
+  const data = (await res.json()) as JiraTransitionsResponse;
+  const names = (data.transitions ?? [])
+    .map((transition) => transition.to?.name ?? transition.name ?? "")
+    .filter(Boolean);
+  return [...new Set(names)];
 }
 
 // Transition issue status
@@ -840,6 +916,24 @@ export async function addJiraWorkLog(
   });
   const data = (await res.json()) as JiraCreatedWorklogResponse;
   return data.id ?? null;
+}
+
+// Add a plain-text comment to a Jira issue
+export async function addJiraComment(
+  account: JiraAccount,
+  issueKey: string,
+  text: string,
+): Promise<void> {
+  await jiraFetch(`issue/${issueKey}/comment`, account, {
+    method: "POST",
+    body: JSON.stringify({
+      body: {
+        type: "doc",
+        version: 1,
+        content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+      },
+    }),
+  });
 }
 
 // Delete a work log from Jira

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
-import { fetchAssignedJiraData } from "@/lib/jira-api";
+import { fetchAssignedJiraData, TOKEN_UNAVAILABLE_MESSAGE } from "@/lib/jira-api";
 import type { JiraAccount } from "@/lib/jira-db";
 
 const httpFetchMock = mock();
@@ -224,5 +224,16 @@ describe("fetchAssignedJiraData", () => {
 
     expect(result.tasks[0].isCreatedByCurrentUser).toBe(true);
     expect(result.tasks[0].isCurrentAssignee).toBe(false);
+  });
+});
+
+describe("account without a readable API token", () => {
+  it("fails with the keychain message instead of sending a request that would 401", async () => {
+    httpFetchMock.mockReset();
+
+    await expect(fetchAssignedJiraData({ ...account, apiToken: "" })).rejects.toThrow(
+      TOKEN_UNAVAILABLE_MESSAGE,
+    );
+    expect(httpFetchMock).not.toHaveBeenCalled();
   });
 });
