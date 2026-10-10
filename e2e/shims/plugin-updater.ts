@@ -1,6 +1,12 @@
-export type DownloadEvent = never;
-export type Update = never;
+export interface DownloadEvent {
+  event: "Started" | "Progress" | "Finished";
+}
 
-export async function check(): Promise<null> {
+export interface Update {
+  version: string;
+  downloadAndInstall(onEvent?: (event: DownloadEvent) => void): Promise<void>;
+}
+
+export async function check(): Promise<Update | null> {
   return null;
 }

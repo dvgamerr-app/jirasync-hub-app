@@ -153,7 +153,11 @@ type AssignedJiraData = {
   worklogFetchFailedTaskIds: string[];
 };
 
+export const TOKEN_UNAVAILABLE_MESSAGE =
+  "The API token for this account could not be read from the OS keychain (it may be missing, or access was denied — macOS asks for permission, and asks again after an app update). Open Settings and enter the API token again, and choose Always Allow if the system asks.";
+
 function getAuthHeader(account: JiraAccount): string {
+  if (!account.apiToken) throw new Error(TOKEN_UNAVAILABLE_MESSAGE);
   return "Basic " + btoa(`${account.email}:${account.apiToken}`);
 }
 
@@ -529,26 +533,13 @@ export type FetchAssignedOptions = {
   updatedWithinMinutes?: number;
 };
 
-export async function fetchAssignedJiraData(
-  account: JiraAccount,
-  options: FetchAssignedOptions = {},
-): Promise<AssignedJiraData> {
-  const currentUser = await fetchJiraMyself(account).catch(() => null);
-  const storyPointFieldMap = getStoryPointFieldMap();
-  // Collect all unique story-point field IDs configured for this account's projects.
+function buildIssueFields(storyPointFieldMap: Record<string, string>): string[] {
+  // Every story-point field configured for any project, plus the default.
   const storyPointFieldIds = new Set([DEFAULT_STORY_POINT_FIELD_ID]);
   for (const fieldId of Object.values(storyPointFieldMap)) {
     if (fieldId) storyPointFieldIds.add(fieldId);
   }
-
-  const involvement =
-    "(assignee = currentUser() OR assignee was currentUser() OR creator = currentUser())";
-  const updatedFilter =
-    options.updatedWithinMinutes !== undefined
-      ? ` AND updated >= -${Math.max(1, Math.ceil(options.updatedWithinMinutes))}m`
-      : "";
-  const jql = `${involvement}${updatedFilter} ORDER BY updated DESC`;
-  const fields = [
+  return [
     "summary",
     "status",
     "issuetype",
@@ -565,21 +556,19 @@ export async function fetchAssignedJiraData(
     "project",
     "issuelinks",
   ];
+}
 
-  const cols: IssueCollections = {
-    projectMap: new Map(),
-    statusSetByProjectId: new Map(),
-    tasks: [],
-    worklogsByTaskId: {},
-    truncatedIssueKeys: new Map(),
-    fetchedKeys: new Set(),
-    storyPointFieldMap,
-    currentUser,
-  };
+/** Pages through the main JQL query; returns the keys of issues linked from the results. */
+async function fetchMainQueryIssues(
+  account: JiraAccount,
+  jql: string,
+  fields: string[],
+  cols: IssueCollections,
+): Promise<Set<string>> {
   const linkedKeys = new Set<string>();
   let nextPageToken: string | undefined;
 
-  while (true) {
+  do {
     const body: Record<string, unknown> = { jql, maxResults: 100, fields };
     if (nextPageToken) body.nextPageToken = nextPageToken;
 
@@ -597,70 +586,48 @@ export async function fetchAssignedJiraData(
       }
     }
 
-    if (data.isLast) break;
-    nextPageToken = data.nextPageToken;
-    if (!nextPageToken) break;
-  }
+    nextPageToken = data.isLast ? undefined : data.nextPageToken;
+  } while (nextPageToken);
 
-  // Fetch linked issues that weren't already returned by the main query
-  const unfetchedLinkedKeys = Array.from(linkedKeys).filter((k) => !cols.fetchedKeys.has(k));
-  if (unfetchedLinkedKeys.length > 0) {
-    for (let i = 0; i < unfetchedLinkedKeys.length; i += LINKED_ISSUES_BATCH_SIZE) {
-      const batch = unfetchedLinkedKeys.slice(i, i + LINKED_ISSUES_BATCH_SIZE);
-      const linkedJql = `issueKey in (${batch.map((k) => `"${k}"`).join(",")})`;
-      try {
-        const res = await jiraFetch("search/jql", account, {
-          method: "POST",
-          body: JSON.stringify({ jql: linkedJql, maxResults: LINKED_ISSUES_BATCH_SIZE, fields }),
-        });
-        const data = (await res.json()) as JiraSearchResponse;
-        for (const issue of data.issues ?? []) {
-          if (!cols.fetchedKeys.has(issue.key)) processIssueIntoCollections(issue, account, cols);
-        }
-      } catch (error: unknown) {
-        console.warn("Failed fetching linked issues batch:", error);
+  return linkedKeys;
+}
+
+/** Fetches issues by key (linked issues, parent epics). A failed batch is skipped, not fatal. */
+async function fetchIssuesByKeys(
+  account: JiraAccount,
+  keys: string[],
+  fields: string[],
+  cols: IssueCollections,
+  label: string,
+): Promise<void> {
+  for (let i = 0; i < keys.length; i += LINKED_ISSUES_BATCH_SIZE) {
+    const batch = keys.slice(i, i + LINKED_ISSUES_BATCH_SIZE);
+    const jql = `issueKey in (${batch.map((k) => `"${k}"`).join(",")})`;
+    try {
+      const res = await jiraFetch("search/jql", account, {
+        method: "POST",
+        body: JSON.stringify({ jql, maxResults: LINKED_ISSUES_BATCH_SIZE, fields }),
+      });
+      const data = (await res.json()) as JiraSearchResponse;
+      for (const issue of data.issues ?? []) {
+        if (!cols.fetchedKeys.has(issue.key)) processIssueIntoCollections(issue, account, cols);
       }
+    } catch (error: unknown) {
+      console.warn(`Failed fetching ${label} batch:`, error);
     }
   }
+}
 
-  // Fetch parent epics not returned by the main JQL (they may not be assigned to the user)
-  const unfetchedParentKeys = cols.tasks
-    .filter((t) => t.parentKey && !cols.fetchedKeys.has(t.parentKey))
-    .map((t) => t.parentKey as string)
-    .filter((key, i, arr) => arr.indexOf(key) === i);
-
-  if (unfetchedParentKeys.length > 0) {
-    for (let i = 0; i < unfetchedParentKeys.length; i += LINKED_ISSUES_BATCH_SIZE) {
-      const batch = unfetchedParentKeys.slice(i, i + LINKED_ISSUES_BATCH_SIZE);
-      const epicJql = `issueKey in (${batch.map((k) => `"${k}"`).join(",")})`;
-      try {
-        const res = await jiraFetch("search/jql", account, {
-          method: "POST",
-          body: JSON.stringify({ jql: epicJql, maxResults: LINKED_ISSUES_BATCH_SIZE, fields }),
-        });
-        const data = (await res.json()) as JiraSearchResponse;
-        for (const issue of data.issues ?? []) {
-          if (!cols.fetchedKeys.has(issue.key)) processIssueIntoCollections(issue, account, cols);
-        }
-      } catch (error: unknown) {
-        console.warn("Failed fetching parent epics batch:", error);
-      }
-    }
-  }
-
-  const worklogFetchFailedTaskIds = await fetchTruncatedWorklogs(
-    account,
-    cols.truncatedIssueKeys,
-    cols.worklogsByTaskId,
-    cols.currentUser,
-  );
-
+async function attachProjectMetadata(
+  account: JiraAccount,
+  cols: IssueCollections,
+): Promise<Project[]> {
   const collectedProjects = Array.from(cols.projectMap.values());
   const projectMetaResults = await Promise.allSettled(
     collectedProjects.map((project) => fetchProjectMetadata(account, project.jiraProjectKey)),
   );
 
-  const projects = collectedProjects.map((project, index) => {
+  return collectedProjects.map((project, index) => {
     const metaResult = projectMetaResults[index];
     if (metaResult.status === "rejected") {
       console.warn(
@@ -679,9 +646,57 @@ export async function fetchAssignedJiraData(
       availableIssueTypes: meta?.issueTypes ?? [],
     };
   });
+}
+
+export async function fetchAssignedJiraData(
+  account: JiraAccount,
+  options: FetchAssignedOptions = {},
+): Promise<AssignedJiraData> {
+  const currentUser = await fetchJiraMyself(account).catch(() => null);
+  const storyPointFieldMap = getStoryPointFieldMap();
+  const fields = buildIssueFields(storyPointFieldMap);
+
+  const involvement =
+    "(assignee = currentUser() OR assignee was currentUser() OR creator = currentUser())";
+  const updatedFilter =
+    options.updatedWithinMinutes !== undefined
+      ? ` AND updated >= -${Math.max(1, Math.ceil(options.updatedWithinMinutes))}m`
+      : "";
+  const jql = `${involvement}${updatedFilter} ORDER BY updated DESC`;
+
+  const cols: IssueCollections = {
+    projectMap: new Map(),
+    statusSetByProjectId: new Map(),
+    tasks: [],
+    worklogsByTaskId: {},
+    truncatedIssueKeys: new Map(),
+    fetchedKeys: new Set(),
+    storyPointFieldMap,
+    currentUser,
+  };
+
+  const linkedKeys = await fetchMainQueryIssues(account, jql, fields, cols);
+
+  // Fetch linked issues that weren't already returned by the main query
+  const unfetchedLinkedKeys = Array.from(linkedKeys).filter((k) => !cols.fetchedKeys.has(k));
+  await fetchIssuesByKeys(account, unfetchedLinkedKeys, fields, cols, "linked issues");
+
+  // Fetch parent epics not returned by the main JQL (they may not be assigned to the user)
+  const unfetchedParentKeys = cols.tasks
+    .filter((t) => t.parentKey && !cols.fetchedKeys.has(t.parentKey))
+    .map((t) => t.parentKey as string)
+    .filter((key, i, arr) => arr.indexOf(key) === i);
+  await fetchIssuesByKeys(account, unfetchedParentKeys, fields, cols, "parent epics");
+
+  const worklogFetchFailedTaskIds = await fetchTruncatedWorklogs(
+    account,
+    cols.truncatedIssueKeys,
+    cols.worklogsByTaskId,
+    cols.currentUser,
+  );
 
   return {
-    projects,
+    projects: await attachProjectMetadata(account, cols),
     tasks: cols.tasks,
     worklogsByTaskId: cols.worklogsByTaskId,
     worklogFetchFailedTaskIds,
@@ -701,27 +716,7 @@ export async function fetchFreshJiraTask(
 ): Promise<FreshJiraTask> {
   const currentUser = await fetchJiraMyself(account).catch(() => null);
   const storyPointFieldMap = getStoryPointFieldMap();
-  const storyPointFieldIds = new Set([DEFAULT_STORY_POINT_FIELD_ID]);
-  for (const fieldId of Object.values(storyPointFieldMap)) {
-    if (fieldId) storyPointFieldIds.add(fieldId);
-  }
-  const fields = [
-    "summary",
-    "status",
-    "issuetype",
-    "priority",
-    "assignee",
-    "creator",
-    "description",
-    "created",
-    "updated",
-    ...storyPointFieldIds,
-    "parent",
-    "worklog",
-    "timetracking",
-    "project",
-    "issuelinks",
-  ];
+  const fields = buildIssueFields(storyPointFieldMap);
 
   const res = await jiraFetch(`issue/${issueKey}?fields=${fields.join(",")}`, account);
   const issue = (await res.json()) as JiraIssue;

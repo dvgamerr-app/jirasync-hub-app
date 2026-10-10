@@ -145,42 +145,38 @@ export async function pushAll(page: Page) {
 }
 
 export async function idbAll<T = Record<string, unknown>>(page: Page, store: string): Promise<T[]> {
-  return page.evaluate(
-    (storeName) =>
-      new Promise<T[]>((resolve, reject) => {
-        const open = indexedDB.open("jira-task-manager");
-        open.onerror = () => reject(open.error);
-        open.onsuccess = () => {
-          const db = open.result;
-          const req = db.transaction(storeName, "readonly").objectStore(storeName).getAll();
-          req.onsuccess = () => {
-            db.close();
-            resolve(req.result as T[]);
-          };
-          req.onerror = () => reject(req.error);
-        };
-      }),
-    store,
-  );
+  return page.evaluate(async (storeName) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const open = indexedDB.open("jira-task-manager");
+      open.onerror = () => reject(new Error(open.error?.message ?? "IndexedDB open failed"));
+      open.onsuccess = () => resolve(open.result);
+    });
+    const rows = await new Promise<T[]>((resolve, reject) => {
+      const req = db.transaction(storeName, "readonly").objectStore(storeName).getAll();
+      req.onerror = () => reject(new Error(req.error?.message ?? "IndexedDB read failed"));
+      req.onsuccess = () => resolve(req.result as T[]);
+    });
+    db.close();
+    return rows;
+  }, store);
 }
 
 export async function idbPut(page: Page, store: string, value: unknown): Promise<void> {
   await page.evaluate(
-    ([storeName, record]) =>
-      new Promise<void>((resolve, reject) => {
+    async ([storeName, record]) => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
         const open = indexedDB.open("jira-task-manager");
-        open.onerror = () => reject(open.error);
-        open.onsuccess = () => {
-          const db = open.result;
-          const tx = db.transaction(storeName as string, "readwrite");
-          tx.objectStore(storeName as string).put(record);
-          tx.oncomplete = () => {
-            db.close();
-            resolve();
-          };
-          tx.onerror = () => reject(tx.error);
-        };
-      }),
+        open.onerror = () => reject(new Error(open.error?.message ?? "IndexedDB open failed"));
+        open.onsuccess = () => resolve(open.result);
+      });
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(storeName, "readwrite");
+        tx.objectStore(storeName).put(record);
+        tx.onerror = () => reject(new Error(tx.error?.message ?? "IndexedDB write failed"));
+        tx.oncomplete = () => resolve();
+      });
+      db.close();
+    },
     [store, value] as const,
   );
 }

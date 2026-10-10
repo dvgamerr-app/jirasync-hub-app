@@ -87,7 +87,7 @@ function emitResult(result: SyncResult) {
 /** Turns a raw Jira API failure into something the user can act on. */
 export function describeSyncError(error: unknown): string {
   const message = getErrorMessage(error);
-  const status = message.match(/Jira API (\d{3})/)?.[1];
+  const status = /Jira API (\d{3})/.exec(message)?.[1];
   if (status === "401") {
     return "Jira rejected the credentials (401). The API token may have expired or the email is wrong — update this account in Settings.";
   }

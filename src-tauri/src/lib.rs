@@ -62,7 +62,8 @@ const KEYRING_SERVICE: &str = "com.scg.wedo.jirasync-hub";
 
 #[cfg(any(windows, target_os = "macos"))]
 fn secret_entry(account: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(KEYRING_SERVICE, &format!("jira-token:{account}")).map_err(|e| e.to_string())
+    keyring::Entry::new(KEYRING_SERVICE, &format!("jira-token:{account}"))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -124,20 +125,10 @@ fn set_window_theme(window: tauri::WebviewWindow, is_dark: bool) {
         let ns_window = &*(window.ns_window().unwrap() as *mut NSWindow);
         let bg_color = if is_dark {
             // dark --background: hsl(222, 25%, 8%) ≈ rgb(15, 18, 26)
-            NSColor::colorWithRed_green_blue_alpha(
-                15.0 / 255.0,
-                18.0 / 255.0,
-                26.0 / 255.0,
-                1.0,
-            )
+            NSColor::colorWithRed_green_blue_alpha(15.0 / 255.0, 18.0 / 255.0, 26.0 / 255.0, 1.0)
         } else {
             // light --background: hsl(220, 20%, 97%) ≈ rgb(244, 247, 250)
-            NSColor::colorWithRed_green_blue_alpha(
-                244.0 / 255.0,
-                247.0 / 255.0,
-                250.0 / 255.0,
-                1.0,
-            )
+            NSColor::colorWithRed_green_blue_alpha(244.0 / 255.0, 247.0 / 255.0, 250.0 / 255.0, 1.0)
         };
         ns_window.setBackgroundColor(Some(&*bg_color));
     }

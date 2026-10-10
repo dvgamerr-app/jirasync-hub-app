@@ -98,7 +98,7 @@ export class FakeJira {
   private rules: Rule[] = [];
   private nextWorklogId = 9000;
   private readonly t0 = Date.now();
-  private trackers: { name: string; pattern: RegExp; current: number; max: number }[] = [];
+  private readonly trackers: { name: string; pattern: RegExp; current: number; max: number }[] = [];
 
   /** Record the peak number of simultaneous in-flight requests whose path matches `pattern`. */
   track(name: string, pattern: RegExp) {
@@ -297,94 +297,102 @@ export class FakeJira {
     }
     if (method === "POST" && path === "search/jql") return this.search(req);
 
-    let m = path.match(/^project\/([^/]+)\/statuses$/);
-    if (method === "GET" && m) {
-      const issueTypes = new Set(
-        [...this.issues.values()].filter((i) => i.project.key === m![1]).map((i) => i.issuetype),
-      );
-      return {
-        status: 200,
-        body: [...(issueTypes.size ? issueTypes : ["Task"])].map((name) => ({
-          name,
-          statuses: this.statuses.map((s) => ({ name: s })),
-        })),
-      };
-    }
+    const projectStatuses = /^project\/([^/]+)\/statuses$/.exec(path);
+    if (method === "GET" && projectStatuses) return this.projectStatuses(projectStatuses[1]);
 
-    m = path.match(/^issue\/([^/]+)\/transitions$/);
-    if (m) {
-      const issue = this.issues.get(m[1]);
-      if (!issue) return { status: 404, body: { errorMessages: ["not found"] } };
-      if (method === "GET") {
-        return {
-          status: 200,
-          body: {
-            transitions: this.statuses
-              .filter((s) => s !== issue.status && !issue.blockedStatuses.includes(s))
-              .map((s, i) => ({ id: String(i + 1), name: s, to: { name: s } })),
-          },
-        };
+    return (
+      this.routeIssue(req) ?? {
+        status: 404,
+        body: { errorMessages: [`FakeJira: unhandled ${method} ${path}`] },
       }
-      if (method === "POST") {
-        const id = (req.body as { transition: { id: string } }).transition.id;
-        const target = this.statuses.filter(
-          (s) => s !== issue.status && !issue.blockedStatuses.includes(s),
-        )[Number(id) - 1];
-        if (!target) return { status: 400, body: { errorMessages: ["bad transition"] } };
-        issue.status = target;
-        issue.updated = new Date().toISOString();
-        return { status: 204 };
-      }
-    }
+    );
+  }
 
-    m = path.match(/^issue\/([^/]+)\/worklog\/([^/]+)$/);
-    if (method === "DELETE" && m) {
-      const issue = this.issues.get(m[1]);
-      if (!issue) return { status: 404, body: { errorMessages: ["not found"] } };
-      issue.worklogs = issue.worklogs.filter((w) => w.id !== m![2]);
+  private projectStatuses(projectKey: string): { status: number; body: unknown } {
+    const issueTypes = new Set(
+      [...this.issues.values()].filter((i) => i.project.key === projectKey).map((i) => i.issuetype),
+    );
+    return {
+      status: 200,
+      body: [...(issueTypes.size ? issueTypes : ["Task"])].map((name) => ({
+        name,
+        statuses: this.statuses.map((s) => ({ name: s })),
+      })),
+    };
+  }
+
+  /** Every `issue/{key}...` endpoint; undefined when the request is not one of them. */
+  private routeIssue(req: RecordedRequest): { status: number; body?: unknown } | undefined {
+    const { method, path } = req;
+    const match = /^issue\/([^/]+)(?:\/(transitions|worklog)(?:\/([^/]+))?)?$/.exec(path);
+    if (!match) return undefined;
+    const [, key, sub, worklogId] = match;
+
+    const issue = this.issues.get(key);
+    if (!issue) return { status: 404, body: { errorMessages: ["not found"] } };
+
+    if (sub === "transitions" && !worklogId) return this.transitions(issue, req);
+    if (sub === "worklog" && worklogId) {
+      if (method !== "DELETE") return undefined;
+      issue.worklogs = issue.worklogs.filter((w) => w.id !== worklogId);
       return { status: 204 };
     }
-
-    m = path.match(/^issue\/([^/]+)\/worklog$/);
-    if (m) {
-      const issue = this.issues.get(m[1]);
-      if (!issue) return { status: 404, body: { errorMessages: ["not found"] } };
-      if (method === "GET") {
-        const startAt = Number(req.query.get("startAt") ?? 0);
-        const maxResults = Number(req.query.get("maxResults") ?? 100);
-        return {
-          status: 200,
-          body: {
-            startAt,
-            maxResults,
-            total: issue.worklogs.length,
-            worklogs: issue.worklogs.slice(startAt, startAt + maxResults).map(toWorklogJson),
-          },
-        };
-      }
-      if (method === "POST") {
-        const b = req.body as { timeSpentSeconds: number; started: string; comment?: unknown };
-        const wl = this.addWorklog(m[1], {
-          timeSpentSeconds: b.timeSpentSeconds,
-          started: b.started,
-          comment: extractAdfText(b.comment),
-        });
-        return { status: 201, body: { id: wl.id } };
-      }
+    if (sub === "worklog") return this.worklogs(issue, key, req);
+    if (method === "GET") return { status: 200, body: toIssueJson(issue) };
+    if (method === "PUT") {
+      this.applyFields(issue, (req.body as { fields: Record<string, unknown> }).fields ?? {});
+      return { status: 204 };
     }
+    return undefined;
+  }
 
-    m = path.match(/^issue\/([^/]+)$/);
-    if (m) {
-      const issue = this.issues.get(m[1]);
-      if (!issue) return { status: 404, body: { errorMessages: ["not found"] } };
-      if (method === "GET") return { status: 200, body: toIssueJson(issue) };
-      if (method === "PUT") {
-        this.applyFields(issue, (req.body as { fields: Record<string, unknown> }).fields ?? {});
-        return { status: 204 };
-      }
+  private transitions(issue: FakeIssue, req: RecordedRequest): { status: number; body?: unknown } {
+    const available = this.statuses.filter(
+      (s) => s !== issue.status && !issue.blockedStatuses.includes(s),
+    );
+    if (req.method === "GET") {
+      return {
+        status: 200,
+        body: {
+          transitions: available.map((s, i) => ({ id: String(i + 1), name: s, to: { name: s } })),
+        },
+      };
     }
+    if (req.method !== "POST") return { status: 404 };
+    const id = (req.body as { transition: { id: string } }).transition.id;
+    const target = available[Number(id) - 1];
+    if (!target) return { status: 400, body: { errorMessages: ["bad transition"] } };
+    issue.status = target;
+    issue.updated = new Date().toISOString();
+    return { status: 204 };
+  }
 
-    return { status: 404, body: { errorMessages: [`FakeJira: unhandled ${method} ${path}`] } };
+  private worklogs(
+    issue: FakeIssue,
+    key: string,
+    req: RecordedRequest,
+  ): { status: number; body?: unknown } {
+    if (req.method === "GET") {
+      const startAt = Number(req.query.get("startAt") ?? 0);
+      const maxResults = Number(req.query.get("maxResults") ?? 100);
+      return {
+        status: 200,
+        body: {
+          startAt,
+          maxResults,
+          total: issue.worklogs.length,
+          worklogs: issue.worklogs.slice(startAt, startAt + maxResults).map(toWorklogJson),
+        },
+      };
+    }
+    if (req.method !== "POST") return { status: 404 };
+    const b = req.body as { timeSpentSeconds: number; started: string; comment?: unknown };
+    const wl = this.addWorklog(key, {
+      timeSpentSeconds: b.timeSpentSeconds,
+      started: b.started,
+      comment: extractAdfText(b.comment),
+    });
+    return { status: 201, body: { id: wl.id } };
   }
 
   private applyFields(issue: FakeIssue, fields: Record<string, unknown>) {
@@ -406,8 +414,8 @@ export class FakeJira {
     const { jql } = req.body as { jql: string };
     let matches: FakeIssue[];
 
-    const keyList = jql.match(/^issueKey in \((.*)\)$/);
-    const projectMatch = jql.match(/^project = "([^"]+)"/);
+    const keyList = /^issueKey in \((.*)\)$/.exec(jql);
+    const projectMatch = /^project = "([^"]+)"/.exec(jql);
     if (keyList) {
       const keys = [...keyList[1].matchAll(/"([^"]+)"/g)].map((k) => k[1]);
       matches = keys.map((k) => this.issues.get(k)).filter((i): i is FakeIssue => Boolean(i));

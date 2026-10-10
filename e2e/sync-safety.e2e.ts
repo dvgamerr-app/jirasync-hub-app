@@ -206,7 +206,7 @@ test.describe("worklog fetches are rate limited by the client", () => {
     const jira = new FakeJira();
     manyLongTickets(jira, 12);
     jira.track("worklog-list", /^issue\/[^/]+\/worklog$/);
-    jira.delay((r) => r.method === "GET" && /\/worklog$/.test(r.path), 150);
+    jira.delay((r) => r.method === "GET" && r.path.endsWith("/worklog"), 150);
 
     await openApp(page, jira, { waitFor: "PRJ-1" });
     await expect.poll(async () => (await idbAll(page, "workLogs")).length).toBe(12 * 25);
@@ -218,7 +218,7 @@ test.describe("worklog fetches are rate limited by the client", () => {
   test("negative: the limit does not drop any issue's worklogs", async ({ page }) => {
     const jira = new FakeJira();
     manyLongTickets(jira, 9);
-    jira.delay((r) => r.method === "GET" && /\/worklog$/.test(r.path), 50);
+    jira.delay((r) => r.method === "GET" && r.path.endsWith("/worklog"), 50);
 
     await openApp(page, jira, { waitFor: "PRJ-1" });
     await expect.poll(async () => (await idbAll(page, "workLogs")).length).toBe(9 * 25);

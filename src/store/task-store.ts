@@ -131,9 +131,28 @@ export function getSelectableStatuses(
 }
 
 function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
-  const { [key]: _removed, ...rest } = record;
-  void _removed;
-  return rest;
+  return Object.fromEntries(Object.entries(record).filter(([entryKey]) => entryKey !== key));
+}
+
+function upsertById<T extends { id: string }>(current: T[], incoming: T[]): T[] {
+  const byId = new Map(current.map((item) => [item.id, item]));
+  for (const item of incoming) byId.set(item.id, item);
+  return [...byId.values()];
+}
+
+/** Logs and collects the rejected results of a per-task batch (push or discard). */
+function collectTaskFailures(
+  settled: PromiseSettledResult<unknown>[],
+  tasks: Task[],
+  action: string,
+): { jiraId: string; reason: unknown }[] {
+  const failures: { jiraId: string; reason: unknown }[] = [];
+  for (const [index, result] of settled.entries()) {
+    if (result.status !== "rejected") continue;
+    failures.push({ jiraId: tasks[index].jiraTaskId, reason: result.reason });
+    console.error(`${action} failed for ${tasks[index].jiraTaskId}:`, result.reason);
+  }
+  return failures;
 }
 
 export const INACTIVE_STATUSES = new Set(["done", "closed", "cancelled", "cancel", "canceled"]);
@@ -808,12 +827,6 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const removedProjects = new Set(result.removedProjectIds);
         const archived = new Set(result.archivedTaskIds);
 
-        const upsertById = <T extends { id: string }>(current: T[], incoming: T[]): T[] => {
-          const byId = new Map(current.map((item) => [item.id, item]));
-          for (const item of incoming) byId.set(item.id, item);
-          return [...byId.values()];
-        };
-
         const organizations = upsertById(state.organizations, result.organizations).sort(
           (left, right) => compareScopedEntityOrder(left.id, right.id, accountIds, "organization"),
         );
@@ -930,7 +943,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     syncTaskToJira: (taskId) =>
       runLocked(async () => {
         const task = get().tasks.find((candidate) => candidate.id === taskId);
-        if (!task || !task.isDirty) return;
+        if (!task?.isDirty) return;
 
         const syncedTask = await syncDirtyTask(task, getJiraAccounts(), getLatestTask);
         if (!syncedTask) return;
@@ -956,16 +969,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           dirtyTasks.map((task) => syncDirtyTask(task, accounts, getLatestTask)),
         );
 
-        const failures: { jiraId: string; reason: unknown }[] = [];
-        settled.forEach((result, index) => {
-          if (result.status === "rejected") {
-            failures.push({
-              jiraId: dirtyTasks[index].jiraTaskId,
-              reason: result.reason,
-            });
-            console.error(`Sync failed for ${dirtyTasks[index].jiraTaskId}:`, result.reason);
-          }
-        });
+        const failures = collectTaskFailures(settled, dirtyTasks, "Sync");
 
         await get().reloadFromDB();
         set({ transitionOptions: {} });
@@ -980,7 +984,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     discardTask: (taskId) =>
       runLocked(async () => {
         const task = get().tasks.find((candidate) => candidate.id === taskId);
-        if (!task || !task.isDirty) return;
+        if (!task?.isDirty) return;
 
         const restored = await discardDirtyTask(task, getJiraAccounts());
         if (!restored) return;
@@ -1006,16 +1010,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           dirtyTasks.map((task) => discardDirtyTask(task, accounts)),
         );
 
-        const failures: { jiraId: string; reason: unknown }[] = [];
-        settled.forEach((result, index) => {
-          if (result.status === "rejected") {
-            failures.push({
-              jiraId: dirtyTasks[index].jiraTaskId,
-              reason: result.reason,
-            });
-            console.error(`Discard failed for ${dirtyTasks[index].jiraTaskId}:`, result.reason);
-          }
-        });
+        const failures = collectTaskFailures(settled, dirtyTasks, "Discard");
 
         await get().reloadFromDB();
         set({ transitionOptions: {} });

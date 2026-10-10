@@ -37,6 +37,14 @@ JiraSync Hub คือแอป desktop สำหรับดึง Jira tasks �
 
 ![Allow app on macOS](docs/allow-app-on-mac.png)
 
+#### Keychain
+
+API token ถูกเก็บใน macOS Keychain แอปนี้ยังไม่ได้ sign ด้วย Apple Developer ID จึงมีข้อควรรู้:
+
+- ครั้งแรกที่เปิดแอป (หรือหลังเพิ่ม account) macOS จะถามสิทธิ์เข้าถึง Keychain ให้ใส่รหัสผ่านเครื่องแล้วกด `Always Allow` (ถ้ามีหลาย account อาจถามทีละ account)
+- หลังอัปเดตแอปเป็นเวอร์ชันใหม่ macOS จะมองว่าเป็นแอปใหม่ และอาจถามสิทธิ์อีกครั้ง
+- ถ้ากด `Deny` แอปจะอ่าน token ไม่ได้ และแจ้งให้ใส่ API token ใหม่ที่ `Settings` (token เดิมใน Keychain ไม่หาย)
+
 ### Linux
 
 - ถ้าใช้ `.AppImage`: ให้สิทธิ์รันไฟล์ก่อน แล้วเปิดใช้งาน
