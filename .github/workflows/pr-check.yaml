@@ -63,7 +63,18 @@ jobs:
       - name: Install Chromium
         run: bun x playwright install --with-deps chromium
 
+      - name: Start e2e dev server
+        run: |
+          bun x --bun vite --mode e2e --host 127.0.0.1 --port 1425 > vite.log 2>&1 &
+          for _ in $(seq 1 60); do
+            curl -sf -m 5 -o /dev/null http://127.0.0.1:1425/ && exit 0
+            sleep 2
+          done
+          echo "dev server did not become ready"; cat vite.log; exit 1
+
       - name: Playwright tests
+        env:
+          E2E_EXTERNAL_SERVER: "1"
         run: bun run test:e2e
 
       - name: Upload Playwright traces

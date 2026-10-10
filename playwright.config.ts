@@ -17,14 +17,16 @@ export default defineConfig({
     baseURL: `http://${HOST}:${PORT}`,
     trace: "retain-on-failure",
   },
-  webServer: {
-    command: `bun x --bun vite --mode e2e --host ${HOST} --port ${PORT}`,
-    url: `http://${HOST}:${PORT}`,
-    stdout: "pipe",
-    stderr: "pipe",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  // CI starts the dev server itself (see pr-check.yaml) and sets E2E_EXTERNAL_SERVER: on Linux
+  // runners Playwright's own readiness probe hung against a server that answered curl at once.
+  webServer: process.env.E2E_EXTERNAL_SERVER
+    ? undefined
+    : {
+        command: `bun x --bun vite --mode e2e --host ${HOST} --port ${PORT}`,
+        url: `http://${HOST}:${PORT}`,
+        reuseExistingServer: !process.env.CI,
+        timeout: 120_000,
+      },
   projects: [
     {
       name: "chromium",
