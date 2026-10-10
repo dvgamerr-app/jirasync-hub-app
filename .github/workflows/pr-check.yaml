@@ -64,6 +64,8 @@ jobs:
         run: bun x playwright install --with-deps chromium
 
       - name: Playwright tests
+        env:
+          DEBUG: pw:webserver
         run: bun run test:e2e
 
       - name: Upload Playwright traces
