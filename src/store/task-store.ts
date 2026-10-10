@@ -380,6 +380,11 @@ function replaceTask(tasks: Task[], nextTask: Task): Task[] {
   return tasks.map((task) => (task.id === nextTask.id ? nextTask : task));
 }
 
+/** Swaps all of one task's worklogs for a fresh set read back from IndexedDB. */
+function replaceTaskWorkLogs(workLogs: WorkLog[], taskId: string, fresh: WorkLog[]): WorkLog[] {
+  return [...workLogs.filter((workLog) => workLog.taskId !== taskId), ...fresh];
+}
+
 function replaceWorkLog(workLogs: WorkLog[], nextWorkLog: WorkLog): WorkLog[] {
   return workLogs.map((workLog) => (workLog.id === nextWorkLog.id ? nextWorkLog : workLog));
 }
@@ -951,10 +956,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const syncedWorkLogs = await db.workLogs.where("taskId").equals(task.id).toArray();
         set((state) => ({
           tasks: replaceTask(state.tasks, syncedTask),
-          workLogs: [
-            ...state.workLogs.filter((workLog) => workLog.taskId !== task.id),
-            ...syncedWorkLogs,
-          ],
+          workLogs: replaceTaskWorkLogs(state.workLogs, task.id, syncedWorkLogs),
           transitionOptions: withoutKey(state.transitionOptions, task.id),
         }));
       }),
@@ -992,10 +994,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         const freshWorkLogs = await db.workLogs.where("taskId").equals(taskId).toArray();
         set((state) => ({
           tasks: replaceTask(state.tasks, restored),
-          workLogs: [
-            ...state.workLogs.filter((workLog) => workLog.taskId !== taskId),
-            ...freshWorkLogs,
-          ],
+          workLogs: replaceTaskWorkLogs(state.workLogs, taskId, freshWorkLogs),
           transitionOptions: withoutKey(state.transitionOptions, taskId),
         }));
       }),

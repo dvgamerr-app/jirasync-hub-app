@@ -602,7 +602,8 @@ async function fetchIssuesByKeys(
 ): Promise<void> {
   for (let i = 0; i < keys.length; i += LINKED_ISSUES_BATCH_SIZE) {
     const batch = keys.slice(i, i + LINKED_ISSUES_BATCH_SIZE);
-    const jql = `issueKey in (${batch.map((k) => `"${k}"`).join(",")})`;
+    const quotedKeys = batch.map((k) => JSON.stringify(k)).join(",");
+    const jql = `issueKey in (${quotedKeys})`;
     try {
       const res = await jiraFetch("search/jql", account, {
         method: "POST",
