@@ -1,213 +1,600 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>JiraSync Hub — Jira on your desktop, offline-first</title>
-<meta name="description" content="Pull your Jira tickets, edit and log work offline, and push back only the fields you changed. Desktop app for Windows, macOS and Linux.">
-<meta name="color-scheme" content="light dark">
-<meta property="og:type" content="website">
-<meta property="og:title" content="JiraSync Hub — Jira on your desktop, offline-first">
-<meta property="og:description" content="Pull your Jira tickets, edit and log work offline, and push back only the fields you changed.">
-<meta property="og:image" content="https://dvgamerr.app/jirasync-hub-app/screenshots/tasks.png">
-<meta property="og:url" content="https://dvgamerr.app/jirasync-hub-app/">
-<link rel="icon" href="icon.png">
-<style>
-:root{
-  --paper:#f6f3ec; --card:#fffdf8; --ink:#17202e; --muted:#5b6574; --line:#d9d3c4;
-  --blue:#1d4ed8; --blue-ink:#fff; --dirty:#c2410c; --dirty-bg:#ffedd5; --ok:#15803d;
-  --shadow:0 1px 0 var(--line), 0 18px 40px -22px rgba(23,32,46,.35);
-}
-@media (prefers-color-scheme:dark){
-  :root{
-    --paper:#0e131b; --card:#151c27; --ink:#e8ecf3; --muted:#9aa5b6; --line:#273244;
-    --blue:#6b9bff; --blue-ink:#0b1220; --dirty:#fdba74; --dirty-bg:#3a2210; --ok:#4ade80;
-    --shadow:0 1px 0 var(--line), 0 18px 40px -22px rgba(0,0,0,.8);
-  }
-}
-*{box-sizing:border-box}
-html{scroll-behavior:smooth}
-@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{animation:none!important;transition:none!important}.btn:hover{transform:none}}
-body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-  background-image:linear-gradient(var(--line) 1px,transparent 1px);background-size:100% 56px}
-a{color:var(--blue)}
-a:focus-visible,button:focus-visible{outline:3px solid var(--blue);outline-offset:3px;border-radius:4px}
-.wrap{max-width:1080px;margin:0 auto;padding:0 16px}
-.mono{font-family:ui-monospace,"SF Mono",Consolas,monospace}
-header.top{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:18px 0}
-.brand{display:flex;align-items:center;gap:10px;font-weight:700;text-decoration:none;color:var(--ink)}
-.brand img{width:30px;height:30px;border-radius:7px}
-.top nav a{margin-right:16px;color:var(--muted);text-decoration:none;font-size:.95rem}
-.top nav a:hover{color:var(--ink)}
-.hero{padding:36px 0 28px;display:grid;gap:32px;grid-template-columns:1fr}
-.tag{display:inline-block;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line);padding:3px 10px;border-radius:999px;background:var(--card)}
-h1{font-size:clamp(2.1rem,6vw,3.7rem);line-height:1.08;margin:14px 0 14px;letter-spacing:-.02em}
-h1 em{font-style:normal;background:linear-gradient(transparent 62%,var(--dirty-bg) 62%)}
-.lead{font-size:1.15rem;color:var(--muted);max-width:34em;margin:0 0 24px}
-.cta{display:flex;flex-wrap:wrap;gap:12px}
-.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:8px;font-weight:600;text-decoration:none;border:1px solid var(--ink);color:var(--ink);background:transparent;cursor:pointer;font-size:1rem}
-.btn.primary{background:var(--blue);border-color:var(--blue);color:var(--blue-ink)}
-.btn:hover{transform:translateY(-1px)}
-.shot{background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
-.shot img{display:block;width:100%;height:auto}
-section{padding:48px 0}
-h2{font-size:clamp(1.5rem,4vw,2.1rem);margin:0 0 8px;letter-spacing:-.01em}
-.sub{color:var(--muted);margin:0 0 28px;max-width:40em}
-.diff{display:grid;gap:16px;grid-template-columns:1fr}
-.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;box-shadow:var(--shadow)}
-.panel h3{margin:0 0 10px;font-size:1rem}
-.row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 0;border-top:1px dashed var(--line);font-size:.95rem}
-.row:first-of-type{border-top:0}
-.pill{font-size:.75rem;padding:1px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
-.pill.sent{color:var(--ok);border-color:var(--ok)}
-.pill.dirty{color:var(--dirty);border-color:var(--dirty);background:var(--dirty-bg)}
-.grid{display:grid;gap:14px;grid-template-columns:1fr}
-.feat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px}
-.feat b{display:block;margin-bottom:4px}
-.feat span{color:var(--muted);font-size:.95rem}
-.two{display:grid;gap:20px;grid-template-columns:1fr}
-.steps{counter-reset:s;list-style:none;padding:0;margin:0;display:grid;gap:12px}
-.steps li{counter-increment:s;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px 14px 56px;position:relative}
-.steps li::before{content:counter(s);position:absolute;left:14px;top:12px;width:30px;height:30px;border-radius:50%;background:var(--blue);color:var(--blue-ink);display:grid;place-items:center;font-weight:700}
-.os{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:18px 0}
-.os div{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:.92rem}
-.os b{display:block}
-pre{margin:0;padding:14px 16px;background:#0b1220;color:#e8ecf3;border-radius:10px;overflow-x:auto;font-size:.9rem}
-.copy{display:flex;gap:10px;align-items:stretch;margin-top:10px}
-.copy pre{flex:1;min-width:0}
-.star{text-align:center;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:44px 20px;box-shadow:var(--shadow)}
-footer{padding:32px 0 48px;color:var(--muted);font-size:.9rem}
-footer a{color:var(--muted)}
-@media(min-width:760px){
-  .diff{grid-template-columns:1fr 1fr}
-  .grid{grid-template-columns:repeat(3,1fr)}
-  .two{grid-template-columns:.9fr 1.1fr;align-items:center}
-}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <header class="top">
-    <a class="brand" href="#"><img src="icon.png" alt="" width="30" height="30">JiraSync Hub</a>
-    <nav><a href="#how">How it works</a><a href="#features">Features</a><a href="#install">Install</a><a href="https://github.com/dvgamerr-app/jirasync-hub-app">GitHub</a></nav>
-  </header>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>JiraSync Hub — Jira on your desktop, offline-first</title>
+    <meta
+      name="description"
+      content="Pull your Jira tickets, edit and log work offline, and push back only the fields you changed. Desktop app for Windows, macOS and Linux."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="JiraSync Hub — Jira on your desktop, offline-first" />
+    <meta
+      property="og:description"
+      content="Pull your Jira tickets, edit and log work offline, and push back only the fields you changed."
+    />
+    <meta
+      property="og:image"
+      content="https://dvgamerr.app/jirasync-hub-app/screenshots/tasks.png"
+    />
+    <meta property="og:url" content="https://dvgamerr.app/jirasync-hub-app/" />
+    <link rel="icon" href="icon.png" />
+    <style>
+      :root {
+        --paper: #f6f3ec;
+        --card: #fffdf8;
+        --ink: #17202e;
+        --muted: #5b6574;
+        --line: #d9d3c4;
+        --blue: #1d4ed8;
+        --blue-ink: #fff;
+        --dirty: #c2410c;
+        --dirty-bg: #ffedd5;
+        --ok: #15803d;
+        --shadow: 0 1px 0 var(--line), 0 18px 40px -22px rgba(23, 32, 46, 0.35);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --paper: #0e131b;
+          --card: #151c27;
+          --ink: #e8ecf3;
+          --muted: #9aa5b6;
+          --line: #273244;
+          --blue: #6b9bff;
+          --blue-ink: #0b1220;
+          --dirty: #fdba74;
+          --dirty-bg: #3a2210;
+          --ok: #4ade80;
+          --shadow: 0 1px 0 var(--line), 0 18px 40px -22px rgba(0, 0, 0, 0.8);
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+        * {
+          animation: none !important;
+          transition: none !important;
+        }
+        .btn:hover {
+          transform: none;
+        }
+      }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font:
+          16px/1.6 system-ui,
+          -apple-system,
+          "Segoe UI",
+          Roboto,
+          sans-serif;
+        background-image: linear-gradient(var(--line) 1px, transparent 1px);
+        background-size: 100% 56px;
+      }
+      a {
+        color: var(--blue);
+      }
+      a:focus-visible,
+      button:focus-visible {
+        outline: 3px solid var(--blue);
+        outline-offset: 3px;
+        border-radius: 4px;
+      }
+      .wrap {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 0 16px;
+      }
+      .mono {
+        font-family: ui-monospace, "SF Mono", Consolas, monospace;
+      }
+      header.top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 18px 0;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 700;
+        text-decoration: none;
+        color: var(--ink);
+      }
+      .brand img {
+        width: 30px;
+        height: 30px;
+        border-radius: 7px;
+      }
+      .top nav a {
+        margin-right: 16px;
+        color: var(--muted);
+        text-decoration: none;
+        font-size: 0.95rem;
+      }
+      .top nav a:hover {
+        color: var(--ink);
+      }
+      .hero {
+        padding: 36px 0 28px;
+        display: grid;
+        gap: 32px;
+        grid-template-columns: 1fr;
+      }
+      .tag {
+        display: inline-block;
+        font-size: 0.8rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+        border: 1px solid var(--line);
+        padding: 3px 10px;
+        border-radius: 999px;
+        background: var(--card);
+      }
+      h1 {
+        font-size: clamp(2.1rem, 6vw, 3.7rem);
+        line-height: 1.08;
+        margin: 14px 0 14px;
+        letter-spacing: -0.02em;
+      }
+      h1 em {
+        font-style: normal;
+        background: linear-gradient(transparent 62%, var(--dirty-bg) 62%);
+      }
+      .lead {
+        font-size: 1.15rem;
+        color: var(--muted);
+        max-width: 34em;
+        margin: 0 0 24px;
+      }
+      .cta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 20px;
+        border-radius: 8px;
+        font-weight: 600;
+        text-decoration: none;
+        border: 1px solid var(--ink);
+        color: var(--ink);
+        background: transparent;
+        cursor: pointer;
+        font-size: 1rem;
+      }
+      .btn.primary {
+        background: var(--blue);
+        border-color: var(--blue);
+        color: var(--blue-ink);
+      }
+      .btn:hover {
+        transform: translateY(-1px);
+      }
+      .shot {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+      .shot img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      section {
+        padding: 48px 0;
+      }
+      h2 {
+        font-size: clamp(1.5rem, 4vw, 2.1rem);
+        margin: 0 0 8px;
+        letter-spacing: -0.01em;
+      }
+      .sub {
+        color: var(--muted);
+        margin: 0 0 28px;
+        max-width: 40em;
+      }
+      .diff {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: 1fr;
+      }
+      .panel {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: var(--shadow);
+      }
+      .panel h3 {
+        margin: 0 0 10px;
+        font-size: 1rem;
+      }
+      .row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 0;
+        border-top: 1px dashed var(--line);
+        font-size: 0.95rem;
+      }
+      .row:first-of-type {
+        border-top: 0;
+      }
+      .pill {
+        font-size: 0.75rem;
+        padding: 1px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .pill.sent {
+        color: var(--ok);
+        border-color: var(--ok);
+      }
+      .pill.dirty {
+        color: var(--dirty);
+        border-color: var(--dirty);
+        background: var(--dirty-bg);
+      }
+      .grid {
+        display: grid;
+        gap: 14px;
+        grid-template-columns: 1fr;
+      }
+      .feat {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 18px;
+      }
+      .feat b {
+        display: block;
+        margin-bottom: 4px;
+      }
+      .feat span {
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+      .two {
+        display: grid;
+        gap: 20px;
+        grid-template-columns: 1fr;
+      }
+      .steps {
+        counter-reset: s;
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: grid;
+        gap: 12px;
+      }
+      .steps li {
+        counter-increment: s;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 14px 16px 14px 56px;
+        position: relative;
+      }
+      .steps li::before {
+        content: counter(s);
+        position: absolute;
+        left: 14px;
+        top: 12px;
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        background: var(--blue);
+        color: var(--blue-ink);
+        display: grid;
+        place-items: center;
+        font-weight: 700;
+      }
+      .os {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        margin: 18px 0;
+      }
+      .os div {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 12px 14px;
+        font-size: 0.92rem;
+      }
+      .os b {
+        display: block;
+      }
+      pre {
+        margin: 0;
+        padding: 14px 16px;
+        background: #0b1220;
+        color: #e8ecf3;
+        border-radius: 10px;
+        overflow-x: auto;
+        font-size: 0.9rem;
+      }
+      .copy {
+        display: flex;
+        gap: 10px;
+        align-items: stretch;
+        margin-top: 10px;
+      }
+      .copy pre {
+        flex: 1;
+        min-width: 0;
+      }
+      .star {
+        text-align: center;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 44px 20px;
+        box-shadow: var(--shadow);
+      }
+      footer {
+        padding: 32px 0 48px;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      footer a {
+        color: var(--muted);
+      }
+      @media (min-width: 760px) {
+        .diff {
+          grid-template-columns: 1fr 1fr;
+        }
+        .grid {
+          grid-template-columns: repeat(3, 1fr);
+        }
+        .two {
+          grid-template-columns: 0.9fr 1.1fr;
+          align-items: center;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <a class="brand" href="#"
+          ><img src="icon.png" alt="" width="30" height="30" />JiraSync Hub</a
+        >
+        <nav>
+          <a href="#how">How it works</a><a href="#features">Features</a
+          ><a href="#install">Install</a
+          ><a href="https://github.com/dvgamerr-app/jirasync-hub-app">GitHub</a>
+        </nav>
+      </header>
 
-  <main>
-    <div class="hero">
-      <div>
-        <span class="tag">Windows · macOS · Linux</span>
-        <h1>Your Jira tickets, on your desktop, <em>even when Jira isn’t.</em></h1>
-        <p class="lead">Pull the tickets assigned to you, edit and log work offline, then push back only the fields you actually changed.</p>
-        <div class="cta">
-          <a class="btn primary" href="https://github.com/dvgamerr-app/jirasync-hub-app/releases/latest">Download latest release</a>
-          <a class="btn" href="https://github.com/dvgamerr-app/jirasync-hub-app">View on GitHub</a>
+      <main>
+        <div class="hero">
+          <div>
+            <span class="tag">Windows · macOS · Linux</span>
+            <h1>Your Jira tickets, on your desktop, <em>even when Jira isn’t.</em></h1>
+            <p class="lead">
+              Pull the tickets assigned to you, edit and log work offline, then push back only the
+              fields you actually changed.
+            </p>
+            <div class="cta">
+              <a
+                class="btn primary"
+                href="https://github.com/dvgamerr-app/jirasync-hub-app/releases/latest"
+                >Download latest release</a
+              >
+              <a class="btn" href="https://github.com/dvgamerr-app/jirasync-hub-app"
+                >View on GitHub</a
+              >
+            </div>
+          </div>
+          <div class="shot">
+            <img
+              src="screenshots/tasks.png"
+              alt="JiraSync Hub task table with a sidebar of projects with edited rows highlighted"
+            />
+          </div>
         </div>
-      </div>
-      <div class="shot"><img src="screenshots/tasks.png" alt="JiraSync Hub task table with a sidebar of projects with edited rows highlighted"></div>
-    </div>
 
-    <section id="how">
-      <h2>Edit freely. Push precisely.</h2>
-      <p class="sub">The app tracks changes per field. Logging an hour on a ticket sends the worklog and nothing else, so a stale local copy never overwrites someone’s priority or story points.</p>
-      <div class="diff">
-        <div class="panel">
-          <h3 class="mono">PLT-143 · what you changed</h3>
-          <div class="row"><span>Worklog +1h 30m</span><span class="pill dirty">not pushed</span></div>
-          <div class="row"><span>Note (local only)</span><span class="pill">stays local</span></div>
-        </div>
-        <div class="panel">
-          <h3 class="mono">PLT-143 · what Jira receives</h3>
-          <div class="row"><span>New worklog</span><span class="pill sent">sent</span></div>
-          <div class="row"><span>Priority, story points, estimate</span><span class="pill">untouched</span></div>
-        </div>
-      </div>
-    </section>
+        <section id="how">
+          <h2>Edit freely. Push precisely.</h2>
+          <p class="sub">
+            The app tracks changes per field. Logging an hour on a ticket sends the worklog and
+            nothing else, so a stale local copy never overwrites someone’s priority or story points.
+          </p>
+          <div class="diff">
+            <div class="panel">
+              <h3 class="mono">PLT-143 · what you changed</h3>
+              <div class="row">
+                <span>Worklog +1h 30m</span><span class="pill dirty">not pushed</span>
+              </div>
+              <div class="row">
+                <span>Note (local only)</span><span class="pill">stays local</span>
+              </div>
+            </div>
+            <div class="panel">
+              <h3 class="mono">PLT-143 · what Jira receives</h3>
+              <div class="row"><span>New worklog</span><span class="pill sent">sent</span></div>
+              <div class="row">
+                <span>Priority, story points, estimate</span><span class="pill">untouched</span>
+              </div>
+            </div>
+          </div>
+        </section>
 
-    <section id="features">
-      <h2>What you get</h2>
-      <p class="sub">Everything is stored locally first, and your Jira token lives in the OS credential store.</p>
-      <div class="grid">
-        <div class="feat"><b>Incremental sync</b><span>Hourly background pull of only what changed, plus a full sync on demand.</span></div>
-        <div class="feat"><b>Offline editing</b><span>Status, type, severity, story level, mandays, notes and worklogs.</span></div>
-        <div class="feat"><b>Selective push</b><span>Per task or all at once, with field-level change tracking.</span></div>
-        <div class="feat"><b>Honest time totals</b><span>Teammates’ worklogs are read-only and never counted in your totals.</span></div>
-        <div class="feat"><b>CSV export</b><span>Monthly worklog export that opens cleanly in Excel, with a warning for unpushed time.</span></div>
-        <div class="feat"><b>Multi-account</b><span>Several Jira Cloud sites, with story point fields mapped per project.</span></div>
-      </div>
-    </section>
+        <section id="features">
+          <h2>What you get</h2>
+          <p class="sub">
+            Everything is stored locally first, and your Jira token lives in the OS credential
+            store.
+          </p>
+          <div class="grid">
+            <div class="feat">
+              <b>Incremental sync</b
+              ><span>Hourly background pull of only what changed, plus a full sync on demand.</span>
+            </div>
+            <div class="feat">
+              <b>Offline editing</b
+              ><span>Status, type, severity, story level, mandays, notes and worklogs.</span>
+            </div>
+            <div class="feat">
+              <b>Selective push</b
+              ><span>Per task or all at once, with field-level change tracking.</span>
+            </div>
+            <div class="feat">
+              <b>Honest time totals</b
+              ><span>Teammates’ worklogs are read-only and never counted in your totals.</span>
+            </div>
+            <div class="feat">
+              <b>CSV export</b
+              ><span
+                >Monthly worklog export that opens cleanly in Excel, with a warning for unpushed
+                time.</span
+              >
+            </div>
+            <div class="feat">
+              <b>Multi-account</b
+              ><span>Several Jira Cloud sites, with story point fields mapped per project.</span>
+            </div>
+          </div>
+        </section>
 
-    <section>
-      <div class="two">
-        <div>
-          <h2>Task detail and worklogs</h2>
-          <p class="sub" style="margin:0">Open a ticket, log time with a live preview of how your input is read, and export the month as CSV when it’s time to report.</p>
-        </div>
-        <div class="shot"><img loading="lazy" src="screenshots/task-detail.png" alt="Task detail pane with mandays, note and worklogs"></div>
-      </div>
-    </section>
+        <section>
+          <div class="two">
+            <div>
+              <h2>Task detail and worklogs</h2>
+              <p class="sub" style="margin: 0">
+                Open a ticket, log time with a live preview of how your input is read, and export
+                the month as CSV when it’s time to report.
+              </p>
+            </div>
+            <div class="shot">
+              <img
+                loading="lazy"
+                src="screenshots/task-detail.png"
+                alt="Task detail pane with mandays, note and worklogs"
+              />
+            </div>
+          </div>
+        </section>
 
-    <section id="install">
-      <h2>Get started in four steps</h2>
-      <p class="sub">You need a Jira Cloud site (<span class="mono">*.atlassian.net</span>), your Atlassian email and an <a href="https://id.atlassian.net/manage-profile/security/api-tokens">API token</a>.</p>
-      <ol class="steps">
-        <li>Download the installer for your OS from <a href="https://github.com/dvgamerr-app/jirasync-hub-app/releases/latest">Releases</a>.</li>
-        <li>Open <b>Settings → Add Account</b>, enter instance, email and token, then <b>Save &amp; Connect</b>.</li>
-        <li>Press <b>Sync</b> to pull your projects, tasks and worklogs.</li>
-        <li>Edit tasks, then press the upload button to push only what changed.</li>
-      </ol>
-      <div class="os">
-        <div><b>Windows</b>.exe · .msi · portable .exe</div>
-        <div><b>macOS</b>.dmg (not notarised yet)</div>
-        <div><b>Linux</b>.AppImage · .deb</div>
-      </div>
-      <p class="sub" style="margin-bottom:0">Prefer building from source?</p>
-      <div class="copy">
-        <pre id="cmd" class="mono">git clone https://github.com/dvgamerr-app/jirasync-hub-app.git
+        <section id="install">
+          <h2>Get started in four steps</h2>
+          <p class="sub">
+            You need a Jira Cloud site (<span class="mono">*.atlassian.net</span>), your Atlassian
+            email and an
+            <a href="https://id.atlassian.net/manage-profile/security/api-tokens">API token</a>.
+          </p>
+          <ol class="steps">
+            <li>
+              Download the installer for your OS from
+              <a href="https://github.com/dvgamerr-app/jirasync-hub-app/releases/latest">Releases</a
+              >.
+            </li>
+            <li>
+              Open <b>Settings → Add Account</b>, enter instance, email and token, then
+              <b>Save &amp; Connect</b>.
+            </li>
+            <li>Press <b>Sync</b> to pull your projects, tasks and worklogs.</li>
+            <li>Edit tasks, then press the upload button to push only what changed.</li>
+          </ol>
+          <div class="os">
+            <div><b>Windows</b>.exe · .msi · portable .exe</div>
+            <div><b>macOS</b>.dmg (not notarised yet)</div>
+            <div><b>Linux</b>.AppImage · .deb</div>
+          </div>
+          <p class="sub" style="margin-bottom: 0">Prefer building from source?</p>
+          <div class="copy">
+            <pre id="cmd" class="mono">
+git clone https://github.com/dvgamerr-app/jirasync-hub-app.git
 cd jirasync-hub-app &amp;&amp; bun install &amp;&amp; bun tauri dev</pre>
-        <button class="btn" id="copy" type="button">Copy</button>
-      </div>
-    </section>
+            <button class="btn" id="copy" type="button">Copy</button>
+          </div>
+        </section>
 
-    <section>
-      <div class="star">
-        <h2>Saves you Jira clicks? Give it a star.</h2>
-        <p class="sub" style="margin:0 auto 20px">A star helps other Jira users find the project.</p>
-        <div class="cta" style="justify-content:center">
-          <a class="btn primary" href="https://github.com/dvgamerr-app/jirasync-hub-app">★ Star on GitHub <span id="stars" class="mono"></span></a>
-          <a class="btn" href="https://github.com/dvgamerr-app/jirasync-hub-app/issues">Report an issue</a>
-        </div>
-      </div>
-    </section>
-  </main>
+        <section>
+          <div class="star">
+            <h2>Saves you Jira clicks? Give it a star.</h2>
+            <p class="sub" style="margin: 0 auto 20px">
+              A star helps other Jira users find the project.
+            </p>
+            <div class="cta" style="justify-content: center">
+              <a class="btn primary" href="https://github.com/dvgamerr-app/jirasync-hub-app"
+                >★ Star on GitHub <span id="stars" class="mono"></span
+              ></a>
+              <a class="btn" href="https://github.com/dvgamerr-app/jirasync-hub-app/issues"
+                >Report an issue</a
+              >
+            </div>
+          </div>
+        </section>
+      </main>
 
-  <footer>
-    <a href="https://github.com/dvgamerr-app/jirasync-hub-app">dvgamerr-app/jirasync-hub-app</a> ·
-    <a href="https://github.com/dvgamerr-app/jirasync-hub-app/blob/main/README.th.md">ภาษาไทย</a><br>
-    Not affiliated with or endorsed by Atlassian. Jira is a trademark of Atlassian.
-  </footer>
-</div>
-<script>
-(function () {
-  var b = document.getElementById("copy"), c = document.getElementById("cmd");
-  b.addEventListener("click", function () {
-    var t = c.textContent;
-    var p = navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject();
-    p.then(function () {
-      b.textContent = "Copied";
-      setTimeout(function () { b.textContent = "Copy"; }, 1600);
-    }, function () {
-      var r = document.createRange(); r.selectNodeContents(c);
-      var s = getSelection(); s.removeAllRanges(); s.addRange(r);
-    });
-  });
-  try {
-    fetch("https://api.github.com/repos/dvgamerr-app/jirasync-hub-app")
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        if (typeof d.stargazers_count === "number") document.getElementById("stars").textContent = "· " + d.stargazers_count;
-      }).catch(function () {});
-  } catch (e) {}
-})();
-</script>
-</body>
+      <footer>
+        <a href="https://github.com/dvgamerr-app/jirasync-hub-app">dvgamerr-app/jirasync-hub-app</a>
+        ·
+        <a href="https://github.com/dvgamerr-app/jirasync-hub-app/blob/main/README.th.md">ภาษาไทย</a
+        ><br />
+        Not affiliated with or endorsed by Atlassian. Jira is a trademark of Atlassian.
+      </footer>
+    </div>
+    <script>
+      (function () {
+        var b = document.getElementById("copy"),
+          c = document.getElementById("cmd");
+        b.addEventListener("click", function () {
+          var t = c.textContent;
+          var p = navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject();
+          p.then(
+            function () {
+              b.textContent = "Copied";
+              setTimeout(function () {
+                b.textContent = "Copy";
+              }, 1600);
+            },
+            function () {
+              var r = document.createRange();
+              r.selectNodeContents(c);
+              var s = getSelection();
+              s.removeAllRanges();
+              s.addRange(r);
+            },
+          );
+        });
+        try {
+          fetch("https://api.github.com/repos/dvgamerr-app/jirasync-hub-app")
+            .then(function (r) {
+              return r.json();
+            })
+            .then(function (d) {
+              if (typeof d.stargazers_count === "number")
+                document.getElementById("stars").textContent = "· " + d.stargazers_count;
+            })
+            .catch(function () {});
+        } catch (e) {}
+      })();
+    </script>
+  </body>
 </html>
