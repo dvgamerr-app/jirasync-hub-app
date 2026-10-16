@@ -8,7 +8,8 @@
       name="description"
       content="Pull your Jira tickets, edit and log work offline, and push back only the fields you changed. Desktop app for Windows, macOS and Linux."
     />
-    <meta name="color-scheme" content="light dark" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0b0f17" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="JiraSync Hub — Jira on your desktop, offline-first" />
     <meta
@@ -20,57 +21,106 @@
       content="https://dvgamerr.app/jirasync-hub-app/screenshots/tasks.png"
     />
     <meta property="og:url" content="https://dvgamerr.app/jirasync-hub-app/" />
+    <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" href="icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=JetBrains+Mono:wght@400;600&display=swap"
+    />
+    <script>
+      // Apply the saved theme before first paint to avoid a flash.
+      try {
+        var saved = localStorage.getItem("theme");
+        if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
+      } catch (e) {}
+    </script>
     <style>
       :root {
-        --paper: #f6f3ec;
-        --card: #fffdf8;
-        --ink: #17202e;
-        --muted: #5b6574;
-        --line: #d9d3c4;
-        --blue: #1d4ed8;
-        --blue-ink: #fff;
-        --dirty: #c2410c;
-        --dirty-bg: #ffedd5;
-        --ok: #15803d;
-        --shadow: 0 1px 0 var(--line), 0 18px 40px -22px rgba(23, 32, 46, 0.35);
+        --bg: #0b0f17;
+        --bg-2: #0f1520;
+        --surface: #131a27;
+        --surface-2: #182132;
+        --line: #222c3d;
+        --line-strong: #2f3b52;
+        --ink: #e8edf5;
+        --muted: #8d97aa;
+        --faint: #5d6880;
+        --blue: #4a7dff;
+        --blue-2: #2563eb;
+        --blue-ink: #ffffff;
+        --blue-soft: rgba(74, 125, 255, 0.14);
+        --dirty: #fb923c;
+        --dirty-soft: rgba(251, 146, 60, 0.12);
+        --dirty-row: #24170e;
+        --ok: #4ade80;
+        --ok-soft: rgba(74, 222, 128, 0.12);
+        --code-bg: #080b12;
+        --code-key: #93b4ff;
+        --code-str: #a5e3b4;
+        --code-num: #fdba74;
+        --code-com: #5d6880;
+        --glow: rgba(74, 125, 255, 0.22);
+        --shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.75);
+        --display: "Bricolage Grotesque", system-ui, sans-serif;
+        --mono: "JetBrains Mono", ui-monospace, "SF Mono", Consolas, monospace;
       }
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --paper: #0e131b;
-          --card: #151c27;
-          --ink: #e8ecf3;
-          --muted: #9aa5b6;
-          --line: #273244;
-          --blue: #6b9bff;
-          --blue-ink: #0b1220;
-          --dirty: #fdba74;
-          --dirty-bg: #3a2210;
-          --ok: #4ade80;
-          --shadow: 0 1px 0 var(--line), 0 18px 40px -22px rgba(0, 0, 0, 0.8);
+      @media (prefers-color-scheme: light) {
+        :root:not([data-theme="dark"]) {
+          --bg: #f6f7fb;
+          --bg-2: #eef1f7;
+          --surface: #ffffff;
+          --surface-2: #f3f5fa;
+          --line: #e1e5ee;
+          --line-strong: #cbd2e0;
+          --ink: #111827;
+          --muted: #566074;
+          --faint: #8a93a6;
+          --blue: #2357e8;
+          --blue-2: #1d4ed8;
+          --blue-soft: rgba(35, 87, 232, 0.1);
+          --dirty: #c2410c;
+          --dirty-soft: rgba(234, 88, 12, 0.1);
+          --dirty-row: #fff4ea;
+          --ok: #15803d;
+          --ok-soft: rgba(21, 128, 61, 0.1);
+          --glow: rgba(35, 87, 232, 0.14);
+          --shadow: 0 30px 70px -34px rgba(17, 24, 39, 0.35);
         }
       }
+      :root[data-theme="light"] {
+        --bg: #f6f7fb;
+        --bg-2: #eef1f7;
+        --surface: #ffffff;
+        --surface-2: #f3f5fa;
+        --line: #e1e5ee;
+        --line-strong: #cbd2e0;
+        --ink: #111827;
+        --muted: #566074;
+        --faint: #8a93a6;
+        --blue: #2357e8;
+        --blue-2: #1d4ed8;
+        --blue-soft: rgba(35, 87, 232, 0.1);
+        --dirty: #c2410c;
+        --dirty-soft: rgba(234, 88, 12, 0.1);
+        --dirty-row: #fff4ea;
+        --ok: #15803d;
+        --ok-soft: rgba(21, 128, 61, 0.1);
+        --glow: rgba(35, 87, 232, 0.14);
+        --shadow: 0 30px 70px -34px rgba(17, 24, 39, 0.35);
+      }
+
       * {
         box-sizing: border-box;
       }
       html {
         scroll-behavior: smooth;
-      }
-      @media (prefers-reduced-motion: reduce) {
-        html {
-          scroll-behavior: auto;
-        }
-        * {
-          animation: none !important;
-          transition: none !important;
-        }
-        .btn:hover {
-          transform: none;
-        }
+        -webkit-text-size-adjust: 100%;
       }
       body {
         margin: 0;
-        background: var(--paper);
+        background: var(--bg);
         color: var(--ink);
         font:
           16px/1.6 system-ui,
@@ -78,211 +128,794 @@
           "Segoe UI",
           Roboto,
           sans-serif;
-        background-image: linear-gradient(
-          color-mix(in srgb, var(--line) 35%, transparent) 1px,
-          transparent 1px
-        );
-        background-size: 100% 56px;
+      }
+      /* Decorative layer behind the hero; clipped so it never causes horizontal scroll. */
+      .bg {
+        position: absolute;
+        inset: 0 0 auto 0;
+        height: 1100px;
+        overflow: hidden;
+        pointer-events: none;
+        z-index: 0;
+      }
+      /* Faint grid that fades out below the hero. */
+      .bg::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(var(--line) 1px, transparent 1px),
+          linear-gradient(90deg, var(--line) 1px, transparent 1px);
+        background-size: 48px 48px;
+        opacity: 0.45;
+        mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, #000 30%, transparent 75%);
+        -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, #000 30%, transparent 75%);
+      }
+      .bg::after {
+        content: "";
+        position: absolute;
+        top: -260px;
+        left: 50%;
+        width: 1100px;
+        height: 700px;
+        transform: translateX(-50%);
+        background: radial-gradient(closest-side, var(--glow), transparent);
       }
       a {
         color: var(--blue);
       }
       a:focus-visible,
-      button:focus-visible {
-        outline: 3px solid var(--blue);
-        outline-offset: 3px;
-        border-radius: 4px;
+      button:focus-visible,
+      select:focus-visible,
+      input:focus-visible,
+      textarea:focus-visible {
+        outline: 2px solid var(--blue);
+        outline-offset: 2px;
       }
       .wrap {
-        max-width: 1080px;
+        position: relative;
+        z-index: 1;
+        max-width: 1160px;
         margin: 0 auto;
         padding: 0 16px;
       }
       .mono {
-        font-family: ui-monospace, "SF Mono", Consolas, monospace;
+        font-family: var(--mono);
       }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+      }
+
+      /* ── Header ─────────────────────────────────────────── */
       header.top {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        flex-wrap: wrap;
-        gap: 8px;
+        gap: 12px;
         padding: 18px 0;
       }
       .brand {
         display: flex;
         align-items: center;
         gap: 10px;
+        font-family: var(--display);
         font-weight: 700;
+        font-size: 1.08rem;
         text-decoration: none;
         color: var(--ink);
+        flex-shrink: 0;
       }
       .brand img {
         width: 30px;
         height: 30px;
-        border-radius: 7px;
+        border-radius: 8px;
       }
-      .top nav a {
-        margin-right: 16px;
+      .top nav {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .top nav a.link {
+        padding: 6px 10px;
+        border-radius: 8px;
         color: var(--muted);
         text-decoration: none;
-        font-size: 0.95rem;
+        font-size: 0.94rem;
       }
-      .top nav a:hover {
+      .top nav a.link:hover {
+        color: var(--ink);
+        background: var(--surface);
+      }
+      .icon-btn {
+        display: inline-grid;
+        place-items: center;
+        width: 36px;
+        height: 36px;
+        border-radius: 9px;
+        border: 1px solid var(--line);
+        background: var(--surface);
+        color: var(--muted);
+        cursor: pointer;
+      }
+      .icon-btn:hover {
         color: var(--ink);
       }
-      .hero {
-        padding: 36px 0 28px;
-        display: grid;
-        gap: 32px;
-        grid-template-columns: 1fr;
+      .icon-btn svg {
+        width: 17px;
+        height: 17px;
       }
-      .tag {
-        display: inline-block;
-        font-size: 0.8rem;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--muted);
+      .gh-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 36px;
+        padding: 0 12px;
+        border-radius: 9px;
         border: 1px solid var(--line);
-        padding: 3px 10px;
+        background: var(--surface);
+        color: var(--ink);
+        text-decoration: none;
+        font-size: 0.9rem;
+        font-weight: 600;
+      }
+      .gh-pill svg {
+        width: 16px;
+        height: 16px;
+      }
+      .gh-pill .count {
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 0.8rem;
+      }
+      .gh-pill .count:empty {
+        display: none;
+      }
+
+      /* ── Buttons ────────────────────────────────────────── */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 9px;
+        padding: 12px 20px;
+        border-radius: 10px;
+        font:
+          600 0.98rem/1.2 system-ui,
+          sans-serif;
+        text-decoration: none;
+        border: 1px solid var(--line-strong);
+        color: var(--ink);
+        background: var(--surface);
+        cursor: pointer;
+        transition:
+          transform 0.15s ease,
+          background 0.15s ease,
+          border-color 0.15s ease;
+      }
+      .btn:hover {
+        transform: translateY(-1px);
+        border-color: var(--faint);
+      }
+      .btn svg {
+        width: 18px;
+        height: 18px;
+      }
+      .btn.primary {
+        background: linear-gradient(180deg, var(--blue), var(--blue-2));
+        border-color: transparent;
+        color: var(--blue-ink);
+        box-shadow:
+          0 1px 0 rgba(255, 255, 255, 0.25) inset,
+          0 10px 30px -10px var(--blue);
+      }
+      .btn.small {
+        padding: 8px 14px;
+        font-size: 0.88rem;
+      }
+
+      /* ── Hero ───────────────────────────────────────────── */
+      .hero {
+        padding: 48px 0 24px;
+        text-align: center;
+      }
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 12px 5px 6px;
         border-radius: 999px;
-        background: var(--card);
+        border: 1px solid var(--line);
+        background: var(--surface);
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+      .eyebrow b {
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: var(--blue-soft);
+        color: var(--blue);
+        font-size: 0.75rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
       }
       h1 {
-        font-size: clamp(2.1rem, 6vw, 3.7rem);
-        line-height: 1.08;
-        margin: 14px 0 14px;
-        letter-spacing: -0.02em;
+        font-family: var(--display);
+        font-weight: 800;
+        font-size: clamp(2.4rem, 7.2vw, 4.9rem);
+        line-height: 1;
+        letter-spacing: -0.035em;
+        margin: 22px auto 20px;
+        max-width: 13em;
       }
-      h1 em {
-        font-style: normal;
-        background: linear-gradient(transparent 62%, var(--dirty-bg) 62%);
+      h1 .strike {
+        position: relative;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      h1 .strike::after {
+        content: "";
+        position: absolute;
+        left: -2%;
+        right: -2%;
+        top: 54%;
+        height: 0.09em;
+        background: var(--dirty);
+        border-radius: 4px;
+        transform: rotate(-2deg);
+        transform-origin: left;
+        animation: strike 0.7s 0.5s cubic-bezier(0.6, 0, 0.2, 1) both;
+      }
+      @keyframes strike {
+        from {
+          transform: rotate(-2deg) scaleX(0);
+        }
+      }
+      h1 .accent {
+        background: linear-gradient(100deg, var(--blue), #8b5cf6 120%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
       }
       .lead {
-        font-size: 1.15rem;
+        font-size: clamp(1.05rem, 2.2vw, 1.22rem);
         color: var(--muted);
-        max-width: 34em;
-        margin: 0 0 24px;
+        max-width: 36em;
+        margin: 0 auto 30px;
       }
       .cta {
         display: flex;
         flex-wrap: wrap;
         gap: 12px;
+        justify-content: center;
       }
-      .btn {
+      .platforms {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 6px 18px;
+        margin-top: 20px;
+        color: var(--faint);
+        font-size: 0.88rem;
+      }
+      .platforms span {
         display: inline-flex;
         align-items: center;
-        gap: 8px;
-        padding: 12px 20px;
-        border-radius: 8px;
-        font-weight: 600;
-        text-decoration: none;
-        border: 1px solid var(--ink);
-        color: var(--ink);
-        background: transparent;
-        cursor: pointer;
-        font-size: 1rem;
+        gap: 6px;
       }
-      .btn.primary {
-        background: var(--blue);
-        border-color: var(--blue);
-        color: var(--blue-ink);
+      .platforms svg {
+        width: 15px;
+        height: 15px;
       }
-      .btn:hover {
-        transform: translateY(-1px);
+
+      /* App window mockup around the screenshot */
+      .stage {
+        position: relative;
+        margin: 56px auto 0;
+        max-width: 1080px;
       }
-      .shot {
-        background: var(--card);
-        border: 1px solid var(--line);
-        border-radius: 12px;
+      .window {
+        position: relative;
+        border-radius: 14px;
+        border: 1px solid var(--line-strong);
+        background: var(--surface);
         box-shadow: var(--shadow);
         overflow: hidden;
       }
-      .shot img {
+      .window img {
         display: block;
         width: 100%;
         height: auto;
       }
+      .window .shot-light {
+        display: none;
+      }
+      @media (prefers-color-scheme: light) {
+        :root:not([data-theme="dark"]) .window .shot-dark {
+          display: none;
+        }
+        :root:not([data-theme="dark"]) .window .shot-light {
+          display: block;
+        }
+      }
+      :root[data-theme="light"] .window .shot-dark {
+        display: none;
+      }
+      :root[data-theme="light"] .window .shot-light {
+        display: block;
+      }
+      .float {
+        position: absolute;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        border-radius: 12px;
+        border: 1px solid var(--line-strong);
+        background: color-mix(in srgb, var(--surface) 88%, transparent);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.6);
+        font-size: 0.86rem;
+        text-align: left;
+        animation: bob 6s ease-in-out infinite;
+      }
+      .float small {
+        display: block;
+        color: var(--muted);
+        font-size: 0.76rem;
+      }
+      .float .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .float.f1 {
+        left: -28px;
+        top: 22%;
+      }
+      .float.f1 .dot {
+        background: var(--dirty);
+        box-shadow: 0 0 0 4px var(--dirty-soft);
+      }
+      .float.f2 {
+        right: -28px;
+        bottom: 16%;
+        animation-delay: -3s;
+      }
+      .float.f2 .dot {
+        background: var(--ok);
+        box-shadow: 0 0 0 4px var(--ok-soft);
+      }
+      @keyframes bob {
+        50% {
+          transform: translateY(-8px);
+        }
+      }
+
+      /* ── Sections ───────────────────────────────────────── */
       section {
-        padding: 48px 0;
+        padding: 88px 0 0;
+      }
+      .kicker {
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--blue);
+        margin: 0 0 12px;
       }
       h2 {
-        font-size: clamp(1.5rem, 4vw, 2.1rem);
-        margin: 0 0 8px;
-        letter-spacing: -0.01em;
+        font-family: var(--display);
+        font-weight: 800;
+        font-size: clamp(1.85rem, 4.6vw, 3rem);
+        line-height: 1.05;
+        letter-spacing: -0.03em;
+        margin: 0 0 14px;
+        max-width: 18em;
       }
       .sub {
         color: var(--muted);
-        margin: 0 0 28px;
+        margin: 0 0 36px;
         max-width: 40em;
+        font-size: 1.05rem;
       }
-      .diff {
+
+      /* ── Interactive push demo ──────────────────────────── */
+      .demo {
         display: grid;
         gap: 16px;
         grid-template-columns: 1fr;
       }
-      .panel {
-        background: var(--card);
+      .card {
+        background: var(--surface);
         border: 1px solid var(--line);
-        border-radius: 12px;
-        padding: 20px;
-        box-shadow: var(--shadow);
+        border-radius: 14px;
+        overflow: hidden;
       }
-      .panel h3 {
-        margin: 0 0 10px;
-        font-size: 1rem;
-      }
-      .row {
+      .card-head {
         display: flex;
-        justify-content: space-between;
         align-items: center;
+        justify-content: space-between;
         gap: 10px;
-        padding: 7px 0;
-        border-top: 1px dashed var(--line);
-        font-size: 0.95rem;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface-2);
+        font-size: 0.88rem;
+        color: var(--muted);
       }
-      .row:first-of-type {
-        border-top: 0;
+      .card-head .key {
+        font-family: var(--mono);
+        color: var(--ink);
       }
-      .pill {
-        font-size: 0.75rem;
-        padding: 1px 8px;
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 2px 9px;
         border-radius: 999px;
-        border: 1px solid var(--line);
+        font-size: 0.76rem;
+        font-weight: 600;
+        border: 1px solid var(--line-strong);
         color: var(--muted);
         white-space: nowrap;
       }
-      .pill.sent {
-        color: var(--ok);
-        border-color: var(--ok);
-      }
-      .pill.dirty {
+      .badge.dirty {
         color: var(--dirty);
-        border-color: var(--dirty);
-        background: var(--dirty-bg);
+        border-color: color-mix(in srgb, var(--dirty) 50%, transparent);
+        background: var(--dirty-soft);
       }
-      .grid {
+      .badge.ok {
+        color: var(--ok);
+        border-color: color-mix(in srgb, var(--ok) 50%, transparent);
+        background: var(--ok-soft);
+      }
+      .task-title {
+        padding: 16px 16px 4px;
+        font-weight: 600;
+        font-size: 1.05rem;
+      }
+      .fields {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        padding: 12px 16px 16px;
+      }
+      .field {
+        position: relative;
+        display: grid;
+        gap: 5px;
+        min-width: 0;
+      }
+      .field.wide {
+        grid-column: 1 / -1;
+      }
+      .field label {
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+      .field label i {
+        font-style: normal;
+        text-transform: none;
+        letter-spacing: 0;
+        font-weight: 400;
+      }
+      .field select,
+      .field input,
+      .field textarea {
+        width: 100%;
+        min-width: 0;
+        padding: 9px 11px;
+        border-radius: 9px;
+        border: 1px solid var(--line-strong);
+        background: var(--bg-2);
+        color: var(--ink);
+        font: inherit;
+        font-size: 0.95rem;
+      }
+      .field textarea {
+        resize: vertical;
+        min-height: 64px;
+      }
+      .field.is-dirty select,
+      .field.is-dirty input {
+        border-color: color-mix(in srgb, var(--dirty) 70%, transparent);
+        background: var(--dirty-row);
+      }
+      .field.is-dirty label::after {
+        content: " · edited";
+        color: var(--dirty);
+        text-transform: none;
+        letter-spacing: 0;
+      }
+      .hint {
+        font-size: 0.78rem;
+        color: var(--faint);
+        font-family: var(--mono);
+        min-height: 1.2em;
+      }
+      .hint.bad {
+        color: var(--dirty);
+      }
+      .worklogs {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        padding: 0 16px 16px;
+      }
+      .wl {
+        font-family: var(--mono);
+        font-size: 0.8rem;
+        padding: 4px 9px;
+        border-radius: 7px;
+        border: 1px dashed color-mix(in srgb, var(--dirty) 60%, transparent);
+        color: var(--dirty);
+        background: var(--dirty-soft);
+      }
+      .card-foot {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        padding: 12px 16px;
+        border-top: 1px solid var(--line);
+      }
+
+      .terminal {
+        display: flex;
+        flex-direction: column;
+        background: var(--code-bg);
+        border-color: #1b2333;
+        color: #d6deeb;
+      }
+      .terminal .card-head {
+        background: #0d121c;
+        border-color: #1b2333;
+        color: #7f8aa0;
+      }
+      .terminal .card-head .key {
+        color: #d6deeb;
+      }
+      .lights {
+        display: flex;
+        gap: 6px;
+      }
+      .lights i {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #2a3446;
+      }
+      .payload {
+        flex: 1;
+        margin: 0;
+        padding: 16px;
+        overflow-x: auto;
+        font: 0.84rem/1.65 var(--mono);
+        white-space: pre;
+        min-height: 320px;
+      }
+      .payload .req {
+        display: block;
+        color: #fff;
+        font-weight: 600;
+      }
+      .payload .verb {
+        display: inline-block;
+        min-width: 3.4em;
+        padding: 0 6px;
+        margin-right: 6px;
+        border-radius: 4px;
+        background: #1e3a8a;
+        color: #bfdbfe;
+        text-align: center;
+      }
+      .payload .verb.post {
+        background: #14532d;
+        color: #bbf7d0;
+      }
+      .payload .k {
+        color: var(--code-key);
+      }
+      .payload .s {
+        color: var(--code-str);
+      }
+      .payload .n {
+        color: var(--code-num);
+      }
+      .payload .c {
+        color: var(--code-com);
+      }
+      .payload.flash {
+        animation: flash 0.5s ease;
+      }
+      @keyframes flash {
+        from {
+          background: rgba(74, 125, 255, 0.1);
+        }
+      }
+      .term-foot {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 16px;
+        padding: 10px 16px;
+        border-top: 1px solid #1b2333;
+        font: 0.78rem var(--mono);
+        color: #7f8aa0;
+      }
+      .term-foot b {
+        color: #d6deeb;
+        font-weight: 600;
+      }
+
+      /* ── Feature bento ──────────────────────────────────── */
+      .bento {
         display: grid;
         gap: 14px;
         grid-template-columns: 1fr;
       }
-      .feat {
-        background: var(--card);
+      .tile {
+        position: relative;
+        padding: 22px;
+        border-radius: 14px;
         border: 1px solid var(--line);
+        background: var(--surface);
+        overflow: hidden;
+      }
+      .tile .ic {
+        display: grid;
+        place-items: center;
+        width: 38px;
+        height: 38px;
         border-radius: 10px;
-        padding: 18px;
+        background: var(--blue-soft);
+        color: var(--blue);
+        margin-bottom: 14px;
       }
-      .feat b {
-        display: block;
-        margin-bottom: 4px;
+      .tile .ic svg {
+        width: 20px;
+        height: 20px;
       }
-      .feat span {
+      .tile h3 {
+        font-family: var(--display);
+        font-size: 1.2rem;
+        letter-spacing: -0.01em;
+        margin: 0 0 6px;
+      }
+      .tile p {
+        margin: 0;
         color: var(--muted);
         font-size: 0.95rem;
       }
-      .two {
+      .tile.hero-tile {
+        background:
+          radial-gradient(120% 90% at 100% 0%, var(--blue-soft), transparent 60%), var(--surface);
+      }
+      .flow {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 18px;
+        font: 0.8rem var(--mono);
+      }
+      .flow span {
+        padding: 6px 10px;
+        border-radius: 8px;
+        border: 1px solid var(--line-strong);
+        background: var(--bg-2);
+      }
+      .flow em {
+        font-style: normal;
+        color: var(--faint);
+      }
+
+      .synclog {
+        list-style: none;
+        margin: 20px 0 0;
+        padding: 0;
         display: grid;
-        gap: 20px;
+        gap: 8px;
+      }
+      .synclog li {
+        display: grid;
+        grid-template-columns: 3.4em 9.5em 1fr;
+        align-items: center;
+        gap: 12px;
+        padding: 9px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: var(--bg-2);
+        font-size: 0.86rem;
+      }
+      .synclog li span {
+        color: var(--faint);
+        font-size: 0.8rem;
+      }
+      .synclog li b {
+        font-weight: 600;
+      }
+      .synclog li b::before {
+        content: "";
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        margin-right: 8px;
+        border-radius: 50%;
+        background: var(--ok);
+        vertical-align: 1px;
+      }
+      .synclog li em {
+        font-style: normal;
+        color: var(--muted);
+      }
+      .synclog li.off {
+        border-color: color-mix(in srgb, var(--dirty) 40%, transparent);
+        background: var(--dirty-row);
+      }
+      .synclog li.off b::before {
+        background: var(--dirty);
+      }
+      @media (max-width: 520px) {
+        .synclog li {
+          grid-template-columns: 3.4em 1fr;
+        }
+        .synclog li em {
+          grid-column: 2;
+        }
+      }
+
+      /* Let grid columns shrink below their long code lines. */
+      .demo > *,
+      .install > * {
+        min-width: 0;
+      }
+
+      /* ── Gallery ────────────────────────────────────────── */
+      .tabs {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 4px;
+        border-radius: 12px;
+        border: 1px solid var(--line);
+        background: var(--surface);
+        margin-bottom: 18px;
+      }
+      .tabs button {
+        padding: 8px 14px;
+        border: 0;
+        border-radius: 9px;
+        background: transparent;
+        color: var(--muted);
+        font:
+          600 0.9rem system-ui,
+          sans-serif;
+        cursor: pointer;
+      }
+      .tabs button[aria-selected="true"] {
+        background: var(--surface-2);
+        color: var(--ink);
+        box-shadow: 0 0 0 1px var(--line-strong);
+      }
+      .gallery-cap {
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin: 14px 0 0;
+      }
+
+      /* ── Install ────────────────────────────────────────── */
+      .install {
+        display: grid;
+        gap: 24px;
         grid-template-columns: 1fr;
       }
       .steps {
@@ -291,91 +924,193 @@
         padding: 0;
         margin: 0;
         display: grid;
-        gap: 12px;
+        gap: 0;
       }
       .steps li {
         counter-increment: s;
-        background: var(--card);
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        padding: 14px 16px 14px 56px;
         position: relative;
+        padding: 0 0 22px 52px;
       }
       .steps li::before {
         content: counter(s);
         position: absolute;
-        left: 14px;
-        top: 12px;
-        width: 30px;
-        height: 30px;
-        border-radius: 50%;
-        background: var(--blue);
-        color: var(--blue-ink);
+        left: 0;
+        top: -2px;
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+        background: var(--surface);
+        border: 1px solid var(--line-strong);
+        color: var(--blue);
+        font: 700 0.95rem var(--mono);
         display: grid;
         place-items: center;
-        font-weight: 700;
+      }
+      .steps li::after {
+        content: "";
+        position: absolute;
+        left: 17px;
+        top: 36px;
+        bottom: 4px;
+        width: 1px;
+        background: var(--line-strong);
+      }
+      .steps li:last-child::after {
+        display: none;
+      }
+      .steps b {
+        display: block;
+      }
+      .steps span {
+        color: var(--muted);
+        font-size: 0.95rem;
       }
       .os {
         display: grid;
         gap: 10px;
         grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        margin: 18px 0;
+        margin-bottom: 18px;
       }
-      .os div {
-        background: var(--card);
+      .os a {
+        display: block;
+        padding: 14px;
+        border-radius: 12px;
         border: 1px solid var(--line);
-        border-radius: 10px;
-        padding: 12px 14px;
-        font-size: 0.92rem;
+        background: var(--surface);
+        color: var(--ink);
+        text-decoration: none;
+        font-size: 0.88rem;
+        transition: border-color 0.15s ease;
+      }
+      .os a:hover {
+        border-color: var(--blue);
+      }
+      .os svg {
+        width: 22px;
+        height: 22px;
+        margin-bottom: 8px;
+        color: var(--muted);
       }
       .os b {
         display: block;
+        font-size: 1rem;
       }
-      pre {
-        margin: 0;
-        padding: 14px 16px;
-        background: #0b1220;
-        color: #e8ecf3;
-        border-radius: 10px;
-        overflow-x: auto;
-        font-size: 0.9rem;
+      .os span {
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 0.78rem;
       }
       .copy {
-        display: flex;
-        gap: 10px;
-        align-items: stretch;
-        margin-top: 10px;
+        position: relative;
       }
       .copy pre {
-        flex: 1;
-        min-width: 0;
+        margin: 0;
+        padding: 16px 92px 16px 16px;
+        background: var(--code-bg);
+        color: #d6deeb;
+        border: 1px solid #1b2333;
+        border-radius: 12px;
+        overflow-x: auto;
+        font: 0.84rem/1.7 var(--mono);
       }
+      .copy pre .c {
+        color: var(--code-com);
+        user-select: none;
+      }
+      .copy button {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        padding: 6px 12px;
+        border-radius: 8px;
+        border: 1px solid #2a3446;
+        background: #131a27;
+        color: #d6deeb;
+        font:
+          600 0.8rem system-ui,
+          sans-serif;
+        cursor: pointer;
+      }
+
+      /* ── Star CTA + footer ──────────────────────────────── */
       .star {
+        position: relative;
         text-align: center;
-        background: var(--card);
+        padding: 64px 20px;
+        border-radius: 20px;
         border: 1px solid var(--line);
-        border-radius: 16px;
-        padding: 44px 20px;
-        box-shadow: var(--shadow);
+        background:
+          radial-gradient(60% 120% at 50% 0%, var(--blue-soft), transparent 70%), var(--surface);
+        overflow: hidden;
+      }
+      .star h2 {
+        margin: 0 auto 12px;
+      }
+      .star .sub {
+        margin: 0 auto 28px;
       }
       footer {
-        padding: 32px 0 48px;
-        color: var(--muted);
-        font-size: 0.9rem;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 48px 0 56px;
+        color: var(--faint);
+        font-size: 0.88rem;
       }
       footer a {
         color: var(--muted);
       }
-      @media (min-width: 760px) {
-        .diff {
-          grid-template-columns: 1fr 1fr;
+
+      @media (min-width: 860px) {
+        .demo {
+          grid-template-columns: 1fr 1.08fr;
+          align-items: stretch;
         }
-        .grid {
+        .bento {
           grid-template-columns: repeat(3, 1fr);
         }
-        .two {
-          grid-template-columns: 0.9fr 1.1fr;
-          align-items: center;
+        .bento .span2 {
+          grid-column: span 2;
+          grid-row: span 2;
+        }
+        .install {
+          grid-template-columns: 1fr 1.1fr;
+          gap: 48px;
+        }
+      }
+      @media (max-width: 760px) {
+        .top nav a.link {
+          display: none;
+        }
+        .float {
+          display: none;
+        }
+        .hero {
+          padding-top: 28px;
+        }
+        .stage {
+          margin-top: 40px;
+        }
+        section {
+          padding-top: 64px;
+        }
+        .fields {
+          grid-template-columns: 1fr;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+        *,
+        *::before,
+        *::after {
+          animation: none !important;
+          transition: none !important;
+        }
+        .btn:hover {
+          transform: none;
         }
       }
     </style>
@@ -409,171 +1144,471 @@
     </script>
   </head>
   <body>
+    <div class="bg" aria-hidden="true"></div>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <symbol id="i-github" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.39-5.26 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"
+        />
+      </symbol>
+      <symbol
+        id="i-download"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M12 3v12m0 0 5-5m-5 5-5-5M4 19h16" />
+      </symbol>
+      <symbol id="i-windows" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          d="M3 5.5 10.5 4.4v7.1H3zm0 13 7.5 1.1v-7H3zm8.5 1.3L21 21v-8.4h-9.5zm0-15.6v7.3H21V3z"
+        />
+      </symbol>
+      <symbol id="i-apple" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          d="M16.4 12.6c0-2.6 2.1-3.8 2.2-3.9a4.8 4.8 0 0 0-3.8-2c-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.4-.9a5 5 0 0 0-4.2 2.6c-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.6 1.3-.1 1.8-.8 3.3-.8s2 .8 3.4.8c1.4 0 2.3-1.3 3.1-2.5a11 11 0 0 0 1.4-2.9 4.5 4.5 0 0 1-2.6-4.1ZM13.9 5a4.4 4.4 0 0 0 1-3.2 4.5 4.5 0 0 0-2.9 1.5 4.2 4.2 0 0 0-1.1 3.1A3.8 3.8 0 0 0 13.9 5Z"
+        />
+      </symbol>
+      <symbol id="i-linux" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          d="M12 2c-2.2 0-3.6 1.8-3.6 4.4 0 1.6.5 2.6.2 3.9-.4 1.6-2.6 3.6-3 6.1-.3 1.6.4 2.4 1.2 2.6-.2.9.4 2.4 2.4 2.4 1.1 0 2-.6 2.8-.6s1.7.6 2.8.6c2 0 2.6-1.5 2.4-2.4.8-.2 1.5-1 1.2-2.6-.4-2.5-2.6-4.5-3-6.1-.3-1.3.2-2.3.2-3.9C15.6 3.8 14.2 2 12 2Zm-1.4 4.2c.4 0 .7.4.7 1s-.3 1-.7 1-.7-.4-.7-1 .3-1 .7-1Zm2.8 0c.4 0 .7.4.7 1s-.3 1-.7 1-.7-.4-.7-1 .3-1 .7-1ZM12 9.2c.9 0 1.9.5 1.9.9s-1 1-1.9 1-1.9-.6-1.9-1 1-.9 1.9-.9Z"
+        />
+      </symbol>
+      <symbol
+        id="i-sun"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+      >
+        <circle cx="12" cy="12" r="4" />
+        <path
+          d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
+        />
+      </symbol>
+    </svg>
+
     <div class="wrap">
       <header class="top">
         <a class="brand" href="#"
           ><img src="icon.png" alt="" width="30" height="30" />JiraSync Hub</a
         >
-        <nav>
-          <a href="#how">How it works</a><a href="#features">Features</a
-          ><a href="#install">Install</a
-          ><a href="https://github.com/dvgamerr-app/jirasync-hub-app">GitHub</a>
+        <nav aria-label="Main">
+          <a class="link" href="#demo">How it works</a>
+          <a class="link" href="#features">Features</a>
+          <a class="link" href="#install">Install</a>
+          <button class="icon-btn" id="theme" type="button" aria-label="Toggle colour theme">
+            <svg><use href="#i-sun" /></svg>
+          </button>
+          <a class="gh-pill" href="https://github.com/dvgamerr-app/jirasync-hub-app"
+            ><svg><use href="#i-github" /></svg>Star<span class="count" data-stars></span
+          ></a>
         </nav>
       </header>
 
       <main>
         <div class="hero">
-          <div>
-            <span class="tag">Windows · macOS · Linux</span>
-            <h1>Your Jira tickets, on your desktop, <em>even when Jira isn’t.</em></h1>
-            <p class="lead">
-              Pull the tickets assigned to you, edit and log work offline, then push back only the
-              fields you actually changed.
-            </p>
-            <div class="cta">
-              <a
-                class="btn primary"
-                href="https://github.com/dvgamerr-app/jirasync-hub-app/releases/latest"
-                >Download latest release</a
-              >
-              <a class="btn" href="https://github.com/dvgamerr-app/jirasync-hub-app"
-                >View on GitHub</a
-              >
-            </div>
+          <span class="eyebrow"><b>Free</b> Open-source desktop app for Jira Cloud</span>
+          <h1>
+            Stop waiting on <span class="strike">Jira</span>.
+            <span class="accent">Work offline, push what changed.</span>
+          </h1>
+          <p class="lead">
+            Pull the tickets assigned to you into a fast local table. Edit status, estimates and
+            worklogs without a connection, then send back only the fields you actually touched.
+          </p>
+          <div class="cta">
+            <a
+              class="btn primary"
+              href="https://github.com/dvgamerr-app/jirasync-hub-app/releases/latest"
+              ><svg><use href="#i-download" /></svg>Download latest release</a
+            >
+            <a class="btn" href="#demo">Try the push demo</a>
           </div>
-          <div class="shot">
-            <img
-              src="screenshots/tasks.png"
-              alt="JiraSync Hub task table with a sidebar of projects with edited rows highlighted"
-            />
+          <div class="platforms">
+            <span
+              ><svg><use href="#i-windows" /></svg>Windows</span
+            >
+            <span
+              ><svg><use href="#i-apple" /></svg>macOS</span
+            >
+            <span
+              ><svg><use href="#i-linux" /></svg>Linux</span
+            >
+          </div>
+
+          <div class="stage">
+            <div class="window">
+              <img
+                class="shot-dark"
+                src="screenshots/tasks.png"
+                width="2880"
+                height="1800"
+                alt="JiraSync Hub task table: projects in the sidebar, edited rows highlighted in orange"
+              />
+              <img
+                class="shot-light"
+                src="screenshots/tasks-light.png"
+                width="2880"
+                height="1800"
+                loading="lazy"
+                alt="JiraSync Hub task table in the light theme"
+              />
+            </div>
+            <div class="float f1" aria-hidden="true">
+              <span class="dot"></span>
+              <div>2 tasks not pushed<small>Saved locally · Jira unreachable</small></div>
+            </div>
+            <div class="float f2" aria-hidden="true">
+              <span class="dot"></span>
+              <div>Pushed 1 field<small>SHOP-103 · worklog +3h</small></div>
+            </div>
           </div>
         </div>
 
-        <section id="how">
-          <h2>Edit freely. Push precisely.</h2>
+        <section id="demo">
+          <p class="kicker">// field-level push</p>
+          <h2>Edit freely. Jira only hears about what changed.</h2>
           <p class="sub">
-            The app tracks changes per field. Logging an hour on a ticket sends the worklog and
-            nothing else, so a stale local copy never overwrites someone’s priority or story points.
+            Change anything on this ticket and watch the exact requests the app would send. A stale
+            local copy never overwrites a teammate’s priority or story points.
           </p>
-          <div class="diff">
-            <div class="panel">
-              <h3 class="mono">PLT-143 · what you changed</h3>
-              <div class="row">
-                <span>Worklog +1h 30m</span><span class="pill dirty">not pushed</span>
+          <div class="demo">
+            <div class="card">
+              <div class="card-head">
+                <span>Storefront Platform · <span class="key">SHOP-101</span></span>
+                <span class="badge" id="dirty-badge">Up to date</span>
               </div>
-              <div class="row">
-                <span>Note (local only)</span><span class="pill">stays local</span>
+              <div class="task-title">Redesign checkout flow</div>
+              <div class="fields">
+                <div class="field" data-field="type">
+                  <label for="f-type">Type</label>
+                  <select id="f-type">
+                    <option>Story</option>
+                    <option>Task</option>
+                    <option>Bug</option>
+                  </select>
+                </div>
+                <div class="field" data-field="status">
+                  <label for="f-status">Status</label>
+                  <select id="f-status">
+                    <option>To Do</option>
+                    <option selected>In Progress</option>
+                    <option>In Review</option>
+                    <option>Done</option>
+                  </select>
+                </div>
+                <div class="field" data-field="severity">
+                  <label for="f-severity">Severity</label>
+                  <select id="f-severity">
+                    <option>Critical</option>
+                    <option selected>High</option>
+                    <option>Medium</option>
+                    <option>Low</option>
+                  </select>
+                </div>
+                <div class="field" data-field="story">
+                  <label for="f-story">Story level</label>
+                  <select id="f-story">
+                    <option>1</option>
+                    <option>2</option>
+                    <option>3</option>
+                    <option selected>5</option>
+                  </select>
+                </div>
+                <div class="field wide" data-field="mandays">
+                  <label for="f-mandays">Mandays <i>(a bare number means days)</i></label>
+                  <input id="f-mandays" value="3d" autocomplete="off" spellcheck="false" />
+                  <span class="hint" id="mandays-hint" aria-live="polite"></span>
+                </div>
+                <div class="field wide">
+                  <label for="f-note">Note <i>(local only)</i></label>
+                  <textarea id="f-note" rows="2">
+Waiting on design sign-off for the address step.</textarea>
+                </div>
+              </div>
+              <div class="worklogs" id="worklogs" aria-live="polite"></div>
+              <div class="card-foot">
+                <button class="btn small" id="log" type="button">+ Log 1h 30m</button>
+                <button class="btn small" id="reset" type="button">Discard</button>
               </div>
             </div>
-            <div class="panel">
-              <h3 class="mono">PLT-143 · what Jira receives</h3>
-              <div class="row"><span>New worklog</span><span class="pill sent">sent</span></div>
-              <div class="row">
-                <span>Priority, story points, estimate</span><span class="pill">untouched</span>
+
+            <div class="card terminal">
+              <div class="card-head">
+                <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span>what Jira receives</span>
+                <span class="key" id="req-count">0 requests</span>
+              </div>
+              <pre class="payload" id="payload" aria-live="polite"></pre>
+              <div class="term-foot">
+                <span>untouched: <b id="untouched">all fields</b></span>
+                <span>note: <b>never sent</b></span>
               </div>
             </div>
           </div>
         </section>
 
         <section id="features">
-          <h2>What you get</h2>
+          <p class="kicker">// what you get</p>
+          <h2>Built for people who live in Jira all day.</h2>
           <p class="sub">
-            Everything is stored locally first, and your Jira token lives in the OS credential
-            store.
+            Everything is stored on your machine first. Your API token lives in the OS credential
+            store, not in a config file.
           </p>
-          <div class="grid">
-            <div class="feat">
-              <b>Incremental sync</b
-              ><span>Hourly background pull of only what changed, plus a full sync on demand.</span>
+          <div class="bento">
+            <div class="tile hero-tile span2">
+              <div class="ic">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path
+                    d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16m0 5v-5h5"
+                  />
+                </svg>
+              </div>
+              <h3>Offline-first, incremental sync</h3>
+              <p>
+                A background pull every hour fetches only what changed since the last run. Your
+                local database is the source of truth, so the table opens instantly.
+              </p>
+              <div class="flow" aria-hidden="true">
+                <span>Jira Cloud</span><em>→ pull →</em><span>IndexedDB</span><em>→</em
+                ><span>your edits</span><em>→ push diff →</em><span>Jira Cloud</span>
+              </div>
+              <ul class="synclog" aria-label="Example sync history">
+                <li>
+                  <span class="mono">09:00</span><b>Full sync</b><em>48 issues · 212 worklogs</em>
+                </li>
+                <li><span class="mono">10:00</span><b>Incremental</b><em>3 issues changed</em></li>
+                <li class="off">
+                  <span class="mono">11:00</span><b>Jira unreachable</b><em>edits kept locally</em>
+                </li>
+                <li>
+                  <span class="mono">12:00</span><b>Incremental</b
+                  ><em>pushed 2 tasks · 1 worklog</em>
+                </li>
+              </ul>
             </div>
-            <div class="feat">
-              <b>Offline editing</b
-              ><span>Status, type, severity, story level, mandays, notes and worklogs.</span>
+            <div class="tile">
+              <div class="ic">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 7v5l3 2" />
+                </svg>
+              </div>
+              <h3>Honest time totals</h3>
+              <p>Teammates’ worklogs are read-only and never counted in your hours.</p>
             </div>
-            <div class="feat">
-              <b>Selective push</b
-              ><span>Per task or all at once, with field-level change tracking.</span>
+            <div class="tile">
+              <div class="ic">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+                  <path d="M14 3v6h6M8 13h8M8 17h5" />
+                </svg>
+              </div>
+              <h3>Monthly CSV export</h3>
+              <p>
+                One row per ticket per month. Opens cleanly in Excel and warns about unpushed time.
+              </p>
             </div>
-            <div class="feat">
-              <b>Honest time totals</b
-              ><span>Teammates’ worklogs are read-only and never counted in your totals.</span>
+            <div class="tile">
+              <div class="ic">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <rect x="4" y="11" width="16" height="10" rx="2" />
+                  <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+                </svg>
+              </div>
+              <h3>Token in the keychain</h3>
+              <p>Windows Credential Manager and macOS Keychain keep your API token safe.</p>
             </div>
-            <div class="feat">
-              <b>CSV export</b
-              ><span
-                >Monthly worklog export that opens cleanly in Excel, with a warning for unpushed
-                time.</span
-              >
+            <div class="tile">
+              <div class="ic">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <circle cx="9" cy="8" r="3.5" />
+                  <path
+                    d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-4-6"
+                  />
+                </svg>
+              </div>
+              <h3>Multiple Jira sites</h3>
+              <p>Add several Cloud accounts and map the story point field per project.</p>
             </div>
-            <div class="feat">
-              <b>Multi-account</b
-              ><span>Several Jira Cloud sites, with story point fields mapped per project.</span>
+            <div class="tile">
+              <div class="ic">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M9 14 4 9l5-5" />
+                  <path d="M4 9h11a5 5 0 0 1 0 10h-3" />
+                </svg>
+              </div>
+              <h3>Discard per task</h3>
+              <p>Changed your mind? Restore one ticket from Jira without touching the rest.</p>
             </div>
           </div>
         </section>
 
-        <section>
-          <div class="two">
-            <div>
-              <h2>Task detail and worklogs</h2>
-              <p class="sub" style="margin: 0">
-                Open a ticket, log time with a live preview of how your input is read, and export
-                the month as CSV when it’s time to report.
-              </p>
-            </div>
-            <div class="shot">
-              <img
-                loading="lazy"
-                src="screenshots/task-detail.png"
-                alt="Task detail pane with mandays, note and worklogs"
-              />
-            </div>
+        <section id="tour">
+          <p class="kicker">// a quick tour</p>
+          <h2>One window for your whole sprint.</h2>
+          <div class="tabs" role="tablist" aria-label="Screenshots">
+            <button
+              role="tab"
+              aria-selected="true"
+              data-src="screenshots/task-detail.png"
+              data-cap="Open a ticket to edit fields, keep a local note and log time with a live preview of how your input is read."
+            >
+              Task detail
+            </button>
+            <button
+              role="tab"
+              aria-selected="false"
+              data-src="screenshots/export.png"
+              data-cap="Pick a month and export your own worklogs as CSV, grouped per ticket."
+            >
+              CSV export
+            </button>
+            <button
+              role="tab"
+              aria-selected="false"
+              data-src="screenshots/settings.png"
+              data-cap="Connect Jira Cloud accounts and choose which custom field holds story points."
+            >
+              Settings
+            </button>
           </div>
+          <div class="window" role="tabpanel">
+            <img
+              id="tour-img"
+              loading="lazy"
+              src="screenshots/task-detail.png"
+              width="2880"
+              height="1800"
+              alt="JiraSync Hub screenshot"
+            />
+          </div>
+          <p class="gallery-cap" id="tour-cap">
+            Open a ticket to edit fields, keep a local note and log time with a live preview of how
+            your input is read.
+          </p>
         </section>
 
         <section id="install">
-          <h2>Get started in four steps</h2>
-          <p class="sub">
-            You need a Jira Cloud site (<span class="mono">*.atlassian.net</span>), your Atlassian
-            email and an
-            <a href="https://id.atlassian.net/manage-profile/security/api-tokens">API token</a>.
-          </p>
-          <ol class="steps">
-            <li>
-              Download the installer for your OS from
-              <a href="https://github.com/dvgamerr-app/jirasync-hub-app/releases/latest">Releases</a
-              >.
-            </li>
-            <li>
-              Open <b>Settings → Add Account</b>, enter instance, email and token, then
-              <b>Save &amp; Connect</b>.
-            </li>
-            <li>Press <b>Sync</b> to pull your projects, tasks and worklogs.</li>
-            <li>Edit tasks, then press the upload button to push only what changed.</li>
-          </ol>
-          <div class="os">
-            <div><b>Windows</b>.exe · .msi · portable .exe</div>
-            <div><b>macOS</b>.dmg (not notarised yet)</div>
-            <div><b>Linux</b>.AppImage · .deb</div>
-          </div>
-          <p class="sub" style="margin-bottom: 0">Prefer building from source?</p>
-          <div class="copy">
-            <pre id="cmd" class="mono">
-git clone https://github.com/dvgamerr-app/jirasync-hub-app.git
-cd jirasync-hub-app &amp;&amp; bun install &amp;&amp; bun tauri dev</pre>
-            <button class="btn" id="copy" type="button">Copy</button>
+          <div class="install">
+            <div>
+              <p class="kicker">// get started</p>
+              <h2>Up and running in two minutes.</h2>
+              <p class="sub">
+                You need a Jira Cloud site (<span class="mono">*.atlassian.net</span>), your
+                Atlassian email and an
+                <a href="https://id.atlassian.net/manage-profile/security/api-tokens">API token</a>.
+              </p>
+              <ol class="steps">
+                <li>
+                  <b>Download the installer</b
+                  ><span>Grab the build for your OS from the latest release.</span>
+                </li>
+                <li>
+                  <b>Add your account</b
+                  ><span
+                    >Settings → Add Account, enter instance, email and token, then Save &amp;
+                    Connect.</span
+                  >
+                </li>
+                <li>
+                  <b>Sync</b
+                  ><span>Pull your projects, tasks and worklogs into the local table.</span>
+                </li>
+                <li>
+                  <b>Edit and push</b
+                  ><span
+                    >Work as you like, then press the upload button to send only what changed.</span
+                  >
+                </li>
+              </ol>
+            </div>
+            <div>
+              <div class="os">
+                <a href="https://github.com/dvgamerr-app/jirasync-hub-app/releases/latest"
+                  ><svg><use href="#i-windows" /></svg><b>Windows</b
+                  ><span>.exe · .msi · portable</span></a
+                >
+                <a href="https://github.com/dvgamerr-app/jirasync-hub-app/releases/latest"
+                  ><svg><use href="#i-apple" /></svg><b>macOS</b
+                  ><span>.dmg · not notarised yet</span></a
+                >
+                <a href="https://github.com/dvgamerr-app/jirasync-hub-app/releases/latest"
+                  ><svg><use href="#i-linux" /></svg><b>Linux</b><span>.AppImage · .deb</span></a
+                >
+              </div>
+              <p class="sub" style="margin-bottom: 10px">Prefer building from source?</p>
+              <div class="copy">
+                <pre
+                  id="cmd"
+                ><span class="c">$ </span>git clone https://github.com/dvgamerr-app/jirasync-hub-app.git
+<span class="c">$ </span>cd jirasync-hub-app &amp;&amp; bun install
+<span class="c">$ </span>bun tauri dev</pre>
+                <button id="copy" type="button">Copy</button>
+              </div>
+            </div>
           </div>
         </section>
 
         <section>
           <div class="star">
             <h2>Saves you Jira clicks? Give it a star.</h2>
-            <p class="sub" style="margin: 0 auto 20px">
-              A star helps other Jira users find the project.
-            </p>
-            <div class="cta" style="justify-content: center">
+            <p class="sub">A star helps other Jira users find the project, and keeps it going.</p>
+            <div class="cta">
               <a class="btn primary" href="https://github.com/dvgamerr-app/jirasync-hub-app"
-                >★ Star on GitHub <span id="stars" class="mono"></span
+                ><svg><use href="#i-github" /></svg>Star on GitHub
+                <span class="mono" data-stars></span
               ></a>
               <a class="btn" href="https://github.com/dvgamerr-app/jirasync-hub-app/issues"
                 >Report an issue</a
@@ -584,44 +1619,264 @@ cd jirasync-hub-app &amp;&amp; bun install &amp;&amp; bun tauri dev</pre>
       </main>
 
       <footer>
-        <a href="https://github.com/dvgamerr-app/jirasync-hub-app">dvgamerr-app/jirasync-hub-app</a>
-        ·
-        <a href="https://github.com/dvgamerr-app/jirasync-hub-app/blob/main/README.th.md">ภาษาไทย</a
-        ><br />
-        Not affiliated with or endorsed by Atlassian. Jira is a trademark of Atlassian.
+        <span
+          ><a href="https://github.com/dvgamerr-app/jirasync-hub-app"
+            >dvgamerr-app/jirasync-hub-app</a
+          >
+          ·
+          <a href="https://github.com/dvgamerr-app/jirasync-hub-app/blob/main/README.th.md"
+            >ภาษาไทย</a
+          ></span
+        >
+        <span>Not affiliated with or endorsed by Atlassian. Jira is a trademark of Atlassian.</span>
       </footer>
     </div>
+
     <script>
       (function () {
-        var b = document.getElementById("copy"),
-          c = document.getElementById("cmd");
-        b.addEventListener("click", function () {
-          var t = c.textContent;
-          var p = navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject();
+        // ── Theme toggle ─────────────────────────────────────
+        var root = document.documentElement;
+        document.getElementById("theme").addEventListener("click", function () {
+          var current =
+            root.dataset.theme ||
+            (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+          var next = current === "light" ? "dark" : "light";
+          root.dataset.theme = next;
+          try {
+            localStorage.setItem("theme", next);
+          } catch (e) {}
+        });
+
+        // ── Push demo: mirrors task-store push rules ─────────
+        var SEVERITY_TO_PRIORITY = {
+          Critical: "Highest",
+          High: "High",
+          Medium: "Medium",
+          Low: "Low",
+        };
+        var TRANSITION_IDS = { "To Do": "11", "In Progress": "21", "In Review": "31", Done: "41" };
+        var LABELS = {
+          type: "type",
+          status: "status",
+          severity: "priority",
+          story: "story points",
+          mandays: "estimate",
+        };
+        var base = {
+          type: "Story",
+          status: "In Progress",
+          severity: "High",
+          story: "5",
+          mandays: "3d",
+        };
+        var inputs = {
+          type: document.getElementById("f-type"),
+          status: document.getElementById("f-status"),
+          severity: document.getElementById("f-severity"),
+          story: document.getElementById("f-story"),
+          mandays: document.getElementById("f-mandays"),
+        };
+        var payload = document.getElementById("payload");
+        var badge = document.getElementById("dirty-badge");
+        var reqCount = document.getElementById("req-count");
+        var untouched = document.getElementById("untouched");
+        var hint = document.getElementById("mandays-hint");
+        var wlBox = document.getElementById("worklogs");
+        var worklogs = [];
+
+        // Mandays: a bare number is days (1d = 8h), like parseMandayInput in the app.
+        function parseMandays(text) {
+          var t = text.trim().toLowerCase();
+          if (!t) return null;
+          if (/^\d+(\.\d+)?$/.test(t)) return Math.round(parseFloat(t) * 8 * 60);
+          var m = /^(?:(\d+(?:\.\d+)?)\s*d)?\s*(?:(\d+(?:\.\d+)?)\s*h)?\s*(?:(\d+)\s*m)?$/.exec(t);
+          if (!m || (!m[1] && !m[2] && !m[3])) return NaN;
+          return Math.round(
+            (parseFloat(m[1] || 0) * 8 + parseFloat(m[2] || 0)) * 60 + parseInt(m[3] || 0, 10),
+          );
+        }
+        function formatMinutes(min) {
+          var d = Math.floor(min / 480),
+            h = Math.floor((min % 480) / 60),
+            m = min % 60,
+            out = [];
+          if (d) out.push(d + "d");
+          if (h) out.push(h + "h");
+          if (m) out.push(m + "m");
+          return out.join(" ") || "0h";
+        }
+        function esc(s) {
+          return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }
+        function json(obj) {
+          return esc(JSON.stringify(obj, null, 2))
+            .replace(/"([^"]+)"(?=:)/g, '<span class="k">"$1"</span>')
+            .replace(/: "([^"]*)"/g, ': <span class="s">"$1"</span>')
+            .replace(/: (-?\d+(?:\.\d+)?)/g, ': <span class="n">$1</span>');
+        }
+        function request(verb, path, body, comment) {
+          var out =
+            '<span class="req"><span class="verb' +
+            (verb === "POST" ? " post" : "") +
+            '">' +
+            verb +
+            "</span>/rest/api/3/" +
+            path +
+            "</span>";
+          if (comment) out += '<span class="c">// ' + esc(comment) + "</span>\n";
+          return out + json(body) + "\n\n";
+        }
+
+        function render() {
+          var dirty = [];
+          Object.keys(inputs).forEach(function (k) {
+            var changed =
+              k === "mandays"
+                ? parseMandays(inputs[k].value) !== parseMandays(base[k])
+                : inputs[k].value !== base[k];
+            inputs[k].closest(".field").classList.toggle("is-dirty", changed);
+            if (changed) dirty.push(k);
+          });
+
+          var minutes = parseMandays(inputs.mandays.value);
+          var badMandays = Number.isNaN(minutes);
+          hint.className = "hint" + (badMandays ? " bad" : "");
+          hint.textContent = badMandays
+            ? "can’t read that: try 2, 1.5, 4h or 1d 4h"
+            : minutes === null
+              ? "= clears the estimate"
+              : "= " + formatMinutes(minutes) + " (" + minutes / 60 + "h)";
+
+          var fields = {};
+          if (dirty.indexOf("type") >= 0) fields.issuetype = { name: inputs.type.value };
+          if (dirty.indexOf("severity") >= 0)
+            fields.priority = { name: SEVERITY_TO_PRIORITY[inputs.severity.value] };
+          if (dirty.indexOf("story") >= 0) fields.customfield_10016 = Number(inputs.story.value);
+          if (dirty.indexOf("mandays") >= 0 && !badMandays)
+            fields.timetracking = {
+              originalEstimate: minutes === null ? "" : formatMinutes(minutes),
+            };
+
+          var out = "",
+            count = 0;
+          if (Object.keys(fields).length) {
+            out += request("PUT", "issue/SHOP-101", { fields: fields });
+            count++;
+          }
+          if (dirty.indexOf("status") >= 0) {
+            out += request(
+              "POST",
+              "issue/SHOP-101/transitions",
+              { transition: { id: TRANSITION_IDS[inputs.status.value] } },
+              "move to “" + inputs.status.value + "”",
+            );
+            count++;
+          }
+          worklogs.forEach(function (w) {
+            out += request("POST", "issue/SHOP-101/worklog", {
+              timeSpentSeconds: w.seconds,
+              started: w.started,
+            });
+            count++;
+          });
+          if (!count)
+            out =
+              '<span class="c">// Nothing to push.\n// Change a field or log time on the left\n// and the request appears here.</span>';
+
+          payload.innerHTML = out;
+          payload.classList.remove("flash");
+          void payload.offsetWidth;
+          payload.classList.add("flash");
+
+          var pending = dirty.length + worklogs.length;
+          badge.className = "badge " + (pending ? "dirty" : "ok");
+          badge.textContent = pending ? pending + " not pushed" : "Up to date";
+          reqCount.textContent = count + (count === 1 ? " request" : " requests");
+          var rest = Object.keys(LABELS)
+            .filter(function (k) {
+              return dirty.indexOf(k) < 0;
+            })
+            .map(function (k) {
+              return LABELS[k];
+            });
+          untouched.textContent = rest.length ? rest.join(", ") : "none";
+
+          wlBox.innerHTML = worklogs
+            .map(function () {
+              return '<span class="wl">+1h 30m · not pushed</span>';
+            })
+            .join("");
+        }
+
+        Object.keys(inputs).forEach(function (k) {
+          inputs[k].addEventListener("input", render);
+        });
+        document.getElementById("log").addEventListener("click", function () {
+          if (worklogs.length >= 3) return;
+          var d = new Date();
+          d.setHours(9 + worklogs.length * 2, 0, 0, 0);
+          worklogs.push({ seconds: 5400, started: d.toISOString().replace("Z", "+0000") });
+          render();
+        });
+        document.getElementById("reset").addEventListener("click", function () {
+          Object.keys(inputs).forEach(function (k) {
+            inputs[k].value = base[k];
+          });
+          worklogs = [];
+          // Discard keeps the local note, like the app.
+          render();
+        });
+        render();
+
+        // ── Screenshot tour ──────────────────────────────────
+        var tabs = document.querySelectorAll('[role="tab"]');
+        var tourImg = document.getElementById("tour-img");
+        var tourCap = document.getElementById("tour-cap");
+        tabs.forEach(function (tab) {
+          tab.addEventListener("click", function () {
+            tabs.forEach(function (t) {
+              t.setAttribute("aria-selected", String(t === tab));
+            });
+            tourImg.src = tab.dataset.src;
+            tourImg.alt = tab.textContent + " screenshot";
+            tourCap.textContent = tab.dataset.cap;
+          });
+        });
+
+        // ── Copy build commands ──────────────────────────────
+        var copyBtn = document.getElementById("copy"),
+          cmd = document.getElementById("cmd");
+        copyBtn.addEventListener("click", function () {
+          var text = cmd.textContent.replace(/^\$ /gm, "");
+          var p = navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject();
           p.then(
             function () {
-              b.textContent = "Copied";
+              copyBtn.textContent = "Copied";
               setTimeout(function () {
-                b.textContent = "Copy";
+                copyBtn.textContent = "Copy";
               }, 1600);
             },
             function () {
               var r = document.createRange();
-              r.selectNodeContents(c);
+              r.selectNodeContents(cmd);
               var s = getSelection();
               s.removeAllRanges();
               s.addRange(r);
             },
           );
         });
+
+        // ── GitHub star count ────────────────────────────────
         try {
           fetch("https://api.github.com/repos/dvgamerr-app/jirasync-hub-app")
             .then(function (r) {
               return r.json();
             })
             .then(function (d) {
-              if (typeof d.stargazers_count === "number")
-                document.getElementById("stars").textContent = "· " + d.stargazers_count;
+              if (typeof d.stargazers_count !== "number") return;
+              document.querySelectorAll("[data-stars]").forEach(function (el) {
+                el.textContent = d.stargazers_count;
+              });
             })
             .catch(function () {});
         } catch (e) {}
