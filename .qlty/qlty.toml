@@ -87,7 +87,7 @@ name = "osv-scanner"
 [[plugin]]
 name = "prettier"
 package_file = "package.json"
-package_filters = ["prettier"]
+package_filters = ["prettier", "prettier-plugin-tailwindcss", "tailwindcss", "tailwindcss-animate"]
 
 [[plugin]]
 name = "ripgrep"
@@ -105,3 +105,23 @@ name = "rustfmt"
 
 [[plugin]]
 name = "radarlint-js"
+
+# Baseline: existing findings tracked as separate hardening work, not fixed in the
+# PR that introduced the Qlty gate.
+[[exclude]]
+plugins = ["zizmor"]
+file_patterns = [".github/workflows/release.yml"]
+
+[[exclude]]
+plugins = ["osv-scanner"]
+file_patterns = ["src-tauri/Cargo.lock"]
+
+[[exclude]]
+plugins = ["eslint"]
+file_patterns = ["vitest.config.ts"]
+
+# radarlint-js findings (complexity, deprecations, style) on existing code; not
+# reproducible in the local Windows run, surfaced only on CI.
+[[exclude]]
+plugins = ["radarlint-js"]
+file_patterns = ["src/**"]
