@@ -388,6 +388,25 @@
         };
       cronitor("config", { clientKey: "a08df15d735c0c7518246129767fd319" });
     </script>
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/@tracewayapp/frontend@1.2.1/dist/traceway.iife.global.js"
+      integrity="sha384-QVzru2sR5BEVzzBnH9wcv8Pf3XhlbyCQ9Sjtknt6kJvjJJa/Q0XYInAOzTLogL3p"
+      crossorigin="anonymous"
+    ></script>
+    <script>
+      // The DSN is substituted at deploy time (see .github/workflows/pages.yml).
+      // Left as the placeholder (local preview) Traceway stays off.
+      window.addEventListener("DOMContentLoaded", function () {
+        var dsn = "__PUBLIC_TRACEWAY_DSN__";
+        if (!window.Traceway || !dsn || dsn.indexOf("__") === 0) return;
+        try {
+          window.Traceway.init(dsn, { recordAllSessions: true });
+        } catch (e) {
+          console.warn("Traceway disabled:", e instanceof Error ? e.message : e);
+        }
+      });
+    </script>
   </head>
   <body>
     <div class="wrap">
