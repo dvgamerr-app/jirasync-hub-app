@@ -17,7 +17,7 @@ export default defineConfig({
     baseURL: `http://${HOST}:${PORT}`,
     trace: "retain-on-failure",
   },
-  // CI starts the dev server itself (see pr-check.yaml) and sets E2E_EXTERNAL_SERVER: on Linux
+  // CI starts the dev server itself (see pr-check.yml) and sets E2E_EXTERNAL_SERVER: on Linux
   // runners Playwright's own readiness probe hung against a server that answered curl at once.
   webServer: process.env.E2E_EXTERNAL_SERVER
     ? undefined
