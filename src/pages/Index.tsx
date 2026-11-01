@@ -40,13 +40,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "@/hooks/use-toast";
-import {
-  onSyncResult,
-  onSyncStatus,
-  startBackgroundSync,
-  stopBackgroundSync,
-  syncNow,
-} from "@/lib/sync-service";
+import { syncNow } from "@/lib/sync-service";
 import { getJiraAccounts } from "@/lib/jira-db";
 import { cn, getErrorMessage } from "@/lib/utils";
 
@@ -155,15 +149,14 @@ const Index = () => {
     getDirtyTaskCount,
     taskStatusFilter,
     taskScopeFilter,
-    loadFromDB,
     reloadFromDB,
-    applySyncResult,
     waitingForSync,
     setTaskStatusFilter,
     searchQuery,
     setSearchQuery,
     hiddenProjectIds,
     isLoaded,
+    syncing,
   } = useTaskStore(
     useShallow((s) => ({
       tasks: s.tasks,
@@ -176,15 +169,14 @@ const Index = () => {
       getDirtyTaskCount: s.getDirtyTaskCount,
       taskStatusFilter: s.taskStatusFilter,
       taskScopeFilter: s.taskScopeFilter,
-      loadFromDB: s.loadFromDB,
       reloadFromDB: s.reloadFromDB,
-      applySyncResult: s.applySyncResult,
       waitingForSync: s.waitingForSync,
       setTaskStatusFilter: s.setTaskStatusFilter,
       searchQuery: s.searchQuery,
       setSearchQuery: s.setSearchQuery,
       hiddenProjectIds: s.hiddenProjectIds,
       isLoaded: s.isLoaded,
+      syncing: s.boardSyncing,
     })),
   );
   const filteredTasks = useMemo(
@@ -205,7 +197,6 @@ const Index = () => {
   const currentProject = projects.find((p) => p.id === selectedProjectId);
   const isMobile = useIsMobile();
   const dirtyCount = getDirtyTaskCount();
-  const [syncing, setSyncing] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [pushDone, setPushDone] = useState(false);
@@ -242,41 +233,6 @@ const Index = () => {
     document.addEventListener("keydown", handleKeyDown, { capture: true });
     return () => document.removeEventListener("keydown", handleKeyDown, { capture: true });
   }, [searchFocused, setSearchQuery]);
-
-  // Load data from IndexedDB on mount
-  useEffect(() => {
-    loadFromDB();
-  }, [loadFromDB]);
-
-  // Start background sync if Jira configured
-  useEffect(() => {
-    if (!isLoaded) return;
-
-    // Register listener BEFORE startBackgroundSync so we don't miss the
-    // synchronous notify("syncing") that fires inside syncNow() before its
-    // first await.
-    const unsub = onSyncStatus((status, message) => {
-      if (status === "syncing") setSyncing(true);
-      else setSyncing(false);
-
-      if (status === "error") {
-        toast({ title: "Sync Failed", description: message, variant: "destructive" });
-      }
-    });
-
-    // The pull hands over exactly what it wrote, so the store never has to re-read IndexedDB.
-    const unsubResult = onSyncResult(applySyncResult);
-
-    if (getJiraAccounts().length > 0) {
-      startBackgroundSync();
-    }
-
-    return () => {
-      unsub();
-      unsubResult();
-      stopBackgroundSync();
-    };
-  }, [isLoaded, applySyncResult]);
 
   const handleManualSync = async () => {
     try {
