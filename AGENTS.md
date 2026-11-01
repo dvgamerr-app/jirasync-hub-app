@@ -28,13 +28,15 @@
   - `jira-force-full-sync` = flag ให้ sync รอบถัดไปอ่านทั้งหมดใหม่ (ตั้งเมื่อเปลี่ยน story point mapping)
   - `jira-settings` เป็น legacy key และ migrate อัตโนมัติ
   - `jira-story-point-fields` = `{ [projectId]: jiraCustomFieldId }`
+  - `jirasync-ai-hidden-projects` = project IDs ที่ซ่อนจาก All projects ของ AI Board (แยกจาก `jirasync-hidden-projects` ของหน้า Jira)
 - IndexedDB (`jira-task-manager`):
   - `organizations: "id, name"`
   - `projects: "id, orgId, jiraProjectKey"`
   - `tasks: "id, projectId, jiraTaskId, status, isDirty"`
   - `workLogs: "id, taskId, logDate"`
   - `syncMeta: "id"` (`last-sync` + `account:<accountId>` = cursor ของ incremental sync: `lastSyncedAt`, `lastFullSyncAt`)
-- schema เปลี่ยนต้องเพิ่ม entry ใหม่ใน `SCHEMA_VERSIONS` (`src/lib/jira-db.ts`) เท่านั้น ห้ามแก้/ลบ entry เดิม ห้าม `db.delete()`; ตอนนี้อยู่ที่ v2 (ล้าง dirty ที่เกิดจากการแก้ note)
+  - `aiBoardStates: "id, accountId, status"` (`id` = account-scoped task ID; สถานะ AI แยกจาก Jira)
+- schema เปลี่ยนต้องเพิ่ม entry ใหม่ใน `SCHEMA_VERSIONS` (`src/lib/jira-db.ts`) เท่านั้น ห้ามแก้/ลบ entry เดิม ห้าม `db.delete()`; ตอนนี้อยู่ที่ v3 (เพิ่มสถานะ AI แยกจาก Jira; v2 ล้าง dirty ที่เกิดจากการแก้ note)
 - ID format:
   - org: `org-${accountId}`
   - project: `proj-${accountId}-${projectKey}`
@@ -60,6 +62,8 @@
   - severity map เป็น `Critical -> Highest`, `High -> High`, `Medium -> Medium`, `Low -> Low`
 
 ## Current product behavior
+
+- AI Board ใช้ `todo | doing | review | done` ของตัวเองใน `aiBoardStates` การย้าย AI ไม่แก้ `Task.status`/dirty state และไม่ส่ง Jira transition; Jira Done บังคับ AI Done ทางเดียวและซ่อน task จาก board/counts/detail แต่ AI Done ที่ Jira ยังไม่จบยังแสดงได้ เก็บสถานะผ่าน reload/pull/discard และใช้สี theme tokens ของแอป ซ่อน space/project ผ่านปุ่มรูปตาโดยแยก preference จากหน้า Jira
 
 - แก้จาก UI ได้: status, type, severity, story level, mandays, note, worklogs
 - `storyLevel` รับเฉพาะ `1 | 2 | 3 | 5`

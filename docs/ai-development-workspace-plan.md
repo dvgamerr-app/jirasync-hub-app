@@ -1,7 +1,7 @@
 # แผน AI handoff สำหรับ dev ที่ทำงานร่วมกับ AI
 
 วันที่: 2026-11-01 (แก้ไขหลัง review)  
-สถานะ: ข้อเสนอ MVP สำหรับตกลงขอบเขตก่อน implementation
+สถานะ: พัฒนา MVP แล้ว; ยังไม่ release และยังไม่เริ่ม gate ทดลองใช้ 2 สัปดาห์
 
 ## เป้าหมาย
 
@@ -77,7 +77,7 @@ Dialog แยกจาก note เพื่อไม่ให้ handoff ส่�
 
 ## 3. ข้อมูลและ schema
 
-**ไม่มี schema ใหม่และไม่มีตารางใหม่** ใช้ `Task.note` และ worklog เดิม จึงไม่ต้องเพิ่ม entry ใน `SCHEMA_VERSIONS` และไม่มีความเสี่ยงเรื่อง rollback ฐานข้อมูล
+ส่วน context/handoff ใช้ `Task.note` และ worklog เดิม ส่วน AI Board เพิ่ม schema v3 แบบ append-only สำหรับ `aiBoardStates: "id, accountId, status"` เพื่อเก็บความคืบหน้า AI แยกจาก Jira ตามข้อ 11 โดยไม่เปลี่ยน task/worklog เดิม
 
 เพิ่มเฉพาะ UI draft และสถานะ operation ใน Zustand store เดิม ไม่ทำให้ task dirty การเพิ่ม worklog ยังคงทำให้ task dirty ตาม flow เดิม แต่ action ต้องรายงานผลการ persist ให้ caller ทราบ
 
@@ -160,4 +160,65 @@ Bridge (ระยะ 2) มาก่อน Git และ workspace เพรา�
 - [Task detail](../src/components/TaskDetailPanel.tsx) — `NoteFieldEditor` และปุ่ม "Post as Jira comment"
 - [E2E fixtures และ tests](../e2e/)
 
-แผนนี้มาจากการอ่านเอกสารและ source ยังไม่ได้รันแอปหรือ tests และยังไม่ได้ implement
+## 9. ผล implementation และการตรวจสอบ
+
+- เพิ่ม `CopyForAiDialog`, `SummarizeToJiraDialog` และ handoff template ใน note ตามขอบเขต MVP
+- Context ใช้ `src/lib/ai-context.ts` และ `adfToMarkdown()`; draft และ operation state อยู่ใน store เดิม แยกตาม account-scoped task ID ส่วนสถานะ AI เก็บแยกตามข้อ 11
+- Worklog บันทึกพร้อม dirty task ใน IndexedDB transaction และรอผลก่อนแจ้งสำเร็จ ส่วน comment/worklog แยกผลและป้องกันการลองส่วนที่สำเร็จแล้วซ้ำ
+- `bun run test`: 199 tests ผ่าน; `bun run test:e2e`: 87 tests ผ่านก่อนเพิ่มเคส Log Work และ `e2e/ai-handoff.e2e.ts` รุ่นล่าสุดผ่านทั้ง 5 เคส รวมเคสที่เพิ่ม
+- `bun run lint`, `bun run build` และ e2e type-check ผ่าน พร้อม throwaway check ด้วย `node:assert/strict`
+- Mutation check: เมื่อลองแนบ note โดยไม่ตรวจ opt-in, test ต้องล้มเหลว จากนั้นคืน guard และตรวจว่า test ผ่านแล้ว
+- เพิ่ม unit test file สำหรับ pure context builder และ E2E file สำหรับ user flow ใหม่ ส่วน ADF/store/UI mocks ขยายไฟล์ tests เดิม
+- ปรับ TypeScript จาก 7.0.2 กลับเป็น 6.0.3 เพราะ typescript-eslint ที่ติดตั้งยังไม่รองรับ TS 7 และเติม exports ที่ขาดใน mocks เดิมสองจุด
+- คู่มืออยู่ใน [user-guide.th.md](user-guide.th.md) หัวข้อ “ทำงานร่วมกับ AI”
+
+การตรวจ UI ใช้ browser และ fake Jira; ยังไม่ได้ตรวจแพ็กเกจ Tauri จริงหรือ Jira จริง Gate ข้อ 6 จะเริ่มหลัง release และเป็นเงื่อนไขก่อนทำระยะถัดไป
+
+## 10. ขอบเขตหน้าใหม่ตาม Kanzo
+
+ผู้ใช้ยืนยันให้เก็บ layout หน้าเดิมไว้ และเพิ่มอีกหนึ่ง page โดยอ้างอิง `E:\kanzo` หน้าเดิมยังเป็น route `/`; หน้าใหม่เป็น `/ai-board` มีเมนูเข้าใช้งานและลิงก์กลับแยกกัน
+
+- ใช้รูปแบบ sidebar โปรเจกต์, คอลัมน์สถานะ, การ์ดลากย้าย และ detail panel ด้านขวาตาม reference ใน `E:\kanzo\src\index.html`, `src\app.js` และ `docs\img\task-dark.jpg` โดยเขียน UI สำหรับ React ของ repo นี้
+- แสดง Jira tasks จาก IndexedDB/store เดิม ใช้คอลัมน์ AI คงที่ `To Do / Doing / Review / Done`; มี project filter, search และจำนวนงาน ส่วน selection/filter ของ board แยกจากหน้าเดิมใน store เดียว
+- การย้ายการ์ดเปลี่ยนเฉพาะสถานะ AI ไม่แตะ Jira fields/dirty state และไม่เรียก transitions ตามขอบเขตล่าสุดในข้อ 11
+- Detail panel ใช้ description, local handoff, Copy for AI และ Summarize to Jira ที่ทำไว้ ไม่สร้าง comments หรือ agent activity สมมติ
+- หน้าใหม่ยัง sync ได้, รองรับ theme และเปิดตรงผ่าน hash route ได้โดยไม่ต้องผ่านหน้าเดิม
+- ไม่รวม Kanzo backend, MCP server, การสร้าง Jira ticket หรือระบบ agent orchestration ในการเพิ่ม page นี้
+
+ลำดับงาน: เพิ่ม state/actions ของ board → สร้าง page และ styles แบบ scoped → เพิ่ม route/navigation → ทดสอบการไปกลับโดยรักษาหน้าเดิม, project/search, drag/drop และสถานะ AI/Jira ที่เป็นอิสระ → ตรวจภาพจริงทั้ง dark/light และหน้าต่าง 1000×600 → อัปเดตคู่มือ
+
+ใช้ `e2e/ai-board.e2e.ts` ตรวจ user flow ของ page ใหม่ คู่กับ tests เดิม ส่วน logic ที่เพิ่มตรวจด้วย throwaway `node:assert/strict` ผ่าน Bun ไม่มี dependencies ใหม่ การปิดฟีเจอร์ต้องคง schema v3 ไว้เพื่อเปิดข้อมูลเดิมได้ ไม่ downgrade หรือลบฐานข้อมูล
+
+ผลตรวจส่วนหน้าใหม่: unit suite 202 tests และ E2E suite 93 tests ผ่าน รวม 5 เคสของ AI Board; lint/build/e2e type-check และ formatting ผ่าน ตรวจภาพจริง dark/light และขนาด 1000×600 แล้ว หน้าเดิมยังใช้ layout เดิมและ E2E ยืนยัน filter/selection หลังไปกลับ การโหลด board จาก store ที่พร้อมแล้วไม่ reload DB ซ้อน และการย้ายการ์ดผ่าน sync lock เดิม
+
+## 11. สถานะ AI แยกจาก workflow ของคนใน Jira
+
+| การกระทำ              | ผลต่อ AI Board                           | ผลต่อ Jira                              |
+| --------------------- | ---------------------------------------- | --------------------------------------- |
+| AI เริ่มงาน/รอ review | เปลี่ยน Doing/Review และบันทึกในเครื่อง  | ไม่เปลี่ยนสถานะและไม่ทำให้ dirty        |
+| AI ทำเสร็จ            | เปลี่ยน Done                             | ไม่ส่ง transition หรือเปลี่ยน Jira Done |
+| คนปิดงานใน Jira       | Pull บันทึก AI Done และ `jiraDone: true` | อ่านผลจาก Jira เท่านั้น                 |
+| คนเปิดงาน Jira ใหม่   | ปลด lock แต่คง AI Done จนกว่าจะย้ายเอง   | ไม่ส่งการเปลี่ยนกลับจาก AI              |
+
+- `src/lib/ai-board.ts` เป็น pure model ของคอลัมน์/สถานะ AI การปิดงาน Jira ดู done category รวม custom status และชื่อ legacy ตามพฤติกรรมเดิมของแอป
+- เพิ่ม `aiBoardStates` ใน schema v3 โดยคง v1/v2 เดิม ID เป็น task ID ที่แยก account แล้ว พร้อม account index, status, Jira completion flag และ updatedAt
+- Pull sync ใช้ task จาก Jira ก่อน merge dirty fields เพื่อให้ Jira Done ปิด AI ได้แม้มี local Jira status ที่ยังไม่ push แล้วส่ง state ที่บันทึกผ่าน `SyncResult` ไป store
+- สถานะ AI ใช้ table ของตัวเองจึงไม่ถูก pull/discard หรือการ push task เขียนทับ โหลดแบบ account-scoped และลบทิ้งเมื่อยืนยันลบบัญชี
+- UI แยก `AI status` ที่แก้ได้กับ `Jira status` ที่อ่านอย่างเดียว ถ้า Jira ปิดงานแล้ว AI จะอยู่ Done และซ่อน task จากการ์ด/counts/detail โดยไม่ลบข้อมูล ถ้า AI Done แต่ Jira ยังเปิดอยู่ การ์ดยังอยู่ใน Done ไม่มีปุ่ม Push สำหรับสถานะ AI
+- สีใช้ theme tokens เดิม: background/card/border/muted สำหรับพื้นฐาน, primary สำหรับ Doing, warning สำหรับ Review, success สำหรับ Done รวม focus ring และปุ่ม ทั้ง light/dark
+- จุดตรวจรับ: AI Done ไม่เปลี่ยน Jira/dirty state/เรียก transitions, เก็บสถานะหลัง reload และ offline, Jira Done ปิด AI ทางเดียว, อัปเกรดจาก v2 แล้ว note เดิมอยู่ครบ, ลบบัญชี cleanup AI state, สีเปลี่ยนตาม theme
+
+## 12. ซ่อนงานที่ Jira จบแล้วและซ่อนทั้ง space
+
+- ใช้ completion predicate เดียวกับ AI/Jira one-way completion เพื่อซ่อน Jira Done รวมถึง server completion flag เมื่อมี local Jira status ที่ยังไม่ push การ์ดที่ AI Done แต่ Jira ยังเปิดต้องยังอยู่ในคอลัมน์ Done
+- Filter ก่อนคำนวณ counts/รายการ และหา selected/copy task จากชุดที่ไม่ถูกปิดใน Jira จึงปิด detail ของงานที่จบระหว่าง sync ด้วย โดยไม่ลบ task หรือ AI state
+- ปุ่มรูปตาข้างแต่ละ project/space ซ่อนทั้งชุดจาก All projects; แสดงแถวชื่อจางพร้อมปุ่มเปิดคืน และยังเลือก space นั้นดูโดยตรงได้
+- เก็บ project IDs ใน `jirasync-ai-hidden-projects` ผ่าน store เดิม แยกจาก key ฝั่ง Jira ไม่เพิ่ม schema การซ่อนเปลี่ยนเฉพาะ visibility ของ All projects ไม่เปลี่ยน project/detail ที่กำลังเลือก เหมือนหน้า Jira
+- ทดสอบ positive/negative ใน E2E เดิม: Jira Done หายแต่ AI Done ยังอยู่, เปิด Jira ใหม่แล้วงานแสดงกลับ, counts ตรง, ซ่อนแล้วจำหลัง reload, เปิดคืนได้, หน้า Jira ยังเห็นงานและข้อมูลไม่เปลี่ยน
+
+## 13. ตำแหน่งและการใช้งาน controls ให้ตรงกับ Jira
+
+- Search อยู่ฝั่งซ้ายของ toolbar ถัดจากชื่อและจำนวนงาน ใช้ Input เดิม พร้อม Ctrl+F, Escape และปุ่มล้างข้อความ
+- ThemeToggle ตัวเดียวอยู่ขวาสุดของ toolbar ถัดจาก Sync เหมือนหน้า Jira; ไม่มีปุ่ม theme ซ้ำใน sidebar
+- ไอคอน project อยู่หน้าชื่อและเปลี่ยนเป็นรูปตาเมื่อ hover/focus กดเพื่อ hide/show โดยไม่เลือก project ตาม และไม่ลบข้อมูล
+- คงลูกศรซ้ายหน้า My Work ตามเดิม สถานะ AI และ visibility preference ยังคงแยกจาก Jira
