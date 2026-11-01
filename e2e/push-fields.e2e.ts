@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { adfParagraph, FakeJira } from "./fake-jira";
 import {
   getTask,
+  chooseOption,
   idbAll,
   idbPut,
   logWork,
@@ -40,9 +41,7 @@ test.describe("push sends only the fields the user edited", () => {
     const jira = new FakeJira();
     richIssue(jira);
     await openApp(page, jira, { waitFor: "PRJ-1", storage: SP_MAPPING });
-    const panel = await openTask(page, "PRJ-1");
-
-    await setSeverity(page, panel, "High");
+    await chooseOption(page, row(page, "PRJ-1").getByRole("combobox").nth(2), "High");
     await pushAll(page);
 
     await expect.poll(() => jira.putFields("PRJ-1").length).toBe(1);
@@ -144,9 +143,7 @@ test.describe("issue type is pushed", () => {
     const jira = new FakeJira();
     twoTypes(jira);
     await openApp(page, jira, { waitFor: "PRJ-1" });
-    const panel = await openTask(page, "PRJ-1");
-
-    await setType(page, panel, "Bug");
+    await chooseOption(page, row(page, "PRJ-1").getByRole("combobox").nth(0), "Bug");
     await pushAll(page);
 
     await expect.poll(() => jira.putFields("PRJ-1").length).toBe(1);

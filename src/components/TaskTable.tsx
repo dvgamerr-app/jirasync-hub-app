@@ -34,6 +34,7 @@ import { useShallow } from "zustand/react/shallow";
 
 const COMPACT_COLUMN_COUNT = 4;
 const FULL_COLUMN_COUNT = 9;
+const EMPTY_OPTIONS: string[] = [];
 
 function hasStoryPointRuleViolation(task: Pick<Task, "type" | "storyLevel">): boolean {
   return task.type !== "Story" && task.storyLevel !== null;
@@ -184,7 +185,6 @@ export function TaskTable({ tasks: allTasks }: { tasks: Task[] }) {
     projects,
     tasks: rawTasks,
     selectedProjectId,
-    transitionOptions,
   } = useTaskStore(
     useShallow((s) => ({
       selectedTaskId: s.selectedTaskId,
@@ -192,7 +192,6 @@ export function TaskTable({ tasks: allTasks }: { tasks: Task[] }) {
       projects: s.projects,
       tasks: s.tasks,
       selectedProjectId: s.selectedProjectId,
-      transitionOptions: s.transitionOptions,
     })),
   );
   const showExtendedColumns = !selectedTaskId;
@@ -432,12 +431,8 @@ export function TaskTable({ tasks: allTasks }: { tasks: Task[] }) {
                       task={row.task}
                       isSelected={row.task.id === selectedTaskId}
                       showExtendedColumns={showExtendedColumns}
-                      statuses={getSelectableStatuses(
-                        statusesByProjectId.get(row.task.projectId) ?? [],
-                        row.task.status,
-                        transitionOptions[row.task.id]?.statuses,
-                      )}
-                      issueTypes={issueTypesByProjectId.get(row.task.projectId) ?? []}
+                      projectStatuses={statusesByProjectId.get(row.task.projectId) ?? EMPTY_OPTIONS}
+                      issueTypes={issueTypesByProjectId.get(row.task.projectId) ?? EMPTY_OPTIONS}
                       totalMinutes={totalMinutesByTaskId[row.task.id] ?? 0}
                       onSelect={handleSelectTask}
                       depth={row.depth}
@@ -464,7 +459,7 @@ const TaskRow = memo(function TaskRow({
   task,
   isSelected,
   showExtendedColumns,
-  statuses,
+  projectStatuses,
   issueTypes,
   totalMinutes,
   onSelect,
@@ -475,7 +470,7 @@ const TaskRow = memo(function TaskRow({
   task: Task;
   isSelected: boolean;
   showExtendedColumns: boolean;
-  statuses: string[];
+  projectStatuses: string[];
   issueTypes: string[];
   totalMinutes: number;
   onSelect: (taskId: string) => void;
@@ -491,6 +486,7 @@ const TaskRow = memo(function TaskRow({
     updateTaskNote,
     updateTaskMandays,
     loadTransitionOptions,
+    reachableStatuses,
   } = useTaskStore(
     useShallow((s) => ({
       updateTaskStatus: s.updateTaskStatus,
@@ -500,7 +496,15 @@ const TaskRow = memo(function TaskRow({
       updateTaskNote: s.updateTaskNote,
       updateTaskMandays: s.updateTaskMandays,
       loadTransitionOptions: s.loadTransitionOptions,
+      reachableStatuses: s.transitionOptions[task.id]?.statuses,
     })),
+  );
+  const [typeOpen, setTypeOpen] = useState(false);
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [severityOpen, setSeverityOpen] = useState(false);
+  const statuses = useMemo(
+    () => getSelectableStatuses(projectStatuses, task.status, reachableStatuses),
+    [projectStatuses, task.status, reachableStatuses],
   );
   const hasStoryPointViolation = hasStoryPointRuleViolation(task);
   const displayIssueTypes = issueTypes.length > 0 ? issueTypes : TASK_TYPES;
@@ -575,6 +579,7 @@ const TaskRow = memo(function TaskRow({
       <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
         <Select
           value={task.type ?? ""}
+          onOpenChange={setTypeOpen}
           onValueChange={(v) => updateTaskType(task.id, v as TaskType)}
         >
           <SelectTrigger className="h-7 w-full justify-center border-none bg-transparent p-0 shadow-none focus:ring-0 [&>svg]:hidden">
@@ -582,16 +587,18 @@ const TaskRow = memo(function TaskRow({
               <TypeIcon type={task.type} />
             </SelectValue>
           </SelectTrigger>
-          <SelectContent>
-            {displayIssueTypes.map((t) => (
-              <SelectItem key={t} value={t} className="text-[13px]">
-                <div className="flex items-center gap-1.5">
-                  <TypeIcon type={t} />
-                  {t}
-                </div>
-              </SelectItem>
-            ))}
-          </SelectContent>
+          {typeOpen && (
+            <SelectContent>
+              {displayIssueTypes.map((t) => (
+                <SelectItem key={t} value={t} className="text-[13px]">
+                  <div className="flex items-center gap-1.5">
+                    <TypeIcon type={t} />
+                    {t}
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          )}
         </Select>
       </TableCell>
       {/* Status */}
@@ -600,6 +607,7 @@ const TaskRow = memo(function TaskRow({
           value={task.status ?? ""}
           onValueChange={(v) => updateTaskStatus(task.id, v)}
           onOpenChange={(open) => {
+            setStatusOpen(open);
             if (open) void loadTransitionOptions(task.id);
           }}
         >
@@ -608,13 +616,15 @@ const TaskRow = memo(function TaskRow({
               <StatusBadge status={task.status} truncate />
             </SelectValue>
           </SelectTrigger>
-          <SelectContent>
-            {statuses.map((s) => (
-              <SelectItem key={s} value={s} className="text-[13px]">
-                <StatusBadge status={s} />
-              </SelectItem>
-            ))}
-          </SelectContent>
+          {statusOpen && (
+            <SelectContent>
+              {statuses.map((s) => (
+                <SelectItem key={s} value={s} className="text-[13px]">
+                  <StatusBadge status={s} />
+                </SelectItem>
+              ))}
+            </SelectContent>
+          )}
         </Select>
       </TableCell>
       {/* Severity */}
@@ -622,6 +632,7 @@ const TaskRow = memo(function TaskRow({
         <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
           <Select
             value={task.severity ?? ""}
+            onOpenChange={setSeverityOpen}
             onValueChange={(v) => updateTaskSeverity(task.id, v as Severity)}
           >
             <SelectTrigger className="h-7 w-full justify-center border-none bg-transparent p-0 shadow-none focus:ring-0 [&>svg]:hidden">
@@ -629,13 +640,16 @@ const TaskRow = memo(function TaskRow({
                 <SeverityBadge severity={task.severity} />
               </SelectValue>
             </SelectTrigger>
-            <SelectContent>
-              {SEVERITIES.map((s) => (
-                <SelectItem key={s} value={s} className="text-[13px]">
-                  <SeverityBadge severity={s} />
-                </SelectItem>
-              ))}
-            </SelectContent>
+            {severityOpen && (
+              <SelectContent>
+                {SEVERITIES.map((s) => (
+                  <SelectItem key={s} value={s} textValue={s} className="text-[13px]">
+                    <SeverityBadge severity={s} />
+                    <span className="sr-only">{s}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            )}
           </Select>
         </TableCell>
       )}
