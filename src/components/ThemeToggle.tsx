@@ -23,7 +23,13 @@ export function ThemeToggle() {
   }, [dark]);
 
   return (
-    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDark((d) => !d)}>
+    <Button
+      variant="ghost"
+      size="icon"
+      className="h-7 w-7"
+      aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
+      onClick={() => setDark((d) => !d)}
+    >
       {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
     </Button>
   );

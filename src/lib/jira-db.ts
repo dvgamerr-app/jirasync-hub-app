@@ -2,6 +2,7 @@ import Dexie, { type Table, type Transaction } from "dexie";
 import { invoke } from "@tauri-apps/api/core";
 import type { Organization, Project, Task, WorkLog } from "@/types/jira";
 import { getOrganizationId, getTaskIdPrefix } from "@/lib/jira-ids";
+import type { AiBoardTaskState } from "@/lib/ai-board";
 
 export interface SyncMeta {
   id: string;
@@ -76,6 +77,17 @@ const SCHEMA_VERSIONS: SchemaVersion[] = [
         });
     },
   },
+  {
+    version: 3,
+    stores: {
+      organizations: "id, name",
+      projects: "id, orgId, jiraProjectKey",
+      tasks: "id, projectId, jiraTaskId, status, isDirty",
+      workLogs: "id, taskId, logDate",
+      syncMeta: "id",
+      aiBoardStates: "id, accountId, status",
+    },
+  },
 ];
 
 class JiraDatabase extends Dexie {
@@ -84,6 +96,7 @@ class JiraDatabase extends Dexie {
   tasks!: Table<Task, string>;
   workLogs!: Table<WorkLog, string>;
   syncMeta!: Table<SyncMeta, string>;
+  aiBoardStates!: Table<AiBoardTaskState, string>;
 
   constructor() {
     super("jira-task-manager");
@@ -412,17 +425,14 @@ async function cleanupAccountData(accountId: string): Promise<void> {
   try {
     await db.transaction(
       "rw",
-      db.organizations,
-      db.projects,
-      db.tasks,
-      db.workLogs,
-      db.syncMeta,
+      [db.organizations, db.projects, db.tasks, db.workLogs, db.syncMeta, db.aiBoardStates],
       async () => {
         await db.organizations.delete(orgId);
         await db.projects.where("orgId").equals(orgId).delete();
         await db.tasks.where("id").startsWith(taskIdPrefix).delete();
         await db.workLogs.where("taskId").startsWith(taskIdPrefix).delete();
         await db.syncMeta.delete(`account:${accountId}`);
+        await db.aiBoardStates.where("accountId").equals(accountId).delete();
       },
     );
   } catch (error) {

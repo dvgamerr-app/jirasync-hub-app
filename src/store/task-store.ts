@@ -10,7 +10,7 @@ import {
   Severity,
 } from "@/types/jira";
 import { isSyncLockHeld, runExclusiveSync } from "@/lib/sync-lock";
-import type { SyncResult } from "@/lib/sync-service";
+import { syncNow, type SyncResult } from "@/lib/sync-service";
 import { getDescriptionSearchText } from "@/lib/adf-content";
 import { db, getJiraAccounts, getStoryPointFieldMap, type JiraAccount } from "@/lib/jira-db";
 import {
@@ -36,8 +36,15 @@ import {
   isVisibleWorkLog,
   toSyncedWorkLog,
 } from "@/lib/worklog-sync";
-import { formatMandayEstimate } from "@/lib/worklog-time";
+import { formatMandayEstimate, parseTimeInput } from "@/lib/worklog-time";
 import { getErrorMessage } from "@/lib/utils";
+import {
+  DONE_TASK_STATUSES,
+  isJiraDone,
+  isAiBoardCompletedByJira,
+  isAiBoardStatus,
+  type AiBoardTaskState,
+} from "@/lib/ai-board";
 
 function getVisibleWorkLogsForTask(workLogs: WorkLog[], taskId: string): WorkLog[] {
   return workLogs.filter((wl) => wl.taskId === taskId && isVisibleWorkLog(wl));
@@ -45,6 +52,23 @@ function getVisibleWorkLogsForTask(workLogs: WorkLog[], taskId: string): WorkLog
 
 export type TaskStatusFilter = "active" | "done" | "all";
 export type TaskScopeFilter = "my-work" | "created-by-me";
+
+export type SummaryOperation = "comment" | "worklog";
+export type SummaryStatus = "idle" | "pending" | "done" | "error" | "unknown";
+export interface SummaryDraft {
+  accountId: string;
+  taskId: string;
+  jiraTaskId: string;
+  summary: string;
+  timeInput: string;
+  logDate: string;
+  worklogComment: string;
+  commentStatus: SummaryStatus;
+  worklogStatus: SummaryStatus;
+  commentError: string;
+  worklogError: string;
+}
+type SummaryInput = Pick<SummaryDraft, "summary" | "timeInput" | "logDate" | "worklogComment">;
 
 export interface TaskStore {
   organizations: Organization[];
@@ -64,6 +88,28 @@ export interface TaskStore {
   waitingForSync: number;
   searchQuery: string;
   hiddenProjectIds: Set<string>;
+  boardProjectId: string | null;
+  boardTaskId: string | null;
+  boardSearch: string;
+  boardCopyTaskId: string | null;
+  boardSyncing: boolean;
+  boardHiddenProjectIds: Set<string>;
+  toggleBoardProjectVisibility: (projectId: string) => void;
+  aiBoardStates: AiBoardTaskState[];
+  setBoardProject: (projectId: string | null) => void;
+  setBoardTask: (taskId: string | null) => void;
+  setBoardSearch: (query: string) => void;
+  setBoardCopyTask: (taskId: string | null) => void;
+  setBoardSyncing: (syncing: boolean) => void;
+  pullBoard: () => Promise<void>;
+  moveBoardTask: (taskId: string, status: string) => Promise<void>;
+  summaryTaskId: string | null;
+  summaryDrafts: Record<string, SummaryDraft>;
+  openSummary: (taskId: string) => void;
+  closeSummary: () => void;
+  updateSummaryDraft: (taskId: string, updates: Partial<SummaryInput>) => void;
+  resetSummaryOperation: (taskId: string, operation: SummaryOperation) => void;
+  submitSummaryOperation: (taskId: string, operation: SummaryOperation) => Promise<void>;
 
   setSelectedProject: (projectId: string | null) => void;
   setSelectedTask: (taskId: string | null) => void;
@@ -90,7 +136,7 @@ export interface TaskStore {
   /** Explicitly send text to Jira as a new comment (one-off; not synced state). */
   postNoteAsComment: (taskId: string, text: string) => Promise<void>;
 
-  addWorkLog: (log: Omit<WorkLog, "id" | "createdAt">) => void;
+  addWorkLog: (log: Omit<WorkLog, "id" | "createdAt">) => Promise<void>;
   removeWorkLog: (logId: string) => void;
 
   syncTaskToJira: (taskId: string) => Promise<void>;
@@ -155,9 +201,12 @@ function collectTaskFailures(
   return failures;
 }
 
-export const INACTIVE_STATUSES = new Set(["done", "closed", "cancelled", "cancel", "canceled"]);
+export const INACTIVE_STATUSES = DONE_TASK_STATUSES;
 
-type ScopedTaskCollections = Pick<TaskStore, "organizations" | "projects" | "tasks" | "workLogs">;
+type ScopedTaskCollections = Pick<
+  TaskStore,
+  "organizations" | "projects" | "tasks" | "workLogs" | "aiBoardStates"
+>;
 
 function getAccountForTask(task: Task, accounts: JiraAccount[]): JiraAccount | undefined {
   const accountId = getAccountIdFromTask(task);
@@ -299,6 +348,7 @@ async function loadScopedCollections(accountIds: string[]): Promise<ScopedTaskCo
       projects: [],
       tasks: [],
       workLogs: [],
+      aiBoardStates: [],
     };
   }
 
@@ -343,6 +393,7 @@ async function loadScopedCollections(accountIds: string[]): Promise<ScopedTaskCo
     projects,
     tasks,
     workLogs,
+    aiBoardStates: await db.aiBoardStates.where("accountId").anyOf(accountIds).toArray(),
   };
 }
 
@@ -400,9 +451,7 @@ function formatTaskFailures(failures: { jiraId: string; reason: unknown }[]): st
 }
 
 export function isDoneTask(task: Pick<Task, "status" | "statusCategory">): boolean {
-  return (
-    task.statusCategory === "done" || INACTIVE_STATUSES.has(task.status?.trim().toLowerCase() ?? "")
-  );
+  return isJiraDone(task);
 }
 
 function buildChildrenByParentKey(tasks: Task[]): Record<string, Task[]> {
@@ -566,7 +615,7 @@ function getNormalizedSelectionState(
   };
 }
 
-function markDirtyAndPersist(task: Task, updates: Partial<Task>): Task {
+function buildDirtyTask(task: Task, updates: Partial<Task>): Task {
   const updated: Task = {
     ...task,
     ...updates,
@@ -576,6 +625,11 @@ function markDirtyAndPersist(task: Task, updates: Partial<Task>): Task {
     // Strictly increasing, so two edits in the same millisecond still differ (the push compares it).
     updatedAt: new Date(Math.max(Date.now(), (Date.parse(task.updatedAt) || 0) + 1)).toISOString(),
   };
+  return updated;
+}
+
+function markDirtyAndPersist(task: Task, updates: Partial<Task>): Task {
+  const updated = buildDirtyTask(task, updates);
   persistTaskInBackground(updated);
   return updated;
 }
@@ -678,19 +732,23 @@ async function discardDirtyTask(task: Task, accounts: JiraAccount[]): Promise<Ta
 }
 
 const HIDDEN_PROJECTS_KEY = "jirasync-hidden-projects";
+const BOARD_HIDDEN_PROJECTS_KEY = "jirasync-ai-hidden-projects";
 
-function loadHiddenProjectIds(): Set<string> {
+function loadHiddenProjectIds(key = HIDDEN_PROJECTS_KEY): Set<string> {
   try {
-    const raw = localStorage.getItem(HIDDEN_PROJECTS_KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) return new Set();
-    return new Set(JSON.parse(raw) as string[]);
+    const parsed: unknown = JSON.parse(raw);
+    return new Set(
+      Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [],
+    );
   } catch {
     return new Set();
   }
 }
 
-function saveHiddenProjectIds(ids: Set<string>): void {
-  localStorage.setItem(HIDDEN_PROJECTS_KEY, JSON.stringify([...ids]));
+function saveHiddenProjectIds(ids: Set<string>, key = HIDDEN_PROJECTS_KEY): void {
+  localStorage.setItem(key, JSON.stringify([...ids]));
 }
 
 export const useTaskStore = create<TaskStore>((set, get) => {
@@ -764,6 +822,164 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     waitingForSync: 0,
     searchQuery: "",
     hiddenProjectIds: loadHiddenProjectIds(),
+    boardProjectId: null,
+    boardTaskId: null,
+    boardSearch: "",
+    boardCopyTaskId: null,
+    boardSyncing: false,
+    boardHiddenProjectIds: loadHiddenProjectIds(BOARD_HIDDEN_PROJECTS_KEY),
+    toggleBoardProjectVisibility: (projectId) => {
+      const state = get();
+      const hidden = new Set(state.boardHiddenProjectIds);
+      if (hidden.has(projectId)) hidden.delete(projectId);
+      else hidden.add(projectId);
+      saveHiddenProjectIds(hidden, BOARD_HIDDEN_PROJECTS_KEY);
+      set({ boardHiddenProjectIds: hidden });
+    },
+    aiBoardStates: [],
+    setBoardProject: (projectId) => set({ boardProjectId: projectId, boardTaskId: null }),
+    setBoardTask: (taskId) => set({ boardTaskId: taskId }),
+    setBoardSearch: (query) => set({ boardSearch: query }),
+    setBoardCopyTask: (taskId) => set({ boardCopyTaskId: taskId }),
+    setBoardSyncing: (syncing) => set({ boardSyncing: syncing }),
+    pullBoard: async () => {
+      if (get().boardSyncing) return;
+      set({ boardSyncing: true });
+      try {
+        const result = await syncNow({ full: true });
+        if (result) get().applySyncResult(result);
+      } finally {
+        set({ boardSyncing: false });
+      }
+    },
+    moveBoardTask: (taskId, status) =>
+      runLocked(async () => {
+        const task = getLatestTask(taskId);
+        if (!task) throw new Error("This ticket is no longer available");
+        if (!isAiBoardStatus(status)) throw new Error("Unknown AI workflow status");
+        const account = getAccountForTask(task, getJiraAccounts());
+        if (!account) throw new Error("This ticket's Jira account is no longer configured");
+        const previous = get().aiBoardStates.find((state) => state.id === taskId);
+        const jiraDone = isAiBoardCompletedByJira(task, previous);
+        if (jiraDone && status !== "done")
+          throw new Error("This task is completed in Jira. Its AI work stays Done.");
+        const next: AiBoardTaskState = {
+          id: taskId,
+          accountId: account.id,
+          status,
+          jiraDone,
+          updatedAt: new Date().toISOString(),
+        };
+        await db.aiBoardStates.put(next);
+        set((state) => ({ aiBoardStates: upsertById(state.aiBoardStates, [next]) }));
+      }),
+    summaryTaskId: null,
+    summaryDrafts: {},
+    openSummary: (taskId) => {
+      const task = getLatestTask(taskId);
+      if (!task) return;
+      const account = getAccountForTask(task, getJiraAccounts());
+      if (!account) return;
+      const now = new Date();
+      const logDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      set((state) => ({
+        summaryTaskId: taskId,
+        summaryDrafts: {
+          ...state.summaryDrafts,
+          [taskId]: state.summaryDrafts[taskId] ?? {
+            accountId: account.id,
+            taskId,
+            jiraTaskId: task.jiraTaskId,
+            summary: "",
+            timeInput: "",
+            logDate,
+            worklogComment: "",
+            commentStatus: "idle",
+            worklogStatus: "idle",
+            commentError: "",
+            worklogError: "",
+          },
+        },
+      }));
+    },
+    closeSummary: () => set({ summaryTaskId: null }),
+    updateSummaryDraft: (taskId, updates) =>
+      set((state) => {
+        const draft = state.summaryDrafts[taskId];
+        if (!draft) return {};
+        const next = { ...draft };
+        if (draft.commentStatus === "idle" || draft.commentStatus === "error") {
+          if (updates.summary !== undefined) next.summary = updates.summary;
+        }
+        if (draft.worklogStatus === "idle" || draft.worklogStatus === "error") {
+          if (updates.timeInput !== undefined) next.timeInput = updates.timeInput;
+          if (updates.logDate !== undefined) next.logDate = updates.logDate;
+          if (updates.worklogComment !== undefined) next.worklogComment = updates.worklogComment;
+        }
+        return { summaryDrafts: { ...state.summaryDrafts, [taskId]: next } };
+      }),
+    resetSummaryOperation: (taskId, operation) =>
+      set((state) => {
+        const draft = state.summaryDrafts[taskId];
+        if (!draft || draft[`${operation}Status`] === "pending") return {};
+        return {
+          summaryDrafts: {
+            ...state.summaryDrafts,
+            [taskId]: {
+              ...draft,
+              [`${operation}Status`]: "idle",
+              [`${operation}Error`]: "",
+              ...(operation === "comment"
+                ? { summary: "" }
+                : { timeInput: "", worklogComment: "" }),
+            },
+          },
+        };
+      }),
+    submitSummaryOperation: async (taskId, operation) => {
+      const draft = get().summaryDrafts[taskId];
+      if (!draft || !["idle", "error"].includes(draft[`${operation}Status`])) return;
+      const patch = (changes: Partial<SummaryDraft>) =>
+        set((state) => ({
+          summaryDrafts: {
+            ...state.summaryDrafts,
+            [taskId]: { ...state.summaryDrafts[taskId], ...changes },
+          },
+        }));
+      patch({ [`${operation}Status`]: "pending", [`${operation}Error`]: "" });
+      let sendingComment = false;
+      try {
+        const task = getLatestTask(taskId);
+        if (!task || getAccountForTask(task, getJiraAccounts())?.id !== draft.accountId) {
+          throw new Error("This ticket or its Jira account is no longer available");
+        }
+        if (operation === "comment") {
+          if (!draft.summary.trim()) throw new Error("Enter a summary before posting");
+          sendingComment = true;
+          await get().postNoteAsComment(taskId, draft.summary);
+        } else {
+          const minutes = parseTimeInput(draft.timeInput);
+          if (!minutes || !Number.isSafeInteger(minutes) || minutes <= 0)
+            throw new Error("Enter a valid time, e.g. 30m or 2h");
+          await get().addWorkLog({
+            taskId,
+            timeSpentMinutes: minutes,
+            logDate: draft.logDate,
+            comment: draft.worklogComment.trim() || null,
+          });
+        }
+        patch({ [`${operation}Status`]: "done" });
+      } catch (error) {
+        const message = getErrorMessage(error);
+        const uncertain = sendingComment && !/Jira API 4\d\d:/.test(message);
+        patch({
+          [`${operation}Status`]: uncertain ? "unknown" : "error",
+          [`${operation}Error`]: uncertain
+            ? `Result unknown. Check Jira before starting a new comment. ${message}`
+            : message,
+        });
+      }
+    },
 
     setSelectedProject: (projectId) => set({ selectedProjectId: projectId, selectedTaskId: null }),
     setSelectedTask: (taskId) => set({ selectedTaskId: taskId }),
@@ -864,6 +1080,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           projects,
           tasks,
           workLogs,
+          aiBoardStates: upsertById(state.aiBoardStates, result.aiBoardStates ?? []),
           transitionOptions,
           ...getNormalizedSelectionState(
             tasks,
@@ -901,29 +1118,56 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     postNoteAsComment: async (taskId, text) => {
       const task = get().tasks.find((candidate) => candidate.id === taskId);
       const body = text.trim();
-      if (!task || !body) return;
+      if (!task) throw new Error("This ticket is no longer available");
+      if (!body) throw new Error("Enter a comment before posting");
       const account = getAccountForTask(task, getJiraAccounts());
       if (!account) throw new Error("This ticket's Jira account is no longer configured");
       await addJiraComment(account, task.jiraTaskId, body);
     },
 
-    addWorkLog: (log) => {
-      const newLog: WorkLog = {
-        ...log,
-        id: `wl-${crypto.randomUUID()}`,
-        createdAt: new Date().toISOString(),
-        jiraWorklogId: null,
-        syncStatus: "pending_create",
-      };
-      persistWorkLogInBackground(newLog);
-      set((state) => {
-        const task = state.tasks.find((t) => t.id === log.taskId);
-        return {
-          workLogs: [...state.workLogs, newLog],
-          tasks: task ? replaceTask(state.tasks, markDirtyAndPersist(task, {})) : state.tasks,
+    addWorkLog: (log) =>
+      runLocked(async () => {
+        const task = getLatestTask(log.taskId);
+        if (!task || !getAccountForTask(task, getJiraAccounts()))
+          throw new Error("This ticket or its Jira account is no longer available");
+        if (!Number.isSafeInteger(log.timeSpentMinutes) || log.timeSpentMinutes <= 0)
+          throw new Error("Enter a positive number of minutes");
+        if (
+          !/^\d{4}-\d{2}-\d{2}$/.test(log.logDate) ||
+          new Date(`${log.logDate}T00:00:00Z`).toISOString().slice(0, 10) !== log.logDate
+        )
+          throw new Error("Select a valid worklog date");
+        const newLog: WorkLog = {
+          ...log,
+          id: `wl-${crypto.randomUUID()}`,
+          createdAt: new Date().toISOString(),
+          jiraWorklogId: null,
+          syncStatus: "pending_create",
+          isOwn: true,
         };
-      });
-    },
+        let persistedTask = task;
+        await db.transaction("rw", db.tasks, db.workLogs, async () => {
+          await db.workLogs.put(newLog);
+          const latest = getLatestTask(log.taskId);
+          if (!latest || !getAccountForTask(latest, getJiraAccounts()))
+            throw new Error("This ticket or its Jira account is no longer available");
+          persistedTask = buildDirtyTask(latest, {});
+          await db.tasks.put(persistedTask);
+        });
+        set((state) => {
+          const latest = state.tasks.find((t) => t.id === log.taskId);
+          const updated =
+            latest && latest.updatedAt === task.updatedAt && latest.note === persistedTask.note
+              ? persistedTask
+              : latest
+                ? markDirtyAndPersist(latest, {})
+                : undefined;
+          return {
+            workLogs: [...state.workLogs, newLog],
+            tasks: updated ? replaceTask(state.tasks, updated) : state.tasks,
+          };
+        });
+      }),
 
     removeWorkLog: (logId) => {
       const log = get().workLogs.find((workLog) => workLog.id === logId);

@@ -58,16 +58,22 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
   return (
     <aside className="border-border bg-card hidden h-full w-[280px] flex-col border-r md:flex">
       {/* Header */}
-      <div className="border-border border-b px-3 py-3">
+      <div className="border-border border-b px-5 py-[18px]">
         <h2 className="text-[13px] font-semibold">Task Manager</h2>
       </div>
 
       {/* Navigation */}
-      <div className="flex-1 overflow-y-auto p-2">
+      <div className="flex-1 overflow-y-auto px-2.5 py-2">
+        <a
+          href="#/ai-board"
+          className="text-muted-foreground hover:bg-accent hover:text-accent-foreground mb-1 flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px]"
+        >
+          <FolderKanban className="h-3.5 w-3.5" /> AI Board
+        </a>
         <button
           onClick={() => startTransition(() => setTaskScopeFilter("my-work"))}
           className={cn(
-            "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]",
+            "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px]",
             taskScopeFilter === "my-work" && !selectedProjectId
               ? "bg-primary/10 text-primary font-medium"
               : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
@@ -79,7 +85,7 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
         <button
           onClick={() => startTransition(() => setTaskScopeFilter("created-by-me"))}
           className={cn(
-            "mt-0.5 flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]",
+            "mt-0.5 flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px]",
             taskScopeFilter === "created-by-me" && !selectedProjectId
               ? "bg-primary/10 text-primary font-medium"
               : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
@@ -93,8 +99,8 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
           const orgProjects = projects.filter((p) => p.orgId === org.id);
           if (orgProjects.length === 0) return null;
           return (
-            <Collapsible key={org.id} defaultOpen className="mt-3">
-              <CollapsibleTrigger className="text-muted-foreground flex w-full items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold tracking-wider uppercase">
+            <Collapsible key={org.id} defaultOpen className="mt-4">
+              <CollapsibleTrigger className="text-muted-foreground flex w-full items-center gap-2 px-2.5 py-2 text-[11px] font-semibold tracking-wider uppercase">
                 <ChevronDown className="h-3 w-3" />
                 {org.name}
               </CollapsibleTrigger>
@@ -106,7 +112,7 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
                       key={project.id}
                       onClick={() => startTransition(() => setSelectedProject(project.id))}
                       className={cn(
-                        "group flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]",
+                        "group flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px]",
                         selectedProjectId === project.id
                           ? "bg-primary/10 text-primary font-medium"
                           : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
@@ -143,7 +149,7 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
       </div>
 
       {/* Footer */}
-      <div className="border-border space-y-1 border-t px-3 py-2">
+      <div className="border-border space-y-2 border-t px-2.5 py-3">
         {lastSync && (
           <div className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
             <RefreshCw className="h-3 w-3" />
@@ -152,7 +158,7 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
         )}
         <button
           onClick={onOpenSettings}
-          className="text-muted-foreground hover:bg-accent hover:text-accent-foreground flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]"
+          className="text-muted-foreground hover:bg-accent hover:text-accent-foreground flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px]"
         >
           <Settings className="h-3.5 w-3.5" />
           Settings

@@ -324,12 +324,15 @@ export class FakeJira {
   /** Every `issue/{key}...` endpoint; undefined when the request is not one of them. */
   private routeIssue(req: RecordedRequest): { status: number; body?: unknown } | undefined {
     const { method, path } = req;
-    const match = /^issue\/([^/]+)(?:\/(transitions|worklog)(?:\/([^/]+))?)?$/.exec(path);
+    const match = /^issue\/([^/]+)(?:\/(transitions|worklog|comment)(?:\/([^/]+))?)?$/.exec(path);
     if (!match) return undefined;
     const [, key, sub, worklogId] = match;
 
     const issue = this.issues.get(key);
     if (!issue) return { status: 404, body: { errorMessages: ["not found"] } };
+
+    if (sub === "comment" && method === "POST")
+      return { status: 201, body: { id: String(this.requests.length) } };
 
     if (sub === "transitions" && !worklogId) return this.transitions(issue, req);
     if (sub === "worklog" && worklogId) {
