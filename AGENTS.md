@@ -8,7 +8,7 @@
 
 ## Code map
 
-- `src/App.tsx`: app shell, titlebar/resize handles, `HashRouter`
+- `src/App.tsx`: app shell, titlebar/resize handles, `HashRouter`; โหลด IndexedDB ครั้งเดียวและดูแล background sync/result/status ตลอดอายุแอป (ไม่เริ่มใหม่เมื่อสลับ page)
 - `src/pages/Index.tsx`: main dashboard, sync/export/settings controls
 - `src/store/task-store.ts`: source of truth ของ UI, dirty state, push ไป Jira
 - `src/lib/sync-service.ts`: background pull sync ทุก 1 ชั่วโมงแบบ **incremental** (`updated >= -Nm`) ส่วน Sync ที่กดเอง/รอบแรก/ครบ 24 ชม. เป็น **full** (มีแต่ full ที่ลบ/archive ได้); แยก error ต่อ account; `syncNow()` คืน `SyncResult` ให้ store `applySyncResult()` โดยตรง (ไม่ reload จาก DB)
