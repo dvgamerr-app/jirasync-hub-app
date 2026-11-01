@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { format } from "date-fns";
 import { CalendarIcon, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -19,7 +19,7 @@ export type LogWorkPayload = {
 
 interface LogWorkModalProps {
   taskId: string;
-  onLog: (payload: LogWorkPayload) => void;
+  onLog: (payload: LogWorkPayload) => void | Promise<void>;
   /** "button" = full "Log Time" button (TaskDetailPanel), "inline" = small + icon (TaskTable row) */
   variant?: "button" | "inline";
 }
@@ -32,11 +32,14 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
   const [timeInput, setTimeInput] = useState("");
   const [date, setDate] = useState<Date>(new Date());
   const [comment, setComment] = useState("");
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   const typedTime = timeInput.trim();
   const typedMinutes = typedTime ? parseTimeInput(typedTime) : null;
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    if (savingRef.current) return;
     const minutes = parseTimeInput(timeInput);
     if (!minutes || minutes <= 0) {
       toast({
@@ -46,16 +49,29 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
       });
       return;
     }
-    onLog({
-      taskId,
-      timeSpentMinutes: minutes,
-      logDate: format(date, "yyyy-MM-dd"),
-      comment: comment.trim() || null,
-    });
-    setTimeInput("");
-    setComment("");
-    setDatePickerOpen(false);
-    setOpen(false);
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      await onLog({
+        taskId,
+        timeSpentMinutes: minutes,
+        logDate: format(date, "yyyy-MM-dd"),
+        comment: comment.trim() || null,
+      });
+      setTimeInput("");
+      setComment("");
+      setDatePickerOpen(false);
+      setOpen(false);
+    } catch (error) {
+      toast({
+        title: "Could not save worklog",
+        description: error instanceof Error ? error.message : String(error),
+        variant: "destructive",
+      });
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   };
 
   const trigger =
@@ -76,6 +92,7 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
     <Popover
       open={open}
       onOpenChange={(nextOpen) => {
+        if (savingRef.current) return;
         setOpen(nextOpen);
         if (nextOpen) {
           setDate(new Date());
@@ -99,6 +116,7 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
             <PopoverTrigger asChild>
               <Button
                 variant="outline"
+                disabled={saving}
                 className="h-8 w-full justify-start text-[13px] font-normal"
               >
                 <CalendarIcon className="mr-2 h-3.5 w-3.5" />
@@ -124,12 +142,13 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
           <label className="text-muted-foreground text-[11px] font-medium">Time Spent</label>
           <Input
             autoFocus
+            disabled={saving}
             placeholder="e.g. 1d 2h 30m"
             className="h-8 text-[13px]"
             value={timeInput}
             onChange={(e) => setTimeInput(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") handleSubmit();
+              if (e.key === "Enter") void handleSubmit();
             }}
           />
           {typedTime &&
@@ -152,6 +171,7 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
         <div className="space-y-1.5">
           <label className="text-muted-foreground text-[11px] font-medium">Comment</label>
           <Textarea
+            disabled={saving}
             placeholder="What did you work on?"
             className="min-h-[50px] text-[13px]"
             value={comment}
@@ -159,8 +179,12 @@ export function LogWorkModal({ taskId, onLog, variant = "button" }: LogWorkModal
           />
         </div>
 
-        <Button onClick={handleSubmit} className="h-8 w-full text-[13px]">
-          Log Work
+        <Button
+          disabled={saving}
+          onClick={() => void handleSubmit()}
+          className="h-8 w-full text-[13px]"
+        >
+          {saving ? "Saving…" : "Log Work"}
         </Button>
       </PopoverContent>
     </Popover>

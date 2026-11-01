@@ -1,6 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 import { FakeJira } from "./fake-jira";
-import { idbAll, openApp, openTask, row, setSeverity } from "./helpers";
+import { ACCOUNT_ID, idbAll, idbPut, openApp, openTask, row, setSeverity } from "./helpers";
+
+const aiState = {
+  id: `task-${ACCOUNT_ID}-PRJ-1`,
+  accountId: ACCOUNT_ID,
+  status: "doing",
+  jiraDone: false,
+  updatedAt: "2026-01-01T00:00:00Z",
+};
 
 async function openSettings(page: Page) {
   await page.locator("aside").getByRole("button", { name: "Settings" }).click();
@@ -18,6 +26,7 @@ test.describe("removing a Jira account asks for confirmation", () => {
     const jira = new FakeJira();
     jira.addIssue({ key: "PRJ-1", summary: "Keep me" });
     await openApp(page, jira, { waitFor: "PRJ-1" });
+    await idbPut(page, "aiBoardStates", aiState);
     await openSettings(page);
 
     await page.getByRole("button", { name: "Remove Acme" }).click();
@@ -28,12 +37,14 @@ test.describe("removing a Jira account asks for confirmation", () => {
     await expect(page.getByRole("alertdialog")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Remove Acme" })).toBeVisible();
     expect(await idbAll(page, "tasks")).toHaveLength(1);
+    expect(await idbAll(page, "aiBoardStates")).toHaveLength(1);
   });
 
   test("positive: confirming removes the account and its local data", async ({ page }) => {
     const jira = new FakeJira();
     jira.addIssue({ key: "PRJ-1", summary: "Delete me" });
     await openApp(page, jira, { waitFor: "PRJ-1" });
+    await idbPut(page, "aiBoardStates", aiState);
     await openSettings(page);
 
     await page.getByRole("button", { name: "Remove Acme" }).click();
@@ -41,6 +52,7 @@ test.describe("removing a Jira account asks for confirmation", () => {
 
     await expect(page.getByText("No Jira accounts configured yet.")).toBeVisible();
     await expect.poll(async () => (await idbAll(page, "tasks")).length).toBe(0);
+    await expect.poll(async () => (await idbAll(page, "aiBoardStates")).length).toBe(0);
   });
 
   test("positive: the confirmation warns how many tasks have unpushed changes", async ({

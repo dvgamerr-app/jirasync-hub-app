@@ -45,9 +45,9 @@ export function CreatedTicketTable({ tasks }: { tasks: Task[] }) {
           {tasks.map((task) => (
             <TableRow
               key={task.id}
-              className={cn("h-10", task.statusCategory === "done" && "opacity-65")}
+              className={cn("h-12", task.statusCategory === "done" && "opacity-65")}
             >
-              <TableCell className="py-1.5">
+              <TableCell className="py-2">
                 <div className="flex items-center gap-1.5">
                   <span className="text-muted-foreground font-mono text-[12px] tabular-nums">
                     {task.jiraTaskId}
@@ -63,18 +63,18 @@ export function CreatedTicketTable({ tasks }: { tasks: Task[] }) {
                   )}
                 </div>
               </TableCell>
-              <TableCell className="py-1.5">
+              <TableCell className="py-2">
                 <span className="line-clamp-1 text-[13px] leading-tight font-medium">
                   {task.title}
                 </span>
               </TableCell>
-              <TableCell className="text-muted-foreground py-1.5 text-[12px]">
+              <TableCell className="text-muted-foreground py-2 text-[12px]">
                 {task.assignee ?? "Unassigned"}
               </TableCell>
-              <TableCell className="py-1.5">
+              <TableCell className="py-2">
                 <StatusBadge status={task.status} truncate />
               </TableCell>
-              <TableCell className="text-muted-foreground py-1.5 text-[12px] whitespace-nowrap">
+              <TableCell className="text-muted-foreground py-2 text-[12px] whitespace-nowrap">
                 {formatUpdatedAt(task.updatedAt)}
               </TableCell>
             </TableRow>

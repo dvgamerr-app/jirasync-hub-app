@@ -64,6 +64,7 @@ mock.module("@/components/JiraSettings", () => ({
 mock.module("@/hooks/use-mobile", () => ({ useIsMobile: () => false }));
 mock.module("@/hooks/use-toast", () => ({ toast: (...args: unknown[]) => toastMock(...args) }));
 mock.module("@/lib/sync-service", () => ({
+  onSyncResult: () => () => {},
   onSyncStatus: (...args: unknown[]) => onSyncStatusMock(...args),
   startBackgroundSync: (...args: unknown[]) => startBackgroundSyncMock(...args),
   stopBackgroundSync: (...args: unknown[]) => stopBackgroundSyncMock(...args),

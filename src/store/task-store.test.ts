@@ -49,6 +49,15 @@ function createMockState() {
   };
 
   const db = {
+    aiBoardStates: {
+      where: mock(() => ({ anyOf: mock(() => ({ toArray: mock(async () => []) })) })),
+    },
+    transaction: async (
+      _mode: string,
+      _tasks: unknown,
+      _logs: unknown,
+      action: () => Promise<void>,
+    ) => action(),
     organizations: {
       toArray: mock<() => Promise<Organization[]>>(async () => []),
       bulkGet: mock(async (ids: string[]) => {
@@ -159,6 +168,7 @@ function createMockState() {
   const updateJiraIssue = mock(async () => undefined);
   const transitionJiraIssue = mock(async () => undefined);
   const addJiraWorkLog = mock(async () => "jira-worklog-new");
+  const addJiraComment = mock(async () => undefined);
   const deleteJiraWorkLog = mock(async () => undefined);
 
   const reset = () => {
@@ -169,6 +179,7 @@ function createMockState() {
     updateJiraIssue.mockReset().mockResolvedValue(undefined);
     transitionJiraIssue.mockReset().mockResolvedValue(undefined);
     addJiraWorkLog.mockReset().mockResolvedValue("jira-worklog-new");
+    addJiraComment.mockReset().mockResolvedValue(undefined);
     deleteJiraWorkLog.mockReset().mockResolvedValue(undefined);
 
     db.organizations.toArray.mockClear();
@@ -202,6 +213,7 @@ function createMockState() {
     updateJiraIssue,
     transitionJiraIssue,
     addJiraWorkLog,
+    addJiraComment,
     deleteJiraWorkLog,
     reset,
   };
@@ -222,6 +234,9 @@ mock.module("@/lib/jira-db", () => {
 });
 
 mock.module("@/lib/jira-api", () => ({
+  get addJiraComment() {
+    return mocked?.addJiraComment;
+  },
   DEFAULT_STORY_POINT_FIELD_ID: "customfield_10016",
   get updateJiraIssue() {
     return mocked?.updateJiraIssue;
@@ -238,6 +253,98 @@ mock.module("@/lib/jira-api", () => ({
 }));
 
 import { useTaskStore } from "@/store/task-store";
+
+describe("summary operation boundaries", () => {
+  beforeEach(() => {
+    mocked.reset();
+    useTaskStore.setState({ summaryTaskId: null, summaryDrafts: {} });
+  });
+
+  it("rejects both operations when the draft's ticket was removed", async () => {
+    const task = createTask();
+    seedStore([task], []);
+    const store = useTaskStore.getState();
+    store.openSummary(task.id);
+    store.updateSummaryDraft(task.id, { summary: "Ready", timeInput: "1h" });
+    useTaskStore.setState({ tasks: [] });
+    await store.submitSummaryOperation(task.id, "comment");
+    await store.submitSummaryOperation(task.id, "worklog");
+    const draft = useTaskStore.getState().summaryDrafts[task.id];
+    expect(draft.commentStatus).toBe("error");
+    expect(draft.worklogStatus).toBe("error");
+    expect(mocked.addJiraComment).not.toHaveBeenCalled();
+    expect(mocked.db.workLogs.put).not.toHaveBeenCalled();
+  });
+
+  it("rejects a draft whose account identity no longer matches", async () => {
+    const task = createTask();
+    seedStore([task], []);
+    const store = useTaskStore.getState();
+    store.openSummary(task.id);
+    store.updateSummaryDraft(task.id, { summary: "Ready" });
+    useTaskStore.setState((state) => ({
+      summaryDrafts: {
+        ...state.summaryDrafts,
+        [task.id]: { ...state.summaryDrafts[task.id], accountId: "another-account" },
+      },
+    }));
+    await store.submitSummaryOperation(task.id, "comment");
+    expect(useTaskStore.getState().summaryDrafts[task.id].commentStatus).toBe("error");
+    expect(mocked.addJiraComment).not.toHaveBeenCalled();
+  });
+
+  it("guards duplicate submissions and locks the payload until explicitly starting a new item", async () => {
+    const task = createTask();
+    seedStore([task], []);
+    const store = useTaskStore.getState();
+    store.openSummary(task.id);
+    store.updateSummaryDraft(task.id, { summary: "Original" });
+    let finish!: () => void;
+    mocked.addJiraComment.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const pending = store.submitSummaryOperation(task.id, "comment");
+    store.updateSummaryDraft(task.id, { summary: "Changed mid-flight" });
+    store.resetSummaryOperation(task.id, "comment");
+    await store.submitSummaryOperation(task.id, "comment");
+    expect(mocked.addJiraComment).toHaveBeenCalledTimes(1);
+    expect(mocked.addJiraComment).toHaveBeenCalledWith(
+      mocked.accounts[0],
+      task.jiraTaskId,
+      "Original",
+    );
+    finish();
+    await pending;
+    await store.submitSummaryOperation(task.id, "comment");
+    expect(mocked.addJiraComment).toHaveBeenCalledTimes(1);
+    store.resetSummaryOperation(task.id, "comment");
+    expect(useTaskStore.getState().summaryDrafts[task.id].summary).toBe("");
+    expect(useTaskStore.getState().summaryDrafts[task.id].commentStatus).toBe("idle");
+  });
+
+  it("rejects invalid worklog values without creating a local row", async () => {
+    const task = createTask();
+    seedStore([task], []);
+    await expect(
+      useTaskStore
+        .getState()
+        .addWorkLog({ taskId: task.id, timeSpentMinutes: 0, logDate: "2026-11-01", comment: null }),
+    ).rejects.toThrow("positive number");
+    await expect(
+      useTaskStore.getState().addWorkLog({
+        taskId: task.id,
+        timeSpentMinutes: 30,
+        logDate: "2026-02-31",
+        comment: null,
+      }),
+    ).rejects.toThrow("valid worklog date");
+    expect(mocked.db.workLogs.put).not.toHaveBeenCalled();
+    expect(useTaskStore.getState().tasks[0].isDirty).toBe(false);
+  });
+});
 
 function createTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -341,7 +448,7 @@ describe("task-store manual worklog sync", () => {
     const task = createTask();
     seedStore([task], []);
 
-    useTaskStore.getState().addWorkLog({
+    await useTaskStore.getState().addWorkLog({
       taskId: task.id,
       timeSpentMinutes: 90,
       logDate: "2026-03-22",
@@ -722,7 +829,9 @@ describe("task-store task status filters", () => {
       },
     ]);
 
+    await Promise.all([useTaskStore.getState().loadFromDB(), useTaskStore.getState().loadFromDB()]);
     await useTaskStore.getState().loadFromDB();
+    expect(mocked.db.organizations.bulkGet).toHaveBeenCalledTimes(1);
 
     expect(
       useTaskStore

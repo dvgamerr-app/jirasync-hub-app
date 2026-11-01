@@ -44,6 +44,13 @@ export function MobileSidebar({ onOpenSettings }: MobileSidebarProps) {
           Task Manager
         </SheetTitle>
         <div className="flex-1 overflow-y-auto p-2">
+          <a
+            href="#/ai-board"
+            className="text-muted-foreground hover:bg-accent mb-1 flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]"
+            onClick={() => setOpen(false)}
+          >
+            <FolderKanban className="h-3.5 w-3.5" /> AI Board
+          </a>
           <button
             onClick={() => handleScopeSelect("my-work")}
             className={cn(

@@ -1,5 +1,17 @@
 # Architecture — jirasync-hub-app
 
+## Additional Board View
+
+`src/pages/AiBoard.tsx` adds the `/ai-board` hash route alongside the original `/` page. The original task table and layout remain in place; sidebar links provide navigation between the two pages.
+
+The board uses existing account-scoped tasks/projects and the single `task-store.ts`. Its AI workflow is independent: fixed `todo`, `doing`, `review`, `done` columns persist in `aiBoardStates` without touching Jira task fields or dirty state. Human completion in Jira sets AI work to Done; AI completion never transitions Jira. Pull sync persists that completion before emitting its result, including when a locally edited Jira status differs from the server. Reopening Jira releases the completion lock but retains AI progress until explicitly moved.
+
+App.tsx owns initial IndexedDB loading, background sync and sync-result/status subscriptions across routes. Initial loads share an in-flight promise and reuse loaded memory; explicit settings/discard reloads still reread IndexedDB. Switching pages does not restart pull sync. Jira table rows subscribe to their own transition targets and mount dropdown contents only while open.
+
+Board selection/search are separate store fields. Description, local notes and AI handoff dialogs share existing data. `ai-board.css` scopes the layout to this page and uses the app's background/card/primary/warning/success theme tokens in light and dark modes. No native capability changes are required.
+
+Jira-completed tasks are hidden from board cards, counts and the detail panel without deleting task or AI state records; AI-completed tasks remain visible when Jira is still open. Space visibility uses its own `jirasync-ai-hidden-projects` localStorage preference and filters the All projects view. Hidden spaces remain available in the sidebar for direct navigation or restoring visibility; hiding a space leaves the current project and detail selection unchanged, matching the Jira view. The original Jira view's visibility preferences remain separate.
+
 ## Stack
 
 | Layer          | Tech                               |
@@ -32,7 +44,8 @@ src/
   lib/
     sync-service.ts        # Background sync loop (1 hr interval), Jira pull
     jira-api.ts            # Jira REST API v3, ADF parsing
-    jira-db.ts             # Dexie schema (v1), account encryption
+    jira-db.ts             # Append-only Dexie schema (v3), account encryption
+    ai-board.ts            # Independent AI workflow and one-way Jira completion
     worklog-sync.ts        # WorkLog state machine helpers
     worklog-time.ts        # Time formatting / parsing (mandays ↔ minutes)
     jira-ids.ts            # Scoped ID generation (task-{accountId}-{key})
@@ -83,7 +96,7 @@ synced         ──delete──► pending_delete ──push──► (removed
 
 Jira credentials (`JiraAccount`) are stored in `localStorage` encrypted via AES-GCM through Tauri's `invoke("encrypt_data")` / `invoke("decrypt_data")`.
 
-## Dexie Schema (v1)
+## Dexie Schema (v3)
 
 ```ts
 organizations: "id, name";
@@ -91,6 +104,7 @@ projects: "id, orgId, jiraProjectKey";
 tasks: "id, projectId, jiraTaskId, status, isDirty";
 workLogs: "id, taskId, logDate";
 syncMeta: "id";
+aiBoardStates: "id, accountId, status";
 ```
 
-> **Note:** Only version 1 is defined. Any schema changes require adding a new `this.version(N)` with a migration function.
+`SCHEMA_VERSIONS` is append-only: v1 defines the original tables, v2 migrates local-only notes, and v3 adds `aiBoardStates` without reshaping existing data. AI rows use the account-scoped task ID as their primary key and are removed on confirmed account removal. Pull/discard never reset ordinary AI progress. Older binaries cannot open the upgraded database; rollback must retain v3 and disable the UI in a forward fix, without deleting data.

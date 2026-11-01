@@ -11,6 +11,7 @@ import { getOrganizationId, getTaskIdPrefix } from "@/lib/jira-ids";
 import { isPendingCreateWorkLog, isPendingDeleteWorkLog } from "@/lib/worklog-sync";
 import { runExclusiveSync } from "@/lib/sync-lock";
 import { getErrorMessage, mapWithConcurrency } from "@/lib/utils";
+import { isJiraDone, type AiBoardTaskState } from "@/lib/ai-board";
 
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let isSyncing = false;
@@ -38,6 +39,7 @@ export interface SyncResult {
   organizations: Organization[];
   projects: Project[];
   tasks: Task[];
+  aiBoardStates?: AiBoardTaskState[];
   /** Every worklog row now stored for `workLogTaskIds` (Jira-sourced and still-pending ones). */
   workLogs: WorkLog[];
   workLogTaskIds: string[];
@@ -279,6 +281,24 @@ async function syncAccount(account: JiraAccount, forceFull: boolean): Promise<Ac
   const localMap = new Map(localTasks.filter(Boolean).map((t) => [t!.id, t!]));
   const mergedTasks = tasks.map((t) => mergeRemoteTaskWithLocalState(t, localMap.get(t.id)));
   await db.tasks.bulkPut(mergedTasks);
+  // Jira completion closes AI work in one direction, even when a local Jira status is dirty.
+  const previousAiStates = await db.aiBoardStates.bulkGet(tasks.map((task) => task.id));
+  const aiBoardStates = tasks.flatMap<AiBoardTaskState>((task, index) => {
+    const previous = previousAiStates[index];
+    if (isJiraDone(task))
+      return [
+        {
+          id: task.id,
+          accountId: account.id,
+          status: "done" as const,
+          jiraDone: true,
+          updatedAt: startedAt,
+        },
+      ];
+    if (previous?.jiraDone) return [{ ...previous, jiraDone: false, updatedAt: startedAt }];
+    return [];
+  });
+  if (aiBoardStates.length > 0) await db.aiBoardStates.bulkPut(aiBoardStates);
   const archivedTaskIds =
     plan.mode === "full"
       ? await markStaleTasksAsArchived(visibleProjectIds, new Set(tasks.map((t) => t.id)))
@@ -310,6 +330,7 @@ async function syncAccount(account: JiraAccount, forceFull: boolean): Promise<Ac
     organizations: [org],
     projects,
     tasks: mergedTasks,
+    aiBoardStates,
     workLogs,
     workLogTaskIds: replacedTaskIds,
     removedTaskIds: removed.taskIds,
@@ -392,6 +413,7 @@ export async function syncNow(options: SyncOptions = {}): Promise<SyncResult | n
       organizations: outcomes.flatMap((outcome) => outcome.organizations),
       projects: outcomes.flatMap((outcome) => outcome.projects),
       tasks: outcomes.flatMap((outcome) => outcome.tasks),
+      aiBoardStates: outcomes.flatMap((outcome) => outcome.aiBoardStates ?? []),
       workLogs: outcomes.flatMap((outcome) => outcome.workLogs),
       workLogTaskIds: outcomes.flatMap((outcome) => outcome.workLogTaskIds),
       removedTaskIds: outcomes.flatMap((outcome) => outcome.removedTaskIds),

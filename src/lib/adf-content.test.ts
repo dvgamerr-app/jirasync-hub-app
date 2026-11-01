@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { hasAdfContent } from "@/lib/adf-content";
+import { adfToMarkdown, getDescriptionSearchText, hasAdfContent } from "@/lib/adf-content";
 
 function adfDoc(content: unknown[]): string {
   return JSON.stringify({ type: "doc", version: 1, content });
@@ -12,6 +12,71 @@ function paragraph(text: string) {
 function emptyParagraph() {
   return { type: "paragraph", content: [] };
 }
+
+describe("adfToMarkdown", () => {
+  it("preserves plain text and handles absent descriptions", () => {
+    expect(adfToMarkdown("Keep API Case")).toBe("Keep API Case");
+    expect(adfToMarkdown(null)).toBe("");
+    expect(adfToMarkdown("{broken")).toBe("{broken");
+  });
+  it("preserves case without changing search normalization", () => {
+    const description = adfDoc([paragraph("Use API Token")]);
+    expect(adfToMarkdown(description)).toBe("Use API Token");
+    expect(getDescriptionSearchText(description)).toContain("use api token");
+  });
+  it("preserves code containing markdown fences", () => {
+    const description = adfDoc([
+      {
+        type: "codeBlock",
+        attrs: { language: "ts" },
+        content: [{ type: "text", text: "const Code = ` ``` `;" }],
+      },
+    ]);
+    expect(adfToMarkdown(description)).toBe("````ts\nconst Code = ` ``` `;\n````");
+  });
+  it("preserves nested lists", () => {
+    const description = adfDoc([
+      {
+        type: "bulletList",
+        content: [
+          {
+            type: "listItem",
+            content: [
+              paragraph("Parent"),
+              {
+                type: "bulletList",
+                content: [{ type: "listItem", content: [paragraph("Child")] }],
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(adfToMarkdown(description)).toContain("- Parent\n  \n  - Child");
+  });
+  it("exports safe links while excluding unsafe destinations", () => {
+    const description = adfDoc([
+      {
+        type: "paragraph",
+        content: [
+          {
+            type: "text",
+            text: "Docs",
+            marks: [{ type: "link", attrs: { href: "https://example.com/docs" } }],
+          },
+          {
+            type: "text",
+            text: "Danger",
+            marks: [{ type: "link", attrs: { href: "javascript:alert(1)" } }],
+          },
+        ],
+      },
+    ]);
+    expect(adfToMarkdown(description)).toContain("[Docs](<https://example.com/docs>)");
+    expect(adfToMarkdown(description)).toContain("Danger");
+    expect(adfToMarkdown(description)).not.toContain("javascript:");
+  });
+});
 
 describe("hasAdfContent", () => {
   it("returns false for null", () => {

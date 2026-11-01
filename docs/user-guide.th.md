@@ -181,6 +181,50 @@ Story point field ของ Jira แต่ละโปรเจกต์อา�
 - Ref URL
 - Note
 
+## ทำงานร่วมกับ AI
+
+### AI Board — หน้าแยกแบบ Kanzo
+
+เลือก `AI Board` ใน sidebar เพื่อเปิดหน้า board ที่ `/#/ai-board` หน้า My Work/Created by me และตารางเดิมยังอยู่ กด `My Work` ใน sidebar ของ board เพื่อกลับไป โดย filter และ selection ของหน้าเดิมยังอยู่ระหว่างเปิดแอป
+
+- เลือก project ทางซ้าย หรือ `All projects` เพื่อดูงานของ AI ในคอลัมน์ `To Do / Doing / Review / Done` Search อยู่บน toolbar ตำแหน่งเดียวกับหน้า Jira ค้น key, title และข้อความใน description; กด `Ctrl+F` เพื่อโฟกัสและเลือกข้อความ, `Escape` เพื่อล้างและออกจากช่องค้นหา (ยังใช้ `/` หรือ `Ctrl/Cmd+K` ได้)
+- ลากการ์ดหรือเลือก `AI status` เพื่อเปลี่ยนความคืบหน้าของ AI สถานะนี้เก็บในเครื่องและจำข้าม reload/restart ได้ ไม่แก้สถานะ Jira ไม่ทำให้ ticket dirty และไม่ต้อง push
+- Jira เป็น workflow ของคนทำงาน แสดงเป็น `Jira status` แบบอ่านอย่างเดียวในรายละเอียด เมื่อ Jira จบงาน (รวม custom status ใน done category) AI task จะไป Done และซ่อนจาก board, จำนวนงาน และ detail panel โดยเก็บข้อมูลไว้ตามเดิม
+- การย้าย AI ไป Done ไม่เปลี่ยน Jira เป็น Done และการ์ดยังอยู่ในคอลัมน์ Done ถ้า Jira ยังไม่จบ หาก Jira เปิดงานใหม่ การ์ดกลับมาใน AI Done จนกว่าจะเลือกย้ายเอง
+- ชี้ชื่อ space/project ใน sidebar ไอคอนหน้าชื่อจะเปลี่ยนจาก project เป็นรูปตาเหมือนหน้า Jira กดรูปตาเพื่อซ่อนทั้งชุดจาก `All projects` โดยไม่เปลี่ยน project หรือรายละเอียดที่กำลังเปิด กดรูปตาที่ขีดทับเพื่อแสดงคืน ค่าซ่อนจำข้าม reload/restart และแยกจากการซ่อนฝั่ง Jira; ยังคลิกชื่อ space ที่จางอยู่เพื่อเปิดดูโดยตรงได้ การซ่อนไม่ลบ tasks หรือความคืบหน้า AI
+- ปุ่มสลับ light/dark อยู่มุมขวาของ toolbar ถัดจาก Sync เหมือนหน้า Jira และใช้ theme ร่วมกัน
+- คลิกการ์ดเพื่อเปิด detail panel ทางขวา อ่าน description, เก็บ local handoff, `Copy for AI` และ `Summarize to Jira` ได้ สี Doing/Review/Done ใช้ primary/warning/success ของ theme แอปทั้ง light และ dark
+- กด `Sync board` เพื่อดึงข้อมูล Jira ใหม่; หน้า board ใช้ IndexedDB และ store เดียวกับหน้าเดิม โดยเก็บเฉพาะสถานะ AI แยกใน `aiBoardStates` ไม่มี task สำเนาอีกชุด การลบบัญชีที่ยืนยันแล้วจะลบสถานะ AI ของบัญชีนั้นด้วย
+
+Board ใช้รูปแบบการจัดหน้าจาก `E:\kanzo` โดยปรับให้ทำงานกับ Jira ข้อมูล comments ของ agent, MCP server และการสร้าง ticket ใหม่ยังไม่อยู่ในฟีเจอร์นี้
+
+### Copy for AI
+
+ปุ่ม `Copy for AI` และ `Summarize to Jira` มีเฉพาะในหน้า AI Board ไม่แสดงในหน้า Jira
+
+เปิดการ์ดในหน้า AI Board แล้วกด `Copy for AI` เพื่อตรวจ preview ของ key, summary, fields, description แบบ Markdown และ parent/Epic ก่อนกด `Copy context` นำไปวางใน AI ที่ใช้กับ repo ได้ ทำงานได้ขณะ offline จากข้อมูลที่ sync ไว้
+
+Note ส่วนตัวจะไม่รวมมาโดยอัตโนมัติ หากต้องการแนบ ให้เลือก `Include local note` ก่อน copy แอปไม่อ่าน source ใน repo หรือเรียกโมเดล AI ส่วน repo hints และคำสั่งทำงานยังใช้ `CLAUDE.md`/`AGENTS.md` ใน repo ตามปกติ
+
+### Handoff ใน note
+
+กด `Insert handoff template` เพื่อเติมหัวข้อ `Done / Next / Blocked` ต่อท้ายข้อความที่กำลังแก้ เก็บสิ่งที่ทำแล้ว สิ่งที่จะทำต่อ และปัญหาที่ติดอยู่ Note ยังคงเป็น local-only ไม่ทำให้ task dirty และไม่ถูก pull/discard ทับ
+
+Note จะหายเมื่อ local task ถูกลบ รวมถึง cleanup ของ project ที่หายไปจากผล full sync หาก task ไม่มี dirty changes หรือ pending worklog และการลบบัญชีที่ยืนยันแล้ว เก็บ handoff ที่ต้องใช้ระยะยาวใน repo
+
+### Summarize to Jira
+
+1. เปิดการ์ดในหน้า AI Board แล้วกด `Summarize to Jira` ตรวจ key เป้าหมายบน dialog
+2. วางและแก้สรุปจาก AI ในช่อง `Summary` แล้วกด `Post comment` เพื่อส่งเป็น Jira comment โดยไม่ดึง note ส่วนตัวมารวมเอง
+3. กรอก `Work date`, `Time spent` และ `Worklog comment` แล้วกด `Add worklog` เพื่อเก็บเวลาในเครื่อง ตัวเลขเปล่าหมายถึงชั่วโมง; `30m` หมายถึง 30 นาที
+4. เมื่อเห็น `Worklog saved locally — not pushed` ให้ใช้ปุ่ม push เดิมเพื่อส่งเวลาไป Jira
+
+Comment และ worklog มีปุ่มและผลแยกกัน หากส่วนหนึ่งสำเร็จ อีกส่วนผิดพลาด ให้ลองเฉพาะส่วนที่ผิดพลาด ไม่ส่งส่วนที่สำเร็จแล้วซ้ำ หากบันทึกเวลาใน IndexedDB ไม่สำเร็จ ฟอร์มจะคงค่าไว้และแสดง error ส่วน comment ที่ผลไม่แน่ชัดจะแสดง `Result unknown` ให้ตรวจ Jira ก่อนกด `I checked Jira — start a new comment`
+
+ปิด dialog แล้วกลับมาเปิด ticket เดิมได้ draft และผลเดิมขณะที่แอปยังเปิดอยู่ แต่ละ draft ผูกกับ ticket/account ของตัวเอง การเปลี่ยน selection ไม่ย้ายเป้าหมายของงานที่กำลังส่ง ใช้ `Start a new comment` หรือ `Start a new worklog` เมื่อตั้งใจเริ่มรายการใหม่
+
+Draft ไม่เก็บข้าม reload/restart การส่งสรุปไม่เปลี่ยน Jira status อัตโนมัติ และเวลาที่ log ต้องกรอกเองตามกติกาของทีม
+
 ## พฤติกรรมการ sync โดยรวม
 
 - แอปจะทำ background pull sync เป็นระยะเมื่อมี Jira account ถูกตั้งค่าไว้
