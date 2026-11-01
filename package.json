@@ -21,7 +21,7 @@
     "test:coverage": "bun test --isolate --coverage --coverage-reporter=lcov --coverage-dir=coverage"
   },
   "dependencies": {
-    "@radix-ui/react-alert-dialog": "^1.1.24",
+    "@radix-ui/react-alert-dialog": "^1.2.1",
     "@radix-ui/react-collapsible": "^1.1.21",
     "@radix-ui/react-dialog": "^1.2.0",
     "@radix-ui/react-label": "^2.1.16",
