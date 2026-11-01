@@ -313,7 +313,7 @@ export function TaskTable({ tasks: allTasks }: { tasks: Task[] }) {
   const virtualizer = useVirtualizer({
     count: flatRows.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: (i) => (flatRows[i].kind === "epic-header" ? 48 : 40),
+    estimateSize: () => 48,
     overscan: 12,
   });
 
@@ -512,7 +512,7 @@ const TaskRow = memo(function TaskRow({
     <TableRow
       data-index={dataIndex}
       className={cn(
-        "group h-10 cursor-pointer",
+        "group h-12 cursor-pointer",
         hasStoryPointViolation &&
           "bg-red-50/80 hover:bg-red-50 dark:bg-red-950/20 dark:hover:bg-red-950/30",
         isAssignedToSomeoneElse && "opacity-70",
@@ -521,7 +521,7 @@ const TaskRow = memo(function TaskRow({
       )}
     >
       <TableCell
-        className="relative py-1.5"
+        className="relative py-2"
         style={depth ? { paddingLeft: `${depth * 14 + 8}px` } : undefined}
         onClick={() => onSelect(task.id)}
       >
@@ -547,7 +547,7 @@ const TaskRow = memo(function TaskRow({
           </span>
         </div>
       </TableCell>
-      <TableCell className="py-1.5" onClick={() => onSelect(task.id)}>
+      <TableCell className="py-2" onClick={() => onSelect(task.id)}>
         <div className="flex items-center gap-1.5">
           <span className="line-clamp-1 text-[13px] leading-tight font-medium">{task.title}</span>
           {isAssignedToSomeoneElse && (
@@ -572,7 +572,7 @@ const TaskRow = memo(function TaskRow({
         </div>
       </TableCell>
       {/* Type */}
-      <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
+      <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
         <Select
           value={task.type ?? ""}
           onValueChange={(v) => updateTaskType(task.id, v as TaskType)}
@@ -595,7 +595,7 @@ const TaskRow = memo(function TaskRow({
         </Select>
       </TableCell>
       {/* Status */}
-      <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
+      <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
         <Select
           value={task.status ?? ""}
           onValueChange={(v) => updateTaskStatus(task.id, v)}
@@ -619,7 +619,7 @@ const TaskRow = memo(function TaskRow({
       </TableCell>
       {/* Severity */}
       {showExtendedColumns && (
-        <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
+        <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
           <Select
             value={task.severity ?? ""}
             onValueChange={(v) => updateTaskSeverity(task.id, v as Severity)}
@@ -640,7 +640,7 @@ const TaskRow = memo(function TaskRow({
         </TableCell>
       )}
       {showExtendedColumns && (
-        <TableCell className="py-1.5 text-center" onClick={() => onSelect(task.id)}>
+        <TableCell className="py-2 text-center" onClick={() => onSelect(task.id)}>
           <span
             className={cn(
               "text-[13px] tabular-nums",
@@ -652,12 +652,12 @@ const TaskRow = memo(function TaskRow({
         </TableCell>
       )}
       {showExtendedColumns && (
-        <TableCell className="py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
+        <TableCell className="py-2 text-center" onClick={(e) => e.stopPropagation()}>
           <InlineManday taskId={task.id} value={task.mandays} onUpdate={updateTaskMandays} />
         </TableCell>
       )}
       {showExtendedColumns && (
-        <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
+        <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center gap-1">
             <span className="text-muted-foreground text-[12px] tabular-nums">
               {totalMinutes > 0 ? formatMinutes(totalMinutes) : "—"}
@@ -668,7 +668,7 @@ const TaskRow = memo(function TaskRow({
       )}
       {/* Note */}
       {showExtendedColumns && (
-        <TableCell className="py-1.5" onClick={(e) => e.stopPropagation()}>
+        <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
           <InlineNoteEditor
             taskId={task.id}
             initialValue={task.note ?? ""}

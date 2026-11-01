@@ -31,6 +31,7 @@ function createDbMocks() {
     reorderJiraAccounts: mock(() => [accounts[1], accounts[0]]),
     removeJiraAccount: mock(),
     getStoryPointFieldMap: mock(() => ({})),
+    validateJiraInstanceUrl: mock(() => null),
     saveStoryPointFieldMap: mock(),
     db: {
       projects: {

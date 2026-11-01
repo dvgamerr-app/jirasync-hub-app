@@ -12,6 +12,7 @@ import {
   type WindowResizeDirection,
 } from "@/lib/desktop";
 import Index from "./pages/Index.tsx";
+import AiBoard from "./pages/AiBoard.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 function ResizeHandles() {
@@ -64,6 +65,7 @@ const App = () => {
             <HashRouter>
               <Routes>
                 <Route path="/" element={<Index />} />
+                <Route path="/ai-board" element={<AiBoard />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </HashRouter>
