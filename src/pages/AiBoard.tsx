@@ -20,12 +20,6 @@ import { filterTasks, useTaskStore } from "@/store/task-store";
 import { AI_BOARD_COLUMNS, getAiBoardStatus, isAiBoardCompletedByJira } from "@/lib/ai-board";
 import { getJiraAccounts } from "@/lib/jira-db";
 import { adfToMarkdown } from "@/lib/adf-content";
-import {
-  onSyncResult,
-  onSyncStatus,
-  startBackgroundSync,
-  stopBackgroundSync,
-} from "@/lib/sync-service";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { openExternal } from "@/lib/desktop";
@@ -205,13 +199,10 @@ export default function AiBoard() {
     hiddenProjects,
     toggleVisibility,
     loaded,
-    load,
-    apply,
     setProject,
     setTask,
     setSearch,
     setCopy,
-    setSyncing,
     pull,
   } = useTaskStore(
     useShallow((state) => ({
@@ -227,33 +218,13 @@ export default function AiBoard() {
       hiddenProjects: state.boardHiddenProjectIds,
       toggleVisibility: state.toggleBoardProjectVisibility,
       loaded: state.isLoaded,
-      load: state.loadFromDB,
-      apply: state.applySyncResult,
       setProject: state.setBoardProject,
       setTask: state.setBoardTask,
       setSearch: state.setBoardSearch,
       setCopy: state.setBoardCopyTask,
-      setSyncing: state.setBoardSyncing,
       pull: state.pullBoard,
     })),
   );
-  useEffect(() => {
-    if (!loaded) void load().catch(reportError);
-  }, [loaded, load]);
-  useEffect(() => {
-    if (!loaded) return;
-    const unsubscribeResult = onSyncResult(apply);
-    const unsubscribeStatus = onSyncStatus((status, message) => {
-      setSyncing(status === "syncing");
-      if (status === "error") reportError(new Error(message ?? "Sync failed"));
-    });
-    if (getJiraAccounts().length > 0) startBackgroundSync();
-    return () => {
-      unsubscribeResult();
-      unsubscribeStatus();
-      stopBackgroundSync();
-    };
-  }, [loaded, apply, setSyncing]);
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (document.querySelector('[role="dialog"]')) return;

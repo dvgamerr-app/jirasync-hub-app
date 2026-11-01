@@ -829,7 +829,9 @@ describe("task-store task status filters", () => {
       },
     ]);
 
+    await Promise.all([useTaskStore.getState().loadFromDB(), useTaskStore.getState().loadFromDB()]);
     await useTaskStore.getState().loadFromDB();
+    expect(mocked.db.organizations.bulkGet).toHaveBeenCalledTimes(1);
 
     expect(
       useTaskStore

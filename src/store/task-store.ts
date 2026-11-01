@@ -752,6 +752,7 @@ function saveHiddenProjectIds(ids: Set<string>, key = HIDDEN_PROJECTS_KEY): void
 }
 
 export const useTaskStore = create<TaskStore>((set, get) => {
+  let initialLoad: Promise<void> | null = null;
   const refreshStoreFromDB = async (markAsLoaded: boolean): Promise<void> => {
     const collections = await loadScopedCollections(getJiraAccounts().map((account) => account.id));
     const currentState = get();
@@ -844,13 +845,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     setBoardSyncing: (syncing) => set({ boardSyncing: syncing }),
     pullBoard: async () => {
       if (get().boardSyncing) return;
-      set({ boardSyncing: true });
-      try {
-        const result = await syncNow({ full: true });
-        if (result) get().applySyncResult(result);
-      } finally {
-        set({ boardSyncing: false });
-      }
+      await syncNow({ full: true });
     },
     moveBoardTask: (taskId, status) =>
       runLocked(async () => {
@@ -1012,8 +1007,12 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         return { hiddenProjectIds: next };
       }),
 
-    loadFromDB: async () => {
-      await refreshStoreFromDB(true);
+    loadFromDB: () => {
+      if (get().isLoaded) return Promise.resolve();
+      initialLoad ??= refreshStoreFromDB(true).finally(() => {
+        initialLoad = null;
+      });
+      return initialLoad;
     },
 
     reloadFromDB: async () => {

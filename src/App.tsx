@@ -1,4 +1,15 @@
-import { type MouseEvent, useCallback } from "react";
+import { type MouseEvent, useCallback, useEffect } from "react";
+import { useShallow } from "zustand/react/shallow";
+import { useTaskStore } from "@/store/task-store";
+import { getJiraAccounts } from "@/lib/jira-db";
+import {
+  onSyncResult,
+  onSyncStatus,
+  startBackgroundSync,
+  stopBackgroundSync,
+} from "@/lib/sync-service";
+import { toast } from "@/hooks/use-toast";
+import { getErrorMessage } from "@/lib/utils";
 import { HashRouter, Route, Routes } from "react-router-dom";
 import { AppErrorBoundary } from "@/components/AppErrorBoundary";
 import { TitleBar } from "@/components/TitleBar";
@@ -51,6 +62,39 @@ function ResizeHandles() {
 
 const App = () => {
   const showCustomTitlebar = !usesNativeMacTitlebar();
+  const { isLoaded, load, applySyncResult, setSyncing } = useTaskStore(
+    useShallow((state) => ({
+      isLoaded: state.isLoaded,
+      load: state.loadFromDB,
+      applySyncResult: state.applySyncResult,
+      setSyncing: state.setBoardSyncing,
+    })),
+  );
+
+  useEffect(() => {
+    const unsubscribeResult = onSyncResult(applySyncResult);
+    const unsubscribeStatus = onSyncStatus((status, message) => {
+      setSyncing(status === "syncing");
+      if (status === "error")
+        toast({ title: "Sync Failed", description: message, variant: "destructive" });
+    });
+    void load().catch((error) =>
+      toast({
+        title: "Could not load saved tasks",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      }),
+    );
+    return () => {
+      unsubscribeResult();
+      unsubscribeStatus();
+      stopBackgroundSync();
+    };
+  }, [load, applySyncResult, setSyncing]);
+
+  useEffect(() => {
+    if (isLoaded && getJiraAccounts().length > 0) startBackgroundSync();
+  }, [isLoaded]);
 
   return (
     <AppErrorBoundary>
