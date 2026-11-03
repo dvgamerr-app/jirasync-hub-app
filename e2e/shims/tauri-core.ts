@@ -1,3 +1,4 @@
+import type { BoardRunRequest, BoardTask } from "@/lib/board-access";
 // Replaces @tauri-apps/api/core in e2e mode. Credentials are "encrypted" with a
 // reversible, non-secret encoding so the real encrypt/decrypt call sites still run.
 // Harness commands answer from window.__e2e.harness (see state.ts) and record every call.
@@ -133,9 +134,68 @@ function harness(cmd: string, args?: Record<string, unknown>): unknown {
       state.bindings = state.bindings.filter((binding) => binding.projectId !== args?.projectId);
       return null;
     default:
-      return runCommand(cmd, args);
+      return cmd.startsWith("harness_board_") ? boardCommand(cmd, args) : runCommand(cmd, args);
   }
 }
+
+// Board access: the published tasks and requests stay in state so tests can play the external
+// MCP client (window.__e2eBoardRequest) and read back what the app published.
+function boardCommand(cmd: string, args?: Record<string, unknown>): unknown {
+  const state = getHarnessState();
+  const board = (state.board ??= { expiresAt: null, tasks: [], requests: [] });
+  switch (cmd) {
+    case "harness_board_enable":
+      board.expiresAt = Date.now() + Number(args?.hours) * 3_600_000;
+      board.requests = [];
+      return {
+        expiresAt: board.expiresAt,
+        mcpConfig: { mcpServers: { harness: { type: "http", url: "http://127.0.0.1:1/mcp" } } },
+      };
+    case "harness_board_disable":
+      board.expiresAt = null;
+      board.tasks = [];
+      return null;
+    case "harness_board_status":
+      return board.expiresAt;
+    case "harness_board_publish":
+      if (!board.expiresAt) throw "board access is off";
+      board.tasks = args?.tasks as BoardTask[];
+      return null;
+    case "harness_board_requests":
+      return board.requests;
+    case "harness_board_resolve": {
+      const request = board.requests.find((r) => r.requestId === args?.requestId);
+      if (!request) throw "this request no longer exists";
+      if (request.status !== "pending") throw `this request was already ${request.status}`;
+      request.status = args?.approve ? "approved" : "declined";
+      return { ...request };
+    }
+  }
+}
+
+declare global {
+  interface Window {
+    __e2eBoardRequest?: (taskId: string, provider: "claude" | "codex", note?: string) => void;
+  }
+}
+
+/** Plays an external MCP client calling runs_request on a published ready task. */
+window.__e2eBoardRequest = (taskId, provider, note = "") => {
+  const board = getHarnessState().board;
+  const task = board?.tasks.find((candidate) => candidate.taskId === taskId);
+  if (!board?.expiresAt || !task) throw new Error("task is not published as ready");
+  const request: BoardRunRequest = {
+    requestId: `req-${board.requests.length + 1}`,
+    taskId,
+    issueKey: task.issueKey,
+    provider,
+    note,
+    status: "pending",
+    createdAt: Date.now(),
+  };
+  board.requests.push(request);
+  emit("harness://board-request", { ...request });
+};
 
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   if (cmd === "encrypt_data") return btoa(encodeURIComponent(String(args?.plaintext))) as T;

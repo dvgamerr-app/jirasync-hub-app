@@ -178,11 +178,18 @@ pub fn run() {
             harness::harness_stop_run,
             harness::harness_list_runs,
             harness::harness_run_events,
-            harness::harness_remove_run_worktree
+            harness::harness_remove_run_worktree,
+            harness::harness_board_enable,
+            harness::harness_board_disable,
+            harness::harness_board_status,
+            harness::harness_board_publish,
+            harness::harness_board_requests,
+            harness::harness_board_resolve
         ])
         .setup(|app| {
             use tauri::Manager;
             app.manage(harness::create_run_manager(app.handle())?);
+            app.manage(harness::BoardState::default());
 
             let window_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title(WINDOW_TITLE)

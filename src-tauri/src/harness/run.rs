@@ -938,6 +938,22 @@ impl RunManager {
             .ok_or_else(|| format!("run {run_id} not found"))
     }
 
+    /// Appends an external client's report to a run's log. Refused while the run is busy (its
+    /// journal has a live writer); the active lock is held so no step can start meanwhile.
+    pub fn add_report(&self, run_id: &str, text: &str) -> Result<(), String> {
+        let active = self.active.lock().unwrap();
+        if active.as_ref().is_some_and(|a| a.run_id == run_id) {
+            return Err("the run is busy; report again when it waits for the owner".into());
+        }
+        let journal = Journal::open(self.checked_dir(run_id)?, self.emit.clone())?;
+        journal.push(EventKind::Agent {
+            kind: "external_report".into(),
+            text: text.into(),
+        });
+        drop(active);
+        Ok(())
+    }
+
     pub fn active_run_id(&self) -> Option<String> {
         self.active
             .lock()

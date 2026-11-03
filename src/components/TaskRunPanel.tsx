@@ -173,6 +173,8 @@ export function TaskRunPanel({ task }: { task: Task }) {
     bindings,
     start,
     doctor,
+    boardRequests,
+    resolveRequest,
     resume,
     stop,
     loadEvents,
@@ -185,6 +187,8 @@ export function TaskRunPanel({ task }: { task: Task }) {
       bindings: state.repoBindings,
       start: state.startTaskRun,
       doctor: state.harnessDoctor,
+      boardRequests: state.boardRequests,
+      resolveRequest: state.resolveBoardRequest,
       resume: state.resumeTaskRun,
       stop: state.stopTaskRun,
       loadEvents: state.loadRunEvents,
@@ -202,6 +206,9 @@ export function TaskRunPanel({ task }: { task: Task }) {
   const run = runs.find((candidate) => candidate.taskId === task.id);
   // Codex is optional: offer it only when Doctor saw it start on this machine.
   const codexReady = !!doctor?.tools.some((tool) => tool.name === "codex" && tool.ok);
+  const request = boardRequests.find(
+    (candidate) => candidate.taskId === task.id && candidate.status === "pending",
+  );
   const activeElsewhere = runs.find(
     (candidate) => candidate.taskId !== task.id && isRunBusy(candidate.status),
   );
@@ -286,6 +293,37 @@ export function TaskRunPanel({ task }: { task: Task }) {
   return (
     <section className="board-detail-section" aria-label="Agent run">
       <h3>Agent run</h3>
+      {request && (
+        <div className="space-y-1 rounded-md border p-2 text-[12px]" aria-label="Agent request">
+          <p>
+            An external agent asked to run this task with{" "}
+            {request.provider === "codex" ? "Codex" : "Claude"}
+            {request.note ? `: ${request.note}` : "."}
+          </p>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              className="h-7 text-[12px]"
+              disabled={busy || !!startBlocked}
+              title={
+                startBlocked || "Starts the run; the agent still plans first and waits for you"
+              }
+              onClick={() => void act(() => resolveRequest(request.requestId, true))}
+            >
+              Approve &amp; plan
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-[12px]"
+              disabled={busy}
+              onClick={() => void act(() => resolveRequest(request.requestId, false))}
+            >
+              Decline
+            </Button>
+          </div>
+        </div>
+      )}
       {run && (
         <p className="text-[12px]" role="status" aria-label="Run status">
           <span className={cn("font-medium", run.status === "failed" && "text-destructive")}>

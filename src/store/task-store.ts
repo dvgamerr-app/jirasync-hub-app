@@ -13,6 +13,17 @@ import { isSyncLockHeld, runExclusiveSync } from "@/lib/sync-lock";
 import { syncNow, type SyncResult } from "@/lib/sync-service";
 import { getDescriptionSearchText, getSafeExternalUrl } from "@/lib/adf-content";
 import { buildAiContext } from "@/lib/ai-context";
+import {
+  boardAccessExpiry,
+  disableBoardAccess,
+  enableBoardAccess,
+  listBoardRequests,
+  publishBoardTasks,
+  readyBoardTasks,
+  resolveBoardRequest,
+  type BoardAccess,
+  type BoardRunRequest,
+} from "@/lib/board-access";
 import { db, getJiraAccounts, getStoryPointFieldMap, type JiraAccount } from "@/lib/jira-db";
 import {
   getAccountIdFromTask,
@@ -170,6 +181,18 @@ export interface TaskStore {
   markTaskPrReady: (runId: string) => Promise<void>;
   stopTaskRun: (runId: string) => Promise<void>;
   removeTaskRunWorktree: (runId: string, discardChanges: boolean) => Promise<void>;
+  /** External MCP clients' view of the board; `null` while the owner has it off. */
+  boardAccess: BoardAccess | null;
+  /** Run requests from external clients (pending ones wait for the owner). */
+  boardRequests: BoardRunRequest[];
+  loadBoardAccess: () => Promise<void>;
+  enableBoard: (hours: number) => Promise<void>;
+  disableBoard: () => Promise<void>;
+  /** Sends the ready tasks to the native board (no-op while access is off). */
+  publishBoard: () => Promise<void>;
+  applyBoardRequest: (request: BoardRunRequest) => void;
+  /** Approve starts the run (through `startTaskRun`); decline only answers the client. */
+  resolveBoardRequest: (requestId: string, approve: boolean) => Promise<void>;
 
   setSelectedProject: (projectId: string | null) => void;
   setSelectedTask: (taskId: string | null) => void;
@@ -1071,6 +1094,44 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       set((state) => ({
         runs: state.runs.map((run) => (run.runId === record.runId ? record : run)),
       }));
+    },
+    boardAccess: null,
+    boardRequests: [],
+    loadBoardAccess: async () => {
+      const expiresAt = await boardAccessExpiry();
+      set({ boardAccess: expiresAt ? { expiresAt } : null });
+      if (expiresAt) set({ boardRequests: await listBoardRequests() });
+    },
+    enableBoard: async (hours) => {
+      const access = await enableBoardAccess(hours);
+      set({ boardAccess: access, boardRequests: [] });
+      await get().publishBoard();
+    },
+    disableBoard: async () => {
+      await disableBoardAccess();
+      set({ boardAccess: null, boardRequests: [] });
+    },
+    publishBoard: async () => {
+      const state = get();
+      if (!state.boardAccess) return;
+      await publishBoardTasks(
+        readyBoardTasks(state.tasks, state.aiBoardStates, state.repoBindings),
+      );
+    },
+    applyBoardRequest: (request) =>
+      set((state) => ({
+        boardRequests: [
+          ...state.boardRequests.filter((existing) => existing.requestId !== request.requestId),
+          request,
+        ],
+      })),
+    resolveBoardRequest: async (requestId, approve) => {
+      // Approval is the start grant: the run starts through the same path as the app's
+      // buttons, first, so a request whose run could not start stays pending.
+      const pending = get().boardRequests.find((request) => request.requestId === requestId);
+      if (approve && pending)
+        await get().startTaskRun(pending.taskId, { agent: true, provider: pending.provider });
+      get().applyBoardRequest(await resolveBoardRequest(requestId, approve));
     },
     summaryTaskId: null,
     summaryDrafts: {},

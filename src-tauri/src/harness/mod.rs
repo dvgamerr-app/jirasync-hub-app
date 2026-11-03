@@ -2,6 +2,7 @@
 // typed commands with validated inputs; it can never ask for an arbitrary command line.
 mod agent;
 mod bindings;
+mod board;
 mod claude;
 mod codex;
 mod docker;
@@ -230,4 +231,112 @@ pub async fn harness_remove_run_worktree(
 ) -> Result<RunRecord, String> {
     let manager = runs.inner().clone();
     blocking(move || manager.remove_worktree(&run_id, discard_changes)).await
+}
+
+/// Board access for external MCP clients (Phase 5): off until the owner enables it.
+#[derive(Default)]
+pub struct BoardState {
+    server: std::sync::OnceLock<mcp::McpServer>,
+    session: std::sync::Mutex<Option<(String, std::sync::Arc<board::BoardHost>)>>,
+}
+
+/// Event the WebView listens to when an external client asks for a run.
+pub const BOARD_REQUEST_EVENT: &str = "harness://board-request";
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardAccess {
+    pub expires_at: u64,
+    /// MCP client config (`--mcp-config` / `.mcp.json` shape) with the board token.
+    pub mcp_config: serde_json::Value,
+}
+
+fn board_host(board: &BoardState) -> Result<std::sync::Arc<board::BoardHost>, String> {
+    board
+        .session
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|(_, host)| host.clone())
+        .ok_or_else(|| "board access is off".into())
+}
+
+#[tauri::command]
+pub fn harness_board_enable(
+    app: tauri::AppHandle,
+    board: tauri::State<'_, BoardState>,
+    runs: tauri::State<'_, RunManager>,
+    hours: u64,
+) -> Result<BoardAccess, String> {
+    use tauri::Emitter;
+    if !(1..=24).contains(&hours) {
+        return Err("board access lasts 1 to 24 hours".into());
+    }
+    let server = match board.server.get() {
+        Some(server) => server,
+        None => {
+            let started = mcp::McpServer::start()?;
+            board.server.get_or_init(|| started)
+        }
+    };
+    let expires_at = run::now_ms() + hours * 60 * 60 * 1000;
+    let handle = app.clone();
+    let host = std::sync::Arc::new(board::BoardHost::new(
+        runs.inner().clone(),
+        expires_at,
+        std::sync::Arc::new(move |request: &board::RunRequest| {
+            let _ = handle.emit(BOARD_REQUEST_EVENT, request);
+        }),
+    ));
+    let token = server.register(host.clone());
+    let mut session = board.session.lock().unwrap();
+    // A new grant replaces the old one: its token stops working at once.
+    if let Some((old, _)) = session.replace((token.clone(), host)) {
+        server.unregister(&old);
+    }
+    Ok(BoardAccess {
+        expires_at,
+        mcp_config: server.client_config(&token),
+    })
+}
+
+#[tauri::command]
+pub fn harness_board_disable(board: tauri::State<'_, BoardState>) {
+    if let (Some(server), Some((token, _))) =
+        (board.server.get(), board.session.lock().unwrap().take())
+    {
+        server.unregister(&token);
+    }
+}
+
+/// When access is on: its expiry (the token is shown only when it is granted).
+#[tauri::command]
+pub fn harness_board_status(board: tauri::State<'_, BoardState>) -> Option<u64> {
+    board_host(&board).ok().map(|host| host.expires_at())
+}
+
+#[tauri::command]
+pub fn harness_board_publish(
+    board: tauri::State<'_, BoardState>,
+    tasks: Vec<board::BoardTask>,
+) -> Result<(), String> {
+    board_host(&board)?.publish(tasks);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn harness_board_requests(board: tauri::State<'_, BoardState>) -> Vec<board::RunRequest> {
+    board_host(&board)
+        .map(|host| host.requests())
+        .unwrap_or_default()
+}
+
+/// The owner decision on an external request; approving does not start anything by itself.
+#[tauri::command]
+pub fn harness_board_resolve(
+    board: tauri::State<'_, BoardState>,
+    request_id: String,
+    approve: bool,
+) -> Result<board::RunRequest, String> {
+    board_host(&board)?.resolve(&request_id, approve)
 }

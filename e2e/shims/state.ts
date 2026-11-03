@@ -7,6 +7,7 @@ import type {
   RunEvent,
   RunRecord,
 } from "@/lib/harness";
+import type { BoardRunRequest, BoardTask } from "@/lib/board-access";
 
 export interface E2EHarnessState {
   doctor: DoctorReport;
@@ -20,6 +21,8 @@ export interface E2EHarnessState {
   ci?: CiStatus;
   /** Run IDs whose worktree has uncommitted changes (removal needs confirmation). */
   dirtyWorktrees?: string[];
+  /** Board access for external MCP clients (see tauri-core boardCommand). */
+  board?: { expiresAt: number | null; tasks: BoardTask[]; requests: BoardRunRequest[] };
   /** Every harness command the app invoked, in order. */
   calls: { cmd: string; args?: Record<string, unknown> }[];
 }

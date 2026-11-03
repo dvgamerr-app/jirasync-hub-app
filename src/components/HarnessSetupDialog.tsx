@@ -18,6 +18,7 @@ import {
   type ServiceSpec,
 } from "@/lib/harness";
 import { cn, getErrorMessage } from "@/lib/utils";
+import { BOARD_ACCESS_HOURS } from "@/lib/board-access";
 import { toast } from "@/hooks/use-toast";
 import type { Project } from "@/types/jira";
 import { Button } from "@/components/ui/button";
@@ -25,7 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 
-type SetupTab = "tools" | "repositories";
+type SetupTab = "tools" | "repositories" | "external agents";
 
 function StatusIcon({ ok, required }: { ok: boolean; required: boolean }) {
   if (ok) return <CheckCircle2 className="h-4 w-4 text-emerald-500" aria-label="Ready" />;
@@ -552,6 +553,117 @@ function RepositoriesSection() {
   );
 }
 
+function ExternalAgentsSection() {
+  const { access, enable, disable } = useTaskStore(
+    useShallow((state) => ({
+      access: state.boardAccess,
+      enable: state.enableBoard,
+      disable: state.disableBoard,
+    })),
+  );
+  const [hours, setHours] = useState<number>(4);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  async function act(action: () => Promise<void>) {
+    setBusy(true);
+    setError("");
+    try {
+      await action();
+    } catch (actionError) {
+      setError(getErrorMessage(actionError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const config = access?.mcpConfig ? JSON.stringify(access.mcpConfig, null, 2) : "";
+  return (
+    <section aria-label="External agents" className="space-y-3 text-[13px]">
+      <p>
+        Let another MCP client (a Claude Code or Codex session, an IDE) see the AI Board To Do tasks
+        of bound projects and ask for runs. It never sees your local notes, and nothing starts until
+        you approve a request here.
+      </p>
+      {access ? (
+        <>
+          <p role="status">
+            On until {new Date(access.expiresAt).toLocaleString()}. Closing the app turns it off.
+          </p>
+          {config ? (
+            <div className="space-y-1">
+              <Label htmlFor="board-mcp-config">MCP config (keep the token private)</Label>
+              <textarea
+                id="board-mcp-config"
+                readOnly
+                rows={8}
+                className="bg-muted/40 w-full rounded-md border p-2 font-mono text-[11px]"
+                value={config}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  void navigator.clipboard
+                    .writeText(config)
+                    .then(() => setCopied(true))
+                    .catch((copyError) => setError(getErrorMessage(copyError)))
+                }
+              >
+                {copied ? "Copied" : "Copy config"}
+              </Button>
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-[12px]">
+              The token was shown when access was turned on. Turn it on again for a new one.
+            </p>
+          )}
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            disabled={busy}
+            onClick={() => void act(disable)}
+          >
+            Turn off
+          </Button>
+        </>
+      ) : (
+        <div className="flex items-center gap-2">
+          <Label htmlFor="board-hours">Allow for</Label>
+          <select
+            id="board-hours"
+            className="h-8 rounded-md border px-2 text-[13px]"
+            value={hours}
+            onChange={(event) => setHours(Number(event.target.value))}
+          >
+            {BOARD_ACCESS_HOURS.map((option) => (
+              <option key={option} value={option}>
+                {option} {option === 1 ? "hour" : "hours"}
+              </option>
+            ))}
+          </select>
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy}
+            onClick={() => void act(() => enable(hours))}
+          >
+            Turn on
+          </Button>
+        </div>
+      )}
+      {error && (
+        <p className="text-destructive text-[12px]" role="alert">
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
+
 export function HarnessSetupDialog() {
   const { open, setOpen } = useTaskStore(
     useShallow((state) => ({ open: state.harnessSetupOpen, setOpen: state.setHarnessSetupOpen })),
@@ -566,7 +678,7 @@ export function HarnessSetupDialog() {
           Tools and repositories the app uses when it runs a coding agent on a task.
         </DialogDescription>
         <div role="tablist" className="flex gap-1 border-b">
-          {(["tools", "repositories"] as const).map((id) => (
+          {(["tools", "repositories", "external agents"] as const).map((id) => (
             <button
               key={id}
               type="button"
@@ -584,7 +696,13 @@ export function HarnessSetupDialog() {
             </button>
           ))}
         </div>
-        {tab === "tools" ? <ToolsSection /> : <RepositoriesSection />}
+        {tab === "tools" ? (
+          <ToolsSection />
+        ) : tab === "repositories" ? (
+          <RepositoriesSection />
+        ) : (
+          <ExternalAgentsSection />
+        )}
       </DialogContent>
     </Dialog>
   );
