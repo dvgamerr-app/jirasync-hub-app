@@ -107,5 +107,6 @@ export function emptyRunRecord(): RunRecord {
     verifiedDigest: null,
     prUrl: null,
     prReady: false,
+    review: null,
   };
 }

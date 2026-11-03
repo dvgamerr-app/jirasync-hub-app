@@ -349,3 +349,56 @@ test("a failed publish keeps the run reviewable and says why", async ({ page }) 
   await expect(panel.getByRole("button", { name: "Accept & open Draft PR" })).toBeEnabled();
   await expect(panel.getByLabel("Pull request")).toHaveCount(0);
 });
+
+test("the reviewer agent's concerns are shown and can become the owner's feedback", async ({
+  page,
+}) => {
+  await seed(page, {
+    bindings: [binding],
+    runs: [
+      agentRun({
+        status: "ready_for_review",
+        checks: [
+          { name: "test", status: "passed", exitCode: 0, logId: "verify:test", durationMs: 9 },
+        ],
+        review: {
+          verdict: "concerns",
+          summary: "negative numbers are not covered",
+          findings: [{ file: "src/sum.test.ts", issue: "no test for negative inputs" }],
+        },
+      }),
+    ],
+  });
+  const panel = await openTaskOnBoard(page);
+  const review = panel.getByLabel("Independent review");
+  await expect(review).toContainText("Reviewer agent: concerns · negative numbers are not covered");
+  await expect(review).toContainText("src/sum.test.ts: no test for negative inputs");
+  await expect(panel.getByRole("button", { name: "Accept & open Draft PR" })).toBeEnabled();
+
+  await review.getByRole("button", { name: "Use findings as feedback" }).click();
+  await expect(panel.getByLabel("Feedback for the agent")).toHaveValue(
+    "- src/sum.test.ts: no test for negative inputs",
+  );
+  await panel.getByRole("button", { name: "Request changes" }).click();
+  await expect.poll(() => calls(page, "harness_resume_run")).toHaveLength(1);
+  expect((await calls(page, "harness_resume_run"))[0].args?.feedback).toBe(
+    "- src/sum.test.ts: no test for negative inputs",
+  );
+});
+
+test("an approving or missing review offers no findings to copy", async ({ page }) => {
+  await seed(page, {
+    bindings: [binding],
+    runs: [
+      agentRun({
+        status: "ready_for_review",
+        review: { verdict: "unavailable", summary: "the reviewer timed out", findings: [] },
+      }),
+    ],
+  });
+  const panel = await openTaskOnBoard(page);
+  await expect(panel.getByLabel("Independent review")).toContainText(
+    "Not reviewed · the reviewer timed out",
+  );
+  await expect(panel.getByRole("button", { name: "Use findings as feedback" })).toHaveCount(0);
+});

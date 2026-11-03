@@ -7,6 +7,7 @@ use super::bindings::RepoBinding;
 use super::claude;
 use super::exec::{hide_console, resolve_executable};
 use super::repo::{CommandSpec, RepoCommands};
+use super::tools::AgentReview;
 use super::worktree::{self, CreateWorktree, WorktreeInfo};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
@@ -43,6 +44,8 @@ pub enum RunStatus {
     Running,
     /// The app runs the final checks itself.
     Verifying,
+    /// An independent reviewer agent reads the change (read-only).
+    Reviewing,
     /// Checks passed; waiting for the owner to accept or ask for changes.
     ReadyForReview,
     /// Accepted: the app commits, pushes and opens the Draft PR.
@@ -111,6 +114,8 @@ pub struct RunRecord {
     pub checks: Vec<CheckResult>,
     pub changed_files: Vec<String>,
     pub progress: Option<String>,
+    /// Verdict of the independent reviewer agent on the latest change.
+    pub review: Option<AgentReview>,
     /// Env files copied into the worktree; never committed even if the repo does not ignore them.
     pub copy_env: Vec<String>,
     pub base_branch: String,

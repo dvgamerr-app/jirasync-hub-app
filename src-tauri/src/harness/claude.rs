@@ -141,6 +141,20 @@ update .harness/progress.md, then finish with a short report."
     )
 }
 
+pub fn reviewer_prompt(issue_key: &str, checks: &str) -> String {
+    format!(
+        "You are an independent reviewer for Jira task {issue_key}. Another agent wrote the change; \
+you did not, so judge it critically. You can only read.\n\
+1. Read .harness/task.md (what was asked) and the repository's AGENTS.md or CLAUDE.md if present.\n\
+2. Read the real change with mcp__harness__git (op \"status\" and \"diff\").\n\
+3. The app ran these checks itself on this change: {checks}.\n\
+Look for: requirements in the task that the diff does not meet, changes the task did not ask for, \
+risky or broken logic, missing tests for the new behaviour, and secrets or debug leftovers.\n\
+Then call mcp__harness__submit_review with verdict \"approve\" (nothing important found) or \
+\"concerns\" with findings (file + issue). Be concrete and brief. Then stop."
+    )
+}
+
 pub fn drafting_prompt(issue_key: &str) -> String {
     format!(
         "The owner accepted your change for {issue_key}. Write the commit and pull request text now; \

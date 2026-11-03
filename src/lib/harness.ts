@@ -80,6 +80,7 @@ export type RunStatus =
   | "awaiting_plan"
   | "running"
   | "verifying"
+  | "reviewing"
   | "ready_for_review"
   | "publishing"
   | "completed"
@@ -157,6 +158,12 @@ export interface RunRecord {
   prUrl: string | null;
   /** Marked ready for review after CI passed. */
   prReady: boolean;
+  /** Verdict of the independent reviewer agent (it informs; the owner decides). */
+  review: {
+    verdict: "approve" | "concerns" | "unavailable";
+    summary: string;
+    findings: { file: string; issue: string }[];
+  } | null;
 }
 
 export type RunEventKind =
@@ -167,7 +174,7 @@ export type RunEventKind =
   | { type: "permission"; tool: string; decision: "allow" | "deny" }
   | {
       type: "agent";
-      kind: "init" | "text" | "tool" | "plan" | "pr_draft" | "result";
+      kind: "init" | "text" | "tool" | "plan" | "review" | "pr_draft" | "result";
       text: string;
     };
 
@@ -273,9 +280,15 @@ export function aiBoardStatusForRun(status: RunStatus): "doing" | "review" | "do
   if (status === "ready_for_review" || status === "publishing") return "review";
   if (status === "completed") return "done";
   if (
-    ["preparing", "installing", "planning", "awaiting_plan", "running", "verifying"].includes(
-      status,
-    )
+    [
+      "preparing",
+      "installing",
+      "planning",
+      "awaiting_plan",
+      "running",
+      "verifying",
+      "reviewing",
+    ].includes(status)
   )
     return "doing";
   return null;

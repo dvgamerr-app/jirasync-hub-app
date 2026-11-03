@@ -34,6 +34,7 @@ const STATUS_LABEL: Record<RunStatus, string> = {
   awaiting_plan: "Plan ready for your review",
   running: "Agent working",
   verifying: "App running checks",
+  reviewing: "Reviewer agent checking the change",
   ready_for_review: "Ready for review",
   publishing: "Committing, pushing and opening the Draft PR",
   completed: "Accepted",
@@ -349,6 +350,53 @@ export function TaskRunPanel({ task }: { task: Task }) {
             <pre className="board-run-log" aria-label="Agent progress">
               {run.progress}
             </pre>
+          )}
+          {run.review && (
+            <div className="space-y-1 text-[12px]" aria-label="Independent review">
+              <p>
+                <span
+                  className={cn(
+                    "font-medium",
+                    run.review.verdict === "concerns" && "text-amber-600 dark:text-amber-400",
+                  )}
+                >
+                  {run.review.verdict === "approve"
+                    ? "Reviewer agent: no concerns"
+                    : run.review.verdict === "concerns"
+                      ? "Reviewer agent: concerns"
+                      : "Not reviewed"}
+                </span>{" "}
+                · {run.review.summary}
+              </p>
+              {run.review.findings.length > 0 && (
+                <>
+                  <ul className="list-disc pl-4">
+                    {run.review.findings.map((finding, index) => (
+                      <li key={index}>
+                        {finding.file && <span className="font-mono">{finding.file}: </span>}
+                        {finding.issue}
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    type="button"
+                    className="text-primary underline"
+                    onClick={() =>
+                      setFeedback(
+                        run
+                          .review!.findings.map(
+                            (finding) =>
+                              `- ${finding.file ? `${finding.file}: ` : ""}${finding.issue}`,
+                          )
+                          .join("\n"),
+                      )
+                    }
+                  >
+                    Use findings as feedback
+                  </button>
+                </>
+              )}
+            </div>
           )}
           {feedbackBox("What should the agent change?")}
           <div className="flex gap-2">

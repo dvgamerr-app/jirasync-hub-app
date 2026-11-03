@@ -71,6 +71,7 @@ describe("agent run status", () => {
     expect(aiBoardStatusForRun("planning")).toBe("doing");
     expect(aiBoardStatusForRun("awaiting_plan")).toBe("doing");
     expect(aiBoardStatusForRun("verifying")).toBe("doing");
+    expect(aiBoardStatusForRun("reviewing")).toBe("doing");
     expect(aiBoardStatusForRun("ready_for_review")).toBe("review");
     expect(aiBoardStatusForRun("completed")).toBe("done");
     expect(aiBoardStatusForRun("failed")).toBeNull();

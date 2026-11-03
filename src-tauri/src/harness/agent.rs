@@ -6,7 +6,7 @@ use super::exec::git;
 use super::mcp::McpServer;
 use super::repo::CommandSpec;
 use super::run::{run_step, Control, EventKind, Journal, RunStatus, Step, StepOutcome};
-use super::tools::{Phase, PrDraft, RunTools};
+use super::tools::{AgentReview, Phase, PrDraft, RunTools};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -177,9 +177,15 @@ impl AgentRun<'_> {
         worktree: &Path,
         config_path: &Path,
     ) -> Result<StepOutcome, String> {
-        let existing = self.journal.record().session_id;
+        // The reviewer is independent: a fresh session that never sees the implementer's
+        // reasoning, only the task, the diff and the checks.
+        let existing = if phase == Phase::Reviewing {
+            None
+        } else {
+            self.journal.record().session_id
+        };
         let session_id = existing.clone().unwrap_or_else(claude::new_session_id);
-        if existing.is_none() {
+        if existing.is_none() && phase != Phase::Reviewing {
             let id = session_id.clone();
             self.journal.update(|record| record.session_id = Some(id));
         }
@@ -303,7 +309,7 @@ impl AgentRun<'_> {
                 return Ok(RunStatus::Cancelled);
             }
             if failed.is_empty() {
-                return Ok(RunStatus::ReadyForReview);
+                return self.review();
             }
             let names = failed
                 .iter()
@@ -319,6 +325,33 @@ impl AgentRun<'_> {
             self.journal.update(|record| record.attempts += 1);
             prompt = claude::repair_prompt(&self.failure_report(&failed));
         }
+    }
+
+    /// An independent, read-only reviewer compares the change with the task and the app's
+    /// checks (agents tend to rate their own work too well). Its verdict informs the owner;
+    /// if it cannot run, the change still reaches review, marked as not reviewed.
+    fn review(&self) -> Result<RunStatus, String> {
+        self.journal.set_status(RunStatus::Reviewing, None);
+        let record = self.journal.record();
+        let checks = record
+            .checks
+            .iter()
+            .map(|check| format!("{}: {}", check.name, check.status))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let prompt = claude::reviewer_prompt(&record.issue_key, &checks);
+        let review = match self.invoke(Phase::Reviewing, &prompt) {
+            Ok((outcome, tools)) => match self.agent_outcome(outcome)? {
+                Some(status) => return Ok(status),
+                None => tools.take_review().unwrap_or_else(|| {
+                    unavailable("the reviewer finished without submitting a review")
+                }),
+            },
+            Err(_) if self.control.cancelled() => return Ok(RunStatus::Cancelled),
+            Err(error) => unavailable(&error),
+        };
+        self.journal.update(|record| record.review = Some(review));
+        Ok(RunStatus::ReadyForReview)
     }
 
     fn failure_report(&self, failed: &[CheckResult]) -> String {
@@ -810,6 +843,14 @@ pub fn tree_digest(worktree: &Path) -> Result<String, String> {
         .take(16)
         .map(|b| format!("{b:02x}"))
         .collect())
+}
+
+fn unavailable(reason: &str) -> AgentReview {
+    AgentReview {
+        verdict: "unavailable".into(),
+        summary: reason.chars().take(500).collect(),
+        findings: Vec::new(),
+    }
 }
 
 /// Changed and new files in the worktree, excluding the harness scratch folder.

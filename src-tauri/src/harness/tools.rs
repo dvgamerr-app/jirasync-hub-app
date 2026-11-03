@@ -6,6 +6,7 @@ use super::exec::git;
 use super::mcp::ToolHost;
 use super::repo::{CommandSpec, RepoCommands};
 use super::run::{run_step, Background, Control, EventKind, Journal, Step, StepOutcome};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
 use std::net::{TcpListener, TcpStream};
@@ -123,6 +124,74 @@ pub fn validate_pr_draft(arguments: &Value) -> Result<PrDraft, String> {
     Ok(draft)
 }
 
+/// What an independent reviewer agent found. It informs the owner; it never decides.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AgentReview {
+    /// `approve`, `concerns`, or `unavailable` when the reviewer could not run.
+    pub verdict: String,
+    pub summary: String,
+    pub findings: Vec<ReviewFinding>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ReviewFinding {
+    pub file: String,
+    pub issue: String,
+}
+
+const MAX_FINDINGS: usize = 20;
+
+pub fn validate_review(arguments: &Value) -> Result<AgentReview, String> {
+    let verdict = arguments
+        .get("verdict")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if !["approve", "concerns"].contains(&verdict) {
+        return Err("verdict must be \"approve\" or \"concerns\"".into());
+    }
+    let summary = arguments
+        .get("summary")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    if summary.is_empty() || summary.chars().count() > 4000 {
+        return Err("summary is required (at most 4000 characters)".into());
+    }
+    let findings: Vec<ReviewFinding> = arguments
+        .get("findings")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .take(MAX_FINDINGS)
+                .filter_map(|item| {
+                    let issue = item.get("issue").and_then(Value::as_str)?.trim();
+                    (!issue.is_empty()).then(|| ReviewFinding {
+                        file: item
+                            .get("file")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .chars()
+                            .take(300)
+                            .collect(),
+                        issue: issue.chars().take(1000).collect(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if verdict == "concerns" && findings.is_empty() {
+        return Err("list at least one finding when the verdict is \"concerns\"".into());
+    }
+    Ok(AgentReview {
+        verdict: verdict.into(),
+        summary: summary.into(),
+        findings,
+    })
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum Phase {
@@ -145,6 +214,7 @@ pub struct RunTools {
     phase: AtomicU8,
     plan: Mutex<Option<String>>,
     pr_draft: Mutex<Option<PrDraft>>,
+    review: Mutex<Option<AgentReview>>,
     dev: Mutex<Option<(Background, u16)>>,
     exec_ms: AtomicU64,
     calls: AtomicU32,
@@ -167,6 +237,7 @@ impl RunTools {
             phase: AtomicU8::new(Phase::Planning as u8),
             plan: Mutex::new(None),
             pr_draft: Mutex::new(None),
+            review: Mutex::new(None),
             dev: Mutex::new(None),
             exec_ms: AtomicU64::new(0),
             calls: AtomicU32::new(0),
@@ -187,6 +258,11 @@ impl RunTools {
     }
 
     /// The pull request draft submitted in the drafting step, if any.
+    /// The independent review submitted in the reviewing step, if any.
+    pub fn take_review(&self) -> Option<AgentReview> {
+        self.review.lock().unwrap().take()
+    }
+
     pub fn take_pr_draft(&self) -> Option<PrDraft> {
         self.pr_draft.lock().unwrap().take()
     }
@@ -226,7 +302,7 @@ impl RunTools {
         match self.phase() {
             Phase::Planning => &["skill_list", "skill_get", "git", "get_log", "submit_plan"],
             Phase::Implementing => &["skill_list", "skill_get", "git", "get_log", "run"],
-            Phase::Reviewing => &["skill_list", "skill_get", "git", "get_log"],
+            Phase::Reviewing => &["skill_list", "skill_get", "git", "get_log", "submit_review"],
             Phase::Drafting => &[
                 "skill_list",
                 "skill_get",
@@ -530,6 +606,7 @@ impl ToolHost for RunTools {
             json!({ "name": "get_log", "description": "Read a page of the full output of an earlier run (its logId) or of the dev server (\"dev\").", "inputSchema": { "type": "object", "properties": { "logId": string, "offset": { "type": "number" }, "limit": { "type": "number" } }, "required": ["logId"] } }),
             json!({ "name": "run", "description": "Ask the app to execute a project command in the worktree: build, test, lint, dev (starts the dev server) or hurl (runs .hurl files against dev). The owner sees it live. Returns status, exitCode, logId and the output tail.", "inputSchema": { "type": "object", "properties": { "command": { "type": "string", "enum": ["build", "test", "lint", "dev", "hurl"] }, "files": { "type": "array", "items": string } }, "required": ["command"] } }),
             json!({ "name": "submit_plan", "description": "Submit your implementation plan (markdown: goal, files to change, steps, checks to run) for the owner to approve. Only during planning.", "inputSchema": { "type": "object", "properties": { "plan": string }, "required": ["plan"] } }),
+            json!({ "name": "submit_review", "description": "Submit your independent review of the change: verdict approve or concerns, a short summary, and findings (file + issue) for anything that does not match the task, is risky, or is untested. Only while reviewing.", "inputSchema": { "type": "object", "properties": { "verdict": { "type": "string", "enum": ["approve", "concerns"] }, "summary": string, "findings": { "type": "array", "items": { "type": "object", "properties": { "file": string, "issue": string }, "required": ["issue"] } } }, "required": ["verdict", "summary"] } }),
             json!({ "name": "submit_pr_draft", "description": "Submit the commit message and pull request text for the accepted change. title and commitMessage: English conventional commit (feat: ..., fix: ...). summary, reason, changes, impact: Thai markdown bullets grounded in the actual diff. Do not write test results or AI attribution; the app adds the testing section from its own checks.", "inputSchema": { "type": "object", "properties": { "title": string, "commitMessage": string, "summary": string, "reason": string, "changes": string, "impact": string }, "required": ["title", "commitMessage", "summary", "reason", "changes", "impact"] } }),
             json!({ "name": "approve", "description": "Permission handler used by the app. Not for the agent.", "inputSchema": { "type": "object", "properties": { "tool_name": string, "input": { "type": "object" }, "tool_use_id": string }, "required": ["tool_name", "input"] } }),
         ];
@@ -559,6 +636,15 @@ impl ToolHost for RunTools {
             "get_log" => self.get_log(&arguments),
             "run" => self.run(&arguments),
             "submit_plan" => self.submit_plan(&arguments),
+            "submit_review" => {
+                let review = validate_review(&arguments)?;
+                self.journal.push(EventKind::Agent {
+                    kind: "review".into(),
+                    text: format!("{}: {}", review.verdict, review.summary),
+                });
+                *self.review.lock().unwrap() = Some(review);
+                Ok("Review received. Stop now.".into())
+            }
             "submit_pr_draft" => {
                 let draft = validate_pr_draft(&arguments)?;
                 self.journal.push(EventKind::Agent {

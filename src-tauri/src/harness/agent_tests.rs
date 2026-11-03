@@ -18,6 +18,14 @@ fn fake_agent_entry() {
         return;
     };
     let args: Vec<String> = serde_json::from_str(&raw).unwrap();
+    if let Ok(log) = std::env::var("JIRASYNC_FAKE_AGENT_LOG") {
+        let mut previous = fs::read_to_string(&log).unwrap_or_default();
+        previous.push_str(&format!(
+            "{raw}
+"
+        ));
+        fs::write(&log, previous).unwrap();
+    }
     let flag = |name: &str| {
         args.iter()
             .position(|arg| arg == name)
@@ -54,6 +62,19 @@ fn fake_agent_entry() {
         json!({"type": "system", "subtype": "init", "model": "fake", "tools": []})
     );
 
+    if prompt.contains("independent reviewer") {
+        let review = match std::env::var("JIRASYNC_FAKE_REVIEW").as_deref() {
+            Ok("silent") => return,
+            Ok("concerns") => json!({
+                "verdict": "concerns",
+                "summary": "result.txt is written but nothing tests the error path",
+                "findings": [{ "file": "result.txt", "issue": "no test covers a failing result" }]
+            }),
+            _ => json!({ "verdict": "approve", "summary": "matches the task; test passes" }),
+        };
+        call("submit_review", review);
+        return;
+    }
     if prompt.contains("pull request") {
         let english = std::env::var("JIRASYNC_FAKE_DRAFT").as_deref() == Ok("english");
         let reply = call(
@@ -183,6 +204,14 @@ fn fixture() -> Fixture {
 }
 
 impl Fixture {
+    fn agent_calls(&self) -> Vec<Vec<String>> {
+        fs::read_to_string(self.gh_log.path().join("agent.log"))
+            .unwrap_or_default()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+
     fn gh_calls(&self) -> Vec<Vec<String>> {
         fs::read_to_string(self.gh_log.path().join("gh.log"))
             .unwrap_or_default()
@@ -209,6 +238,10 @@ fn manager(fx: &Fixture, env: &[(&str, &str)], budget: Duration) -> RunManager {
     env.push((
         "JIRASYNC_FAKE_GH_LOG".into(),
         fx.gh_log.path().join("gh.log").display().to_string(),
+    ));
+    env.push((
+        "JIRASYNC_FAKE_AGENT_LOG".into(),
+        fx.gh_log.path().join("agent.log").display().to_string(),
     ));
     let skills = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/harness-skills");
     let mut agent = AgentEnv::new(
@@ -339,6 +372,7 @@ fn plan_approve_implement_verify_review_accept() {
     assert_eq!(reviewed.changed_files, vec!["result.txt".to_string()]);
     assert!(reviewed.progress.as_deref().unwrap().contains("PASS"));
     assert_eq!(reviewed.attempts, 0);
+    assert_eq!(reviewed.review.as_ref().unwrap().verdict, "approve");
 
     let events = manager.events(&run.run_id, 0, usize::MAX).unwrap();
     assert!(events.iter().any(|e| matches!(&e.kind,
@@ -633,6 +667,79 @@ fn a_change_made_after_the_checks_is_checked_again_before_publishing() {
         "the stale pass was replaced"
     );
     assert!(fx.gh_calls().is_empty(), "nothing was published");
+}
+
+#[test]
+fn an_independent_reviewer_reports_concerns_without_deciding() {
+    let fx = fixture();
+    let manager = manager(
+        &fx,
+        &[("JIRASYNC_FAKE_REVIEW", "concerns")],
+        Duration::from_secs(600),
+    );
+    let run = reviewed(&manager, &fx);
+    let review = run.review.clone().unwrap();
+    assert_eq!(review.verdict, "concerns");
+    assert_eq!(review.findings[0].file, "result.txt");
+    assert_eq!(
+        run.status,
+        RunStatus::ReadyForReview,
+        "the owner still decides"
+    );
+
+    let events = manager.events(&run.run_id, 0, usize::MAX).unwrap();
+    let sessions: Vec<String> = events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            EventKind::StepStart { step, command } if step == "agent" => Some(command.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sessions.len(), 3, "plan, implement, review");
+    let calls = fx.agent_calls();
+    let session_of = |args: &Vec<String>, flag: &str| {
+        args.iter()
+            .position(|a| a == flag)
+            .map(|i| args[i + 1].clone())
+    };
+    let owner_session = run.session_id.clone().unwrap();
+    assert_eq!(
+        session_of(&calls[1], "--resume").as_deref(),
+        Some(owner_session.as_str())
+    );
+    let reviewer = session_of(&calls[2], "--session-id").expect("reviewer starts a new session");
+    assert_ne!(
+        reviewer, owner_session,
+        "the reviewer never resumes the author session"
+    );
+    assert!(session_of(&calls[2], "--resume").is_none());
+    assert!(
+        sessions
+            .iter()
+            .all(|command| command.contains("fake_agent_entry")),
+        "every agent step is an app-started process"
+    );
+    assert!(events.iter().any(|e| matches!(
+        &e.kind,
+        EventKind::Status {
+            status: RunStatus::Reviewing,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn a_reviewer_that_does_not_answer_does_not_block_the_owner() {
+    let fx = fixture();
+    let manager = manager(
+        &fx,
+        &[("JIRASYNC_FAKE_REVIEW", "silent")],
+        Duration::from_secs(600),
+    );
+    let run = reviewed(&manager, &fx);
+    let review = run.review.unwrap();
+    assert_eq!(review.verdict, "unavailable");
+    assert!(review.summary.contains("without submitting a review"));
 }
 
 fn published(manager: &RunManager, fx: &Fixture) -> RunRecord {
