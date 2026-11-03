@@ -3,6 +3,8 @@
 วันที่: 2026-11-01 (แก้ไขหลัง review)  
 สถานะ: พัฒนา MVP แล้ว; ยังไม่ release และยังไม่เริ่ม gate ทดลองใช้ 2 สัปดาห์
 
+แผนระยะถัดไปตามโจทย์ใหม่: [Agent Execution และ Personal Development Harness](agent-execution-harness-plan.md) สำหรับสั่ง Claude/Codex ผ่านแอปและคุมงานในเครื่อง; ยังเป็นข้อเสนอ ไม่ใช่ฟีเจอร์ที่ implement แล้ว
+
 ## เป้าหมาย
 
 ลดงานซ้ำตอนต้นและตอนท้ายของการทำ ticket กับ AI โดยใช้ข้อมูลที่แอปมีอยู่แล้ว (ticket ที่ sync ไว้, note, worklog, comment) ไม่สร้างระบบติดตาม session ซ้อนกับ repo
