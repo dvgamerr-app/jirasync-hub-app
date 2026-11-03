@@ -23,6 +23,8 @@ export interface E2EHarnessState {
   dirtyWorktrees?: string[];
   /** Board access for external MCP clients (see tauri-core boardCommand). */
   board?: { expiresAt: number | null; tasks: BoardTask[]; requests: BoardRunRequest[] };
+  /** Git snapshot sync folder: its snapshot, what the app pushed, and a busy-run refusal. */
+  snapshot?: { remote: string | null; pushed: string[]; busy?: boolean };
   /** Every harness command the app invoked, in order. */
   calls: { cmd: string; args?: Record<string, unknown> }[];
 }

@@ -184,7 +184,9 @@ pub fn run() {
             harness::harness_board_status,
             harness::harness_board_publish,
             harness::harness_board_requests,
-            harness::harness_board_resolve
+            harness::harness_board_resolve,
+            harness::harness_snapshot_pull,
+            harness::harness_snapshot_push
         ])
         .setup(|app| {
             use tauri::Manager;

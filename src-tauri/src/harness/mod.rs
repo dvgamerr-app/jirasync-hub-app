@@ -11,6 +11,7 @@ mod exec;
 mod mcp;
 mod repo;
 mod run;
+mod snapshot;
 #[cfg(test)]
 mod testutil;
 mod tools;
@@ -339,4 +340,32 @@ pub fn harness_board_resolve(
     approve: bool,
 ) -> Result<board::RunRequest, String> {
     board_host(&board)?.resolve(&request_id, approve)
+}
+
+/// Pulls the sync folder (fast-forward only) and returns the snapshot it holds, if any.
+#[tauri::command]
+pub async fn harness_snapshot_pull(
+    runs: tauri::State<'_, RunManager>,
+    folder: String,
+) -> Result<Option<String>, String> {
+    let manager = runs.inner().clone();
+    blocking(move || snapshot::pull(Path::new(&folder), manager.active_run_id().as_deref())).await
+}
+
+/// Writes the snapshot into the sync folder, commits only that file and pushes if possible.
+#[tauri::command]
+pub async fn harness_snapshot_push(
+    runs: tauri::State<'_, RunManager>,
+    folder: String,
+    content: String,
+) -> Result<snapshot::PushResult, String> {
+    let manager = runs.inner().clone();
+    blocking(move || {
+        snapshot::push(
+            Path::new(&folder),
+            &content,
+            manager.active_run_id().as_deref(),
+        )
+    })
+    .await
 }

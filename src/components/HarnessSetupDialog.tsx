@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
+import { open as openFolderDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
+import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { CheckCircle2, CircleAlert, FolderOpen, Loader2, RefreshCw, XCircle } from "lucide-react";
 import { useTaskStore } from "@/store/task-store";
 import {
@@ -19,6 +20,7 @@ import {
 } from "@/lib/harness";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { BOARD_ACCESS_HOURS } from "@/lib/board-access";
+import { parseSnapshot, SNAPSHOT_FILE, type ImportReport } from "@/lib/snapshot";
 import { toast } from "@/hooks/use-toast";
 import type { Project } from "@/types/jira";
 import { Button } from "@/components/ui/button";
@@ -26,7 +28,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 
-type SetupTab = "tools" | "repositories" | "external agents";
+type SetupTab = "tools" | "repositories" | "external agents" | "sync";
 
 function StatusIcon({ ok, required }: { ok: boolean; required: boolean }) {
   if (ok) return <CheckCircle2 className="h-4 w-4 text-emerald-500" aria-label="Ready" />;
@@ -553,6 +555,179 @@ function RepositoriesSection() {
   );
 }
 
+const SNAPSHOT_FOLDER_KEY = "jirasync-snapshot-folder";
+
+function describeImport(report: ImportReport | null): string {
+  if (!report) return "No snapshot in the folder yet.";
+  const parts = [
+    `${report.aiStates} AI status${report.aiStates === 1 ? "" : "es"}`,
+    `${report.notes} note${report.notes === 1 ? "" : "s"}`,
+  ];
+  if (report.olderIgnored) parts.push(`${report.olderIgnored} older status kept local`);
+  if (report.noteConflicts.length)
+    parts.push(`notes kept local (different here): ${report.noteConflicts.join(", ")}`);
+  if (report.missingTasks.length)
+    parts.push(`notes for tasks not synced here: ${report.missingTasks.join(", ")}`);
+  if (report.unknownAccounts.length)
+    parts.push(`Jira accounts not set up here: ${report.unknownAccounts.join(", ")}`);
+  return `Imported ${parts.join(" · ")}.`;
+}
+
+function SnapshotSection() {
+  const { exportSnapshot, importSnapshot, syncFolder } = useTaskStore(
+    useShallow((state) => ({
+      exportSnapshot: state.exportSnapshot,
+      importSnapshot: state.importSnapshot,
+      syncFolder: state.syncSnapshotFolder,
+    })),
+  );
+  const [includeNotes, setIncludeNotes] = useState(false);
+  const [folder, setFolder] = useState(() => {
+    try {
+      return localStorage.getItem(SNAPSHOT_FOLDER_KEY) ?? "";
+    } catch {
+      return "";
+    }
+  });
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  async function act(action: () => Promise<string>) {
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      setMessage(await action());
+    } catch (actionError) {
+      setError(getErrorMessage(actionError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const exportFile = () =>
+    act(async () => {
+      const path = await saveFileDialog({
+        defaultPath: SNAPSHOT_FILE,
+        filters: [{ name: "JiraSync snapshot", extensions: ["json"] }],
+      });
+      if (!path) return "";
+      await writeTextFile(path, JSON.stringify(exportSnapshot(includeNotes), null, 2));
+      return `Saved ${path}`;
+    });
+
+  const importFile = (file: File) =>
+    act(async () => describeImport(await importSnapshot(parseSnapshot(await file.text()))));
+
+  const sync = () =>
+    act(async () => {
+      try {
+        localStorage.setItem(SNAPSHOT_FOLDER_KEY, folder);
+      } catch {
+        // Remembering the folder is a convenience only.
+      }
+      const result = await syncFolder(folder, includeNotes);
+      const pushed = result.pushed
+        ? "pushed"
+        : result.committed
+          ? "committed (no upstream to push to)"
+          : "nothing new to commit";
+      return `${describeImport(result.report)} Snapshot ${pushed}.`;
+    });
+
+  return (
+    <section aria-label="Sync" className="space-y-3 text-[13px]">
+      <p>
+        Move your AI Board progress (and, if you choose, local notes) to another machine. Jira data
+        comes back with a Jira sync, repository settings stay per machine, and tokens are never
+        included. Tasks are matched by Jira site, account email and issue key.
+      </p>
+      <label className="flex items-center gap-1.5 text-[12px]">
+        <input
+          type="checkbox"
+          checked={includeNotes}
+          onChange={(event) => setIncludeNotes(event.target.checked)}
+        />
+        Include my local notes
+      </label>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          onClick={() => void exportFile()}
+        >
+          Export file
+        </Button>
+        <Label className="border-input hover:bg-muted inline-flex h-8 cursor-pointer items-center rounded-md border px-3 text-[12px] font-normal">
+          Import file
+          <input
+            type="file"
+            accept=".json,application/json"
+            aria-label="Import snapshot file"
+            className="sr-only"
+            disabled={busy}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) void importFile(file);
+            }}
+          />
+        </Label>
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor="snapshot-folder">Git sync folder (a clone of a private repository)</Label>
+        <div className="flex gap-2">
+          <Input
+            id="snapshot-folder"
+            value={folder}
+            placeholder="C:\\src\\jirasync-sync"
+            onChange={(event) => setFolder(event.target.value)}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              void openFolderDialog({ directory: true, multiple: false }).then((picked) => {
+                if (typeof picked === "string") setFolder(picked);
+              })
+            }
+          >
+            <FolderOpen className="h-3.5 w-3.5" />
+            Browse
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy || !folder.trim()}
+            onClick={() => void sync()}
+          >
+            {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            Sync now
+          </Button>
+        </div>
+        <p className="text-muted-foreground text-[11px]">
+          Pulls, merges (newer AI status wins, a different local note is kept), then commits and
+          pushes only {SNAPSHOT_FILE}. Stop running agents before switching machines.
+        </p>
+      </div>
+      {message && (
+        <p className="text-[12px]" role="status">
+          {message}
+        </p>
+      )}
+      {error && (
+        <p className="text-destructive text-[12px]" role="alert">
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
+
 function ExternalAgentsSection() {
   const { access, enable, disable } = useTaskStore(
     useShallow((state) => ({
@@ -678,7 +853,7 @@ export function HarnessSetupDialog() {
           Tools and repositories the app uses when it runs a coding agent on a task.
         </DialogDescription>
         <div role="tablist" className="flex gap-1 border-b">
-          {(["tools", "repositories", "external agents"] as const).map((id) => (
+          {(["tools", "repositories", "external agents", "sync"] as const).map((id) => (
             <button
               key={id}
               type="button"
@@ -700,8 +875,10 @@ export function HarnessSetupDialog() {
           <ToolsSection />
         ) : tab === "repositories" ? (
           <RepositoriesSection />
-        ) : (
+        ) : tab === "external agents" ? (
           <ExternalAgentsSection />
+        ) : (
+          <SnapshotSection />
         )}
       </DialogContent>
     </Dialog>

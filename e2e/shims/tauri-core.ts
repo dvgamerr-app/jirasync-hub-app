@@ -134,8 +134,21 @@ function harness(cmd: string, args?: Record<string, unknown>): unknown {
       state.bindings = state.bindings.filter((binding) => binding.projectId !== args?.projectId);
       return null;
     default:
+      if (cmd.startsWith("harness_snapshot_")) return snapshotCommand(cmd, args);
       return cmd.startsWith("harness_board_") ? boardCommand(cmd, args) : runCommand(cmd, args);
   }
+}
+
+// Git snapshot sync: `remote` is what the sync folder holds after a pull; pushes are kept.
+function snapshotCommand(cmd: string, args?: Record<string, unknown>): unknown {
+  const sync = (getHarnessState().snapshot ??= { remote: null, pushed: [] });
+  if (sync.busy) throw "run abc123 is working; finish or stop it before syncing to another machine";
+  if (cmd === "harness_snapshot_pull") return sync.remote;
+  const content = String(args?.content);
+  const committed = content !== sync.remote;
+  sync.pushed.push(content);
+  sync.remote = content;
+  return { committed, pushed: committed };
 }
 
 // Board access: the published tasks and requests stay in state so tests can play the external

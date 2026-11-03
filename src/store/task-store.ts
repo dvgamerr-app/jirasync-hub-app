@@ -24,6 +24,16 @@ import {
   type BoardAccess,
   type BoardRunRequest,
 } from "@/lib/board-access";
+import {
+  buildSnapshot,
+  parseSnapshot,
+  planImport,
+  pullSnapshotFolder,
+  pushSnapshotFolder,
+  type ImportReport,
+  type Snapshot,
+  type SnapshotPushResult,
+} from "@/lib/snapshot";
 import { db, getJiraAccounts, getStoryPointFieldMap, type JiraAccount } from "@/lib/jira-db";
 import {
   getAccountIdFromTask,
@@ -181,6 +191,15 @@ export interface TaskStore {
   markTaskPrReady: (runId: string) => Promise<void>;
   stopTaskRun: (runId: string) => Promise<void>;
   removeTaskRunWorktree: (runId: string, discardChanges: boolean) => Promise<void>;
+  /** AI progress (and notes if asked) as a portable snapshot; never credentials. */
+  exportSnapshot: (includeNotes: boolean) => Snapshot;
+  /** Merges a snapshot: newer AI states win, a different local note is never overwritten. */
+  importSnapshot: (snapshot: Snapshot) => Promise<ImportReport>;
+  /** Pull → merge → write → commit → push through a git folder (refused while a run works). */
+  syncSnapshotFolder: (
+    folder: string,
+    includeNotes: boolean,
+  ) => Promise<SnapshotPushResult & { report: ImportReport | null }>;
   /** External MCP clients' view of the board; `null` while the owner has it off. */
   boardAccess: BoardAccess | null;
   /** Run requests from external clients (pending ones wait for the owner). */
@@ -1094,6 +1113,36 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       set((state) => ({
         runs: state.runs.map((run) => (run.runId === record.runId ? record : run)),
       }));
+    },
+    exportSnapshot: (includeNotes) => {
+      const state = get();
+      return buildSnapshot(getJiraAccounts(), state.aiBoardStates, state.tasks, {
+        includeNotes,
+      });
+    },
+    importSnapshot: (snapshot) =>
+      runLocked(async () => {
+        const state = get();
+        const plan = planImport(snapshot, {
+          accounts: getJiraAccounts(),
+          aiStates: state.aiBoardStates,
+          tasks: state.tasks,
+        });
+        if (plan.aiStates.length > 0) {
+          await db.aiBoardStates.bulkPut(plan.aiStates);
+          set((current) => ({
+            aiBoardStates: upsertById(current.aiBoardStates, plan.aiStates),
+          }));
+        }
+        for (const { taskId, note } of plan.notes) get().updateTaskNote(taskId, note);
+        return plan.report;
+      }),
+    syncSnapshotFolder: async (folder, includeNotes) => {
+      const remote = await pullSnapshotFolder(folder);
+      const report = remote ? await get().importSnapshot(parseSnapshot(remote)) : null;
+      const content = JSON.stringify(get().exportSnapshot(includeNotes), null, 2);
+      const result = await pushSnapshotFolder(folder, content);
+      return { report, ...result };
     },
     boardAccess: null,
     boardRequests: [],
