@@ -9,8 +9,8 @@ import { emit } from "./tauri-event";
 /** Appends to the fake journal and sends it live, like the native core does. */
 function pushRunEvent(event: RunEvent) {
   const state = getHarnessState();
-  state.journal ??= {};
-  (state.journal[event.runId] ??= []).push(event);
+  const journal = (state.journal ??= {});
+  journal[event.runId] = [...(journal[event.runId] ?? []), event];
   if (event.type === "status") {
     const { status, message } = event;
     state.runs = (state.runs ?? []).map((run) =>
@@ -27,83 +27,93 @@ declare global {
 }
 window.__e2ePushRunEvent = pushRunEvent;
 
-function runCommand(cmd: string, args?: Record<string, unknown>): unknown {
+type Args = Record<string, unknown> | undefined;
+
+/** Replaces one run record and returns the new copy. */
+function updateRun(runId: unknown, change: (run: RunRecord) => RunRecord): RunRecord | undefined {
+  const state = getHarnessState();
+  state.runs = (state.runs ?? []).map((run) => (run.runId === runId ? change(run) : run));
+  return state.runs.find((run) => run.runId === runId);
+}
+
+function startRun(args: Args): RunRecord {
   const state = getHarnessState();
   const runs = (state.runs ??= []);
-  switch (cmd) {
-    case "harness_start_run": {
-      const active = runs.find((run) =>
-        ["preparing", "installing", "planning", "running", "verifying"].includes(run.status),
-      );
-      if (active) throw `another run (${active.runId}) is active; stop it or wait for it to finish`;
-      if (!state.bindings.some((binding) => binding.projectId === args?.projectId))
-        throw "bind this project to a repository in Setup first";
-      const record: RunRecord = {
-        ...emptyRunRecord(),
-        runId: `run${String(runs.length + 1).padStart(3, "0")}abc`,
-        taskId: String(args?.taskId),
-        projectId: String(args?.projectId),
-        issueKey: String(args?.issueKey),
-        repoPath: "C:/src/service",
-        createdAt: Date.now(),
-        mode: args?.context ? "agent" : "prepare",
-        provider: args?.context ? (args?.provider === "codex" ? "codex" : "claude") : "",
-      };
-      state.runs = [record, ...runs];
-      pushRunEvent({
-        runId: record.runId,
-        seq: 1,
-        at: Date.now(),
-        type: "status",
-        status: "preparing",
-        message: null,
-      });
-      return record;
-    }
-    case "harness_resume_run": {
-      // The real gate rules are tested natively; the shim records the decision and moves on.
-      const run = runs.find((candidate) => candidate.runId === args?.runId);
-      if (!run) throw `run ${args?.runId} not found`;
-      if (["revise_plan", "request_changes"].includes(String(args?.decision)) && !args?.feedback)
-        throw "write what should change";
-      const status =
-        args?.decision === "accept"
-          ? "publishing"
-          : args?.decision === "revise_plan"
-            ? "planning"
-            : "running";
-      state.runs = runs.map((candidate) =>
-        candidate === run ? { ...candidate, status } : candidate,
-      );
-      return state.runs.find((candidate) => candidate.runId === run.runId);
-    }
-    case "harness_pr_checks":
-      return state.ci ?? { checks: [], allPassed: false };
-    case "harness_mark_pr_ready": {
-      if (!state.ci?.allPassed) throw "CI has not passed yet";
-      state.runs = runs.map((run) => (run.runId === args?.runId ? { ...run, prReady: true } : run));
-      return state.runs.find((run) => run.runId === args?.runId);
-    }
-    case "harness_stop_run":
-      return null;
-    case "harness_list_runs":
-      return runs;
-    case "harness_run_events":
-      return (state.journal?.[String(args?.runId)] ?? []).filter(
-        (event) => event.seq > Number(args?.afterSeq ?? 0),
-      );
-    case "harness_remove_run_worktree": {
-      const runId = String(args?.runId);
-      if (state.dirtyWorktrees?.includes(runId) && !args?.discardChanges)
-        throw "worktree has 1 uncommitted change(s); confirm to discard them";
-      state.runs = runs.map((run) =>
-        run.runId === runId ? { ...run, worktreeRemoved: true } : run,
-      );
-      return state.runs.find((run) => run.runId === runId);
-    }
-    default:
-      return undefined;
-  }
+  const active = runs.find((run) =>
+    ["preparing", "installing", "planning", "running", "verifying"].includes(run.status),
+  );
+  if (active)
+    throw new Error(`another run (${active.runId}) is active; stop it or wait for it to finish`);
+  if (!state.bindings.some((binding) => binding.projectId === args?.projectId))
+    throw new Error("bind this project to a repository in Setup first");
+  const agent = Boolean(args?.context);
+  let provider: RunRecord["provider"] = "";
+  if (agent) provider = args?.provider === "codex" ? "codex" : "claude";
+  const record: RunRecord = {
+    ...emptyRunRecord(),
+    runId: `run${String(runs.length + 1).padStart(3, "0")}abc`,
+    taskId: String(args?.taskId),
+    projectId: String(args?.projectId),
+    issueKey: String(args?.issueKey),
+    repoPath: "C:/src/service",
+    createdAt: Date.now(),
+    mode: agent ? "agent" : "prepare",
+    provider,
+  };
+  state.runs = [record, ...runs];
+  pushRunEvent({
+    runId: record.runId,
+    seq: 1,
+    at: Date.now(),
+    type: "status",
+    status: "preparing",
+    message: null,
+  });
+  return record;
+}
+
+const STATUS_AFTER: Record<string, RunRecord["status"]> = {
+  accept: "publishing",
+  revise_plan: "planning",
+};
+
+function resumeRun(args: Args): RunRecord | undefined {
+  // The real gate rules are tested natively; the shim records the decision and moves on.
+  const run = getHarnessState().runs?.find((candidate) => candidate.runId === args?.runId);
+  if (!run) throw new Error(`run ${String(args?.runId)} not found`);
+  const decision = String(args?.decision);
+  if (["revise_plan", "request_changes"].includes(decision) && !args?.feedback)
+    throw new Error("write what should change");
+  const status = STATUS_AFTER[decision] ?? "running";
+  return updateRun(run.runId, (current) => ({ ...current, status }));
+}
+
+function removeWorktree(args: Args): RunRecord | undefined {
+  const runId = String(args?.runId);
+  if (getHarnessState().dirtyWorktrees?.includes(runId) && !args?.discardChanges)
+    throw new Error("worktree has 1 uncommitted change(s); confirm to discard them");
+  return updateRun(runId, (run) => ({ ...run, worktreeRemoved: true }));
+}
+
+const RUN_COMMANDS: Record<string, (args: Args) => unknown> = {
+  harness_start_run: startRun,
+  harness_resume_run: resumeRun,
+  harness_remove_run_worktree: removeWorktree,
+  harness_pr_checks: () => getHarnessState().ci ?? { checks: [], allPassed: false },
+  harness_mark_pr_ready: (args) => {
+    if (!getHarnessState().ci?.allPassed) throw new Error("CI has not passed yet");
+    return updateRun(args?.runId, (run) => ({ ...run, prReady: true }));
+  },
+  harness_stop_run: () => null,
+  harness_list_runs: () => (getHarnessState().runs ??= []),
+  harness_run_events: (args) =>
+    (getHarnessState().journal?.[String(args?.runId)] ?? []).filter(
+      (event) => event.seq > Number(args?.afterSeq ?? 0),
+    ),
+};
+
+function runCommand(cmd: string, args: Args): unknown {
+  return RUN_COMMANDS[cmd]?.(args);
 }
 
 function harness(cmd: string, args?: Record<string, unknown>): unknown {
@@ -114,8 +124,9 @@ function harness(cmd: string, args?: Record<string, unknown>): unknown {
       return state.doctor;
     case "harness_detect_repo": {
       const result = state.detections[String(args?.path)];
-      if (result === undefined) throw `${args?.path} is not inside a git repository`;
-      if (typeof result === "string") throw result;
+      if (result === undefined)
+        throw new Error(`${String(args?.path)} is not inside a git repository`);
+      if (typeof result === "string") throw new Error(result);
       return result;
     }
     case "harness_default_worktree_root":
@@ -142,7 +153,8 @@ function harness(cmd: string, args?: Record<string, unknown>): unknown {
 // Git snapshot sync: `remote` is what the sync folder holds after a pull; pushes are kept.
 function snapshotCommand(cmd: string, args?: Record<string, unknown>): unknown {
   const sync = (getHarnessState().snapshot ??= { remote: null, pushed: [] });
-  if (sync.busy) throw "run abc123 is working; finish or stop it before syncing to another machine";
+  if (sync.busy)
+    throw new Error("run abc123 is working; finish or stop it before syncing to another machine");
   if (cmd === "harness_snapshot_pull") return sync.remote;
   const content = String(args?.content);
   const committed = content !== sync.remote;
@@ -171,15 +183,16 @@ function boardCommand(cmd: string, args?: Record<string, unknown>): unknown {
     case "harness_board_status":
       return board.expiresAt;
     case "harness_board_publish":
-      if (!board.expiresAt) throw "board access is off";
+      if (!board.expiresAt) throw new Error("board access is off");
       board.tasks = args?.tasks as BoardTask[];
       return null;
     case "harness_board_requests":
       return board.requests;
     case "harness_board_resolve": {
       const request = board.requests.find((r) => r.requestId === args?.requestId);
-      if (!request) throw "this request no longer exists";
-      if (request.status !== "pending") throw `this request was already ${request.status}`;
+      if (!request) throw new Error("this request no longer exists");
+      if (request.status !== "pending")
+        throw new Error(`this request was already ${request.status}`);
       request.status = args?.approve ? "approved" : "declined";
       return { ...request };
     }

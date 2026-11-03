@@ -180,9 +180,8 @@ const report: Record<string, unknown> = {
 const checks: { name: string; pass: boolean; detail?: unknown }[] = [];
 const check = (name: string, pass: boolean, detail?: unknown) => {
   checks.push({ name, pass, detail });
-  console.log(
-    `${pass ? "PASS" : "FAIL"}  ${name}${detail === undefined ? "" : `  ${JSON.stringify(detail)}`}`,
-  );
+  const shown = detail === undefined ? "" : "  " + JSON.stringify(detail);
+  console.log(`${pass ? "PASS" : "FAIL"}  ${name}${shown}`);
 };
 
 // --- Run 1: full task ----------------------------------------------------------------------

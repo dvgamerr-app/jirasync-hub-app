@@ -110,8 +110,9 @@ pub fn validate(mut binding: RepoBinding) -> Result<RepoBinding, String> {
     if !Path::new(worktree_root).is_absolute() {
         return Err("worktree folder must be an absolute path".into());
     }
-    let worktree_path = Path::new(worktree_root);
-    if worktree_path.starts_with(&root) {
+    // Compare real locations: git reports resolved paths (macOS /var -> /private/var, Windows
+    // 8.3 short names), and the worktree folder may not exist yet.
+    if resolved(Path::new(worktree_root)).starts_with(resolved(&root)) {
         return Err("worktree folder must be outside the repository".into());
     }
     binding.worktree_root = worktree_root.to_string();
@@ -202,6 +203,24 @@ fn validate_services(services: &[ServiceSpec], overrides: &[EnvVar]) -> Result<(
         }
     }
     Ok(())
+}
+
+/// `path` with its nearest existing ancestor canonicalized (symlinks and short names resolved).
+fn resolved(path: &Path) -> std::path::PathBuf {
+    let mut existing = path;
+    let mut rest = Vec::new();
+    while !existing.exists() {
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                existing = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
+    let mut full = fs::canonicalize(existing).unwrap_or_else(|_| existing.to_path_buf());
+    full.extend(rest.iter().rev());
+    full
 }
 
 pub fn save(path: &Path, binding: RepoBinding) -> Result<RepoBinding, String> {
@@ -382,6 +401,22 @@ mod tests {
         assert!(unknown.unwrap_err().contains("unknown service \"cache\""));
         assert!(validate_services(&[], &[var("BAD KEY", "1")]).is_err());
         assert!(validate_services(&[], &[var("PORT", "1\nINJECT=1")]).is_err());
+    }
+
+    /// A worktree folder reached through another name for the repo (a symlink here; macOS
+    /// /var -> /private/var and Windows short names behave the same) is still inside it.
+    #[cfg(unix)]
+    #[test]
+    fn worktree_inside_the_repo_is_caught_through_a_symlink() {
+        let repo = TempDir::new("bind-link-repo");
+        repo.init_repo("main");
+        let links = TempDir::new("bind-link");
+        let alias = links.path().join("alias");
+        std::os::unix::fs::symlink(repo.path(), &alias).unwrap();
+        let store_dir = TempDir::new("bind-link-store");
+        let bad = binding(repo.path(), &alias.join("wt"));
+        let error = save(&store_dir.path().join("bindings.json"), bad).unwrap_err();
+        assert!(error.contains("outside the repository"), "{error}");
     }
 
     #[test]

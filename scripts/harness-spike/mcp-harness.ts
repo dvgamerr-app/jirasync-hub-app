@@ -74,7 +74,8 @@ async function execute(name: string, executable: string, args: string[], timeout
   const exitCode = await proc.exited;
   clearTimeout(timer);
   const logId = `log-${++logSeq}`;
-  const output = `${stdout}${stderr ? `\n[stderr]\n${stderr}` : ""}`;
+  const stderrPart = stderr ? "\n[stderr]\n" + stderr : "";
+  const output = stdout + stderrPart;
   writeFileSync(join(logDir, `${logId}.log`), output);
   const durationMs = Date.now() - startedAt;
   record({ event: "exec_end", name, exitCode, durationMs, logId });
@@ -158,56 +159,69 @@ function approve(input: Record<string, unknown>) {
       };
 }
 
-async function callTool(name: string, input: Record<string, unknown>) {
+type Input = Record<string, unknown>;
+
+function runHurl(input: Input) {
+  const hurl = Bun.which("hurl");
+  if (!hurl) return { status: "unavailable", reason: "hurl is not installed" };
+  const reportDir = join(logDir, `hurl-${logSeq + 1}`);
+  return execute("hurl", hurl, [
+    "--test",
+    "--no-color",
+    "--variable",
+    `base_url=http://127.0.0.1:${devPort}`,
+    "--report-json",
+    reportDir,
+    ...hurlFiles(input.files),
+  ]);
+}
+
+function runCommand(input: Input) {
+  const command = String(input.command ?? "");
+  if (command === "dev") return startDev();
+  if (command === "hurl") return runHurl(input);
+  const spec = commands[command];
+  if (!spec || spec.longRunning) {
+    const allowed = [...Object.keys(commands), "hurl"].join(", ");
+    return { status: "rejected", reason: `unknown command "${command}"; allowed: ${allowed}` };
+  }
+  return execute(command, spec.executable, spec.args, spec.timeoutMs);
+}
+
+function runGit(input: Input) {
+  const op = String(input.op ?? "");
+  const args = GIT_OPS[op];
+  if (!args)
+    return { status: "rejected", reason: `op must be one of ${Object.keys(GIT_OPS).join(", ")}` };
+  return execute(`git ${op}`, "git", args, 30_000);
+}
+
+function getLog(input: Input) {
+  const logId = String(input.logId ?? "");
+  if (!/^log-\d+$/.test(logId)) return { status: "rejected", reason: "invalid logId" };
+  const lines = readFileSync(join(logDir, `${logId}.log`), "utf8").split(/\r?\n/);
+  const offset = Number(input.offset ?? 0);
+  const limit = Math.min(Number(input.limit ?? 200), 500);
+  return {
+    logId,
+    offset,
+    totalLines: lines.length,
+    lines: lines.slice(offset, offset + limit).join("\n"),
+  };
+}
+
+const HANDLERS: Record<string, (input: Input) => unknown> = {
+  run: runCommand,
+  git: runGit,
+  skill_list: () => ({ skills: listSkills() }),
+  skill_get: getSkill,
+  get_log: getLog,
+};
+
+async function callTool(name: string, input: Input) {
   if (name === "approve") return approve(input);
   record({ event: "tool_call", tool: name, input });
-  if (name === "run") {
-    const command = String(input.command ?? "");
-    if (command === "dev") return startDev();
-    if (command === "hurl") {
-      const hurl = Bun.which("hurl");
-      if (!hurl) return { status: "unavailable", reason: "hurl is not installed" };
-      const reportDir = join(logDir, `hurl-${logSeq + 1}`);
-      return execute("hurl", hurl, [
-        "--test",
-        "--no-color",
-        "--variable",
-        `base_url=http://127.0.0.1:${devPort}`,
-        "--report-json",
-        reportDir,
-        ...hurlFiles(input.files),
-      ]);
-    }
-    const spec = commands[command];
-    if (!spec || spec.longRunning)
-      return {
-        status: "rejected",
-        reason: `unknown command "${command}"; allowed: ${[...Object.keys(commands), "hurl"].join(", ")}`,
-      };
-    return execute(command, spec.executable, spec.args, spec.timeoutMs);
-  }
-  if (name === "git") {
-    const args = GIT_OPS[String(input.op ?? "")];
-    if (!args)
-      return { status: "rejected", reason: `op must be one of ${Object.keys(GIT_OPS).join(", ")}` };
-    return execute(`git ${input.op}`, "git", args, 30_000);
-  }
-  if (name === "skill_list") return { skills: listSkills() };
-  if (name === "skill_get") return getSkill(input);
-  if (name === "get_log") {
-    const logId = String(input.logId ?? "");
-    if (!/^log-\d+$/.test(logId)) return { status: "rejected", reason: "invalid logId" };
-    const lines = readFileSync(join(logDir, `${logId}.log`), "utf8").split(/\r?\n/);
-    const offset = Number(input.offset ?? 0);
-    const limit = Math.min(Number(input.limit ?? 200), 500);
-    return {
-      logId,
-      offset,
-      totalLines: lines.length,
-      lines: lines.slice(offset, offset + limit).join("\n"),
-    };
-  }
-  return { status: "rejected", reason: `unknown tool ${name}` };
+  return HANDLERS[name]?.(input) ?? { status: "rejected", reason: `unknown tool ${name}` };
 }
 
 const TOOLS = [
@@ -330,7 +344,7 @@ process.stdin.on("data", (chunk) => {
   while ((newline = buffer.indexOf("\n")) >= 0) {
     const line = buffer.slice(0, newline).trim();
     buffer = buffer.slice(newline + 1);
-    if (line) void handle(JSON.parse(line));
+    if (line) handle(JSON.parse(line)).catch((error) => console.error(error));
   }
 });
 process.stdin.on("end", () => {

@@ -18,14 +18,14 @@ The owner watches every command the app runs for you in the Run panel.
 
 ## Tools you have
 
-| Need | Use |
-| --- | --- |
-| Read, search, edit, create files | `Read`, `Glob`, `Grep`, `Edit`, `Write` (worktree only) |
-| Run build / test / lint | `mcp__harness__run` with `command: "build" \| "test" \| "lint"` |
-| Start the dev server | `mcp__harness__run` with `command: "dev"` (long-running; returns the port) |
-| Call the app's HTTP API | write a `.hurl` file, then `mcp__harness__run` with `command: "hurl"`, `files: [...]` |
-| Git state | `mcp__harness__git` with `op: "status" \| "diff" \| "log" \| "show"` (read-only) |
-| Full output of an earlier command | `mcp__harness__get_log` with the `logId` from a run result |
+| Need                              | Use                                                                                   |
+| --------------------------------- | ------------------------------------------------------------------------------------- |
+| Read, search, edit, create files  | `Read`, `Glob`, `Grep`, `Edit`, `Write` (worktree only)                               |
+| Run build / test / lint           | `mcp__harness__run` with `command: "build" \| "test" \| "lint"`                       |
+| Start the dev server              | `mcp__harness__run` with `command: "dev"` (long-running; returns the port)            |
+| Call the app's HTTP API           | write a `.hurl` file, then `mcp__harness__run` with `command: "hurl"`, `files: [...]` |
+| Git state                         | `mcp__harness__git` with `op: "status" \| "diff" \| "log" \| "show"` (read-only)      |
+| Full output of an earlier command | `mcp__harness__get_log` with the `logId` from a run result                            |
 
 There is no `Bash`, `curl`, `npm`, `bun`, `pip`, or other shell access. Do not try to find
 one. Command names are fixed by the owner; you cannot pass a command string.

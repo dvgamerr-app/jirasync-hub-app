@@ -237,22 +237,29 @@ export const removeRunWorktree = (runId: string, discardChanges: boolean) =>
   invoke<RunRecord>("harness_remove_run_worktree", { runId, discardChanges });
 
 /** Subscribes to live run events; returns an unsubscribe function. */
-export function onRunEvent(handler: (event: RunEvent) => void): () => void {
+/**
+ * Subscribes to a native event synchronously and returns an unsubscribe function, even though
+ * the bridge registers the listener asynchronously.
+ */
+export function listenNative<T>(name: string, handler: (payload: T) => void): () => void {
   let unlisten: (() => void) | null = null;
   let stopped = false;
-  void listen<RunEvent>(RUN_EVENT, (event) => handler(event.payload))
+  void listen<T>(name, (event) => handler(event.payload))
     .then((stop) => {
       if (stopped) stop();
       else unlisten = stop;
     })
     .catch(() => {
-      // Plain-browser preview has no event bridge; runs are unavailable there.
+      // Plain-browser preview has no event bridge.
     });
   return () => {
     stopped = true;
     unlisten?.();
   };
 }
+
+export const onRunEvent = (handler: (event: RunEvent) => void) =>
+  listenNative<RunEvent>(RUN_EVENT, handler);
 
 /** `bun run test`, quoting arguments that contain spaces. */
 export function formatCommand(command: CommandSpec | null | undefined): string {

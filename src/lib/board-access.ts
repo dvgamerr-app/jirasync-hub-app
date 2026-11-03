@@ -2,11 +2,10 @@
 // Board To Do column whose project is bound to a repository, not completed in Jira, with the
 // same snapshot as Copy for AI and never the local note.
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { getAiBoardStatus, type AiBoardTaskState } from "@/lib/ai-board";
 import { buildAiContext } from "@/lib/ai-context";
 import { getAccountIdFromTask } from "@/lib/jira-ids";
-import type { AgentProvider, RepoBinding } from "@/lib/harness";
+import { listenNative, type AgentProvider, type RepoBinding } from "@/lib/harness";
 import type { Task } from "@/types/jira";
 
 export interface BoardTask {
@@ -72,19 +71,5 @@ export const listBoardRequests = () => invoke<BoardRunRequest[]>("harness_board_
 export const resolveBoardRequest = (requestId: string, approve: boolean) =>
   invoke<BoardRunRequest>("harness_board_resolve", { requestId, approve });
 
-export function onBoardRequest(handler: (request: BoardRunRequest) => void): () => void {
-  let unlisten: (() => void) | null = null;
-  let stopped = false;
-  void listen<BoardRunRequest>(BOARD_REQUEST_EVENT, (event) => handler(event.payload))
-    .then((stop) => {
-      if (stopped) stop();
-      else unlisten = stop;
-    })
-    .catch(() => {
-      // Plain-browser preview has no event bridge.
-    });
-  return () => {
-    stopped = true;
-    unlisten?.();
-  };
-}
+export const onBoardRequest = (handler: (request: BoardRunRequest) => void) =>
+  listenNative<BoardRunRequest>(BOARD_REQUEST_EVENT, handler);

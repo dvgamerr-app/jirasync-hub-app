@@ -71,17 +71,17 @@ Content-Type: application/json; charset=utf-8   # implicit header assert
 
 ## Queries (for captures and asserts)
 
-| Query | Meaning |
-| --- | --- |
-| `status`, `version` | status code, HTTP version |
-| `header "Name"` | response header |
-| `cookie "NAME"`, `cookie "NAME[Expires]"` | response cookie or one of its attributes |
-| `body`, `bytes`, `sha256`, `md5` | body as text, bytes, or hash |
-| `jsonpath "$.items[0].id"` | JSONPath (RFC 9535); a single match becomes a scalar |
-| `xpath "//h1"` | XPath 1.0 on HTML/XML |
-| `regex "id:([0-9]+)"` | first capture group |
-| `url`, `redirects`, `ip`, `duration` | final URL, redirect list, peer IP, time in ms |
-| `variable "name"` | an earlier variable |
+| Query                                     | Meaning                                              |
+| ----------------------------------------- | ---------------------------------------------------- |
+| `status`, `version`                       | status code, HTTP version                            |
+| `header "Name"`                           | response header                                      |
+| `cookie "NAME"`, `cookie "NAME[Expires]"` | response cookie or one of its attributes             |
+| `body`, `bytes`, `sha256`, `md5`          | body as text, bytes, or hash                         |
+| `jsonpath "$.items[0].id"`                | JSONPath (RFC 9535); a single match becomes a scalar |
+| `xpath "//h1"`                            | XPath 1.0 on HTML/XML                                |
+| `regex "id:([0-9]+)"`                     | first capture group                                  |
+| `url`, `redirects`, `ip`, `duration`      | final URL, redirect list, peer IP, time in ms        |
+| `variable "name"`                         | an earlier variable                                  |
 
 Captures: `name: <query> [filter]`, e.g. `token: header "X-Token" redact`.
 
@@ -129,10 +129,10 @@ The app runs `hurl --test --variable base_url=... --report-json <dir> <files>`, 
 are not printed. On a failure the result shows the failing entry, line, and the expected and
 actual values.
 
-| Exit code | Meaning |
-| --- | --- |
-| 0 | all asserts passed |
-| 1 | CLI option error (report this, it is a harness problem) |
-| 2 | `.hurl` file parse error: fix your file |
-| 3 | runtime error, e.g. cannot connect: is `dev` started? |
-| 4 | assert failed: fix the code or the expectation |
+| Exit code | Meaning                                                 |
+| --------- | ------------------------------------------------------- |
+| 0         | all asserts passed                                      |
+| 1         | CLI option error (report this, it is a harness problem) |
+| 2         | `.hurl` file parse error: fix your file                 |
+| 3         | runtime error, e.g. cannot connect: is `dev` started?   |
+| 4         | assert failed: fix the code or the expectation          |

@@ -30,7 +30,7 @@ test("board is a separate page and returning keeps the original task layout and 
           request.result.createObjectStore(name, { keyPath: "id" });
       };
       request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
+      request.onerror = () => reject(request.error ?? new Error("could not open the database"));
     });
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction("tasks", "readwrite");
@@ -43,7 +43,7 @@ test("board is a separate page and returning keeps the original task layout and 
         isSynced: true,
       });
       transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
+      transaction.onerror = () => reject(transaction.error ?? new Error("could not seed the task"));
     });
     database.close();
   });
