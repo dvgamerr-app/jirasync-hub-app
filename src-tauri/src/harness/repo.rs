@@ -1,6 +1,7 @@
 // Repo detection: proposes install/build/test/lint/dev commands, env files to copy, and
 // service env keys for any bound repo, deterministically from its files (no AI, no tokens).
 // The owner reviews and saves the result as a binding; runs only use the saved binding.
+use super::docker::{parse_compose, propose_overrides, EnvVar, ServiceSpec};
 use super::exec::{git, resolve_executable};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -32,16 +33,19 @@ pub struct RepoCommands {
     pub test: Option<CommandSpec>,
     pub lint: Option<CommandSpec>,
     pub dev: Option<CommandSpec>,
+    /// Database migrations, run after services start and before the agent works.
+    pub migrate: Option<CommandSpec>,
 }
 
 impl RepoCommands {
-    pub fn all(&self) -> [(&'static str, Option<&CommandSpec>); 5] {
+    pub fn all(&self) -> [(&'static str, Option<&CommandSpec>); 6] {
         [
             ("install", self.install.as_ref()),
             ("build", self.build.as_ref()),
             ("test", self.test.as_ref()),
             ("lint", self.lint.as_ref()),
             ("dev", self.dev.as_ref()),
+            ("migrate", self.migrate.as_ref()),
         ]
     }
 }
@@ -60,6 +64,10 @@ pub struct FileDetection {
     /// Keys that look like a service address (DB, cache, port) and may need a per-run value.
     pub service_env_keys: Vec<String>,
     pub compose_files: Vec<String>,
+    /// Services proposed from the first compose file (the owner reviews them in Setup).
+    pub services: Vec<ServiceSpec>,
+    /// Per-run values for service env keys, derived from the example file only.
+    pub env_overrides: Vec<EnvVar>,
     pub notes: Vec<String>,
 }
 
@@ -170,6 +178,15 @@ fn js_commands(root: &Path, runner: &str, notes: &mut Vec<String>) -> RepoComman
         test: script("test"),
         lint: script("lint"),
         dev: script("dev").or_else(|| script("start")),
+        migrate: [
+            "migrate",
+            "db:migrate",
+            "migrate:deploy",
+            "migration:run",
+            "migrate:up",
+        ]
+        .iter()
+        .find_map(|name| script(name)),
     }
 }
 
@@ -229,6 +246,7 @@ pub fn detect_files(root: &Path) -> FileDetection {
                 test: Some(spec("cargo", &["test"])),
                 lint: Some(spec("cargo", &["clippy"])),
                 dev: None,
+                migrate: None,
             };
         }
         ecosystems.push("cargo".into());
@@ -241,6 +259,7 @@ pub fn detect_files(root: &Path) -> FileDetection {
                 test: Some(spec("go", &["test", "./..."])),
                 lint: Some(spec("go", &["vet", "./..."])),
                 dev: None,
+                migrate: None,
             };
         }
         ecosystems.push("go".into());
@@ -297,6 +316,30 @@ pub fn detect_files(root: &Path) -> FileDetection {
         .filter(|name| has(name))
         .map(|name| name.to_string())
         .collect();
+    if let Some(compose) = detection.compose_files.first() {
+        match fs::read_to_string(root.join(compose))
+            .map_err(|e| e.to_string())
+            .and_then(|text| parse_compose(&text))
+        {
+            Ok(found) => {
+                detection.services = found.services;
+                detection.notes.extend(found.unsupported);
+            }
+            Err(error) => detection.notes.push(format!("{compose}: {error}")),
+        }
+    }
+    let example_text = detection
+        .env_example_file
+        .as_ref()
+        .and_then(|name| fs::read_to_string(root.join(name)).ok())
+        .unwrap_or_default();
+    detection.env_overrides = propose_overrides(&example_text, &detection.services);
+    if !detection.services.is_empty() && detection.commands.migrate.is_none() {
+        detection.notes.push(
+            "no migration script found: set the migrate command, or leave it empty if the app migrates on start"
+                .into(),
+        );
+    }
     detection
 }
 
@@ -399,6 +442,47 @@ mod tests {
             .notes
             .iter()
             .any(|note| note.contains("several lockfiles")));
+    }
+
+    #[test]
+    fn compose_services_migrations_and_overrides_are_proposed() {
+        let dir = TempDir::new("services");
+        dir.write(
+            "package.json",
+            r#"{"scripts":{"test":"vitest","db:migrate":"prisma migrate deploy"}}"#,
+        );
+        dir.write("package-lock.json", "{}");
+        dir.write(
+            "docker-compose.yml",
+            "services:\n  db:\n    image: postgres:16\n    ports: [\"5432:5432\"]\n",
+        );
+        dir.write(
+            ".env.example",
+            "DATABASE_URL=postgres://app:app@localhost:5432/app\n",
+        );
+        let detection = detect_files(dir.path());
+        assert_eq!(detection.services[0].image, "postgres:16");
+        assert_eq!(
+            detection.commands.migrate,
+            Some(spec("npm", &["run", "db:migrate"]))
+        );
+        assert_eq!(detection.env_overrides[0].key, "DATABASE_URL");
+        assert!(detection.env_overrides[0]
+            .value
+            .contains("{services.db.port}"));
+
+        let bare = TempDir::new("services-no-migrate");
+        bare.write("go.mod", "module x");
+        bare.write(
+            "compose.yaml",
+            "services:\n  cache:\n    image: redis\n    ports: [6379]\n",
+        );
+        let detection = detect_files(bare.path());
+        assert!(detection.commands.migrate.is_none());
+        assert!(detection
+            .notes
+            .iter()
+            .any(|note| note.contains("no migration script found")));
     }
 
     #[test]

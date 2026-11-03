@@ -1,6 +1,7 @@
 // Repo bindings: which local repo a Jira project's tasks run in, and the commands the app
 // executes there. Stored per machine in the app data folder, never in a repo, because they
 // hold absolute paths.
+use super::docker::{EnvVar, ServiceSpec};
 use super::repo::{git_root, RepoCommands};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -17,6 +18,12 @@ pub struct RepoBinding {
     pub commands: RepoCommands,
     /// Env files copied from the repo into each worktree (relative to the repo root).
     pub copy_env: Vec<String>,
+    /// Containers started for each run while the agent implements (Docker Engine API).
+    #[serde(default)]
+    pub services: Vec<ServiceSpec>,
+    /// Env values written into the worktree .env per run, e.g. `{services.db.port}`.
+    #[serde(default)]
+    pub env_overrides: Vec<EnvVar>,
     #[serde(default)]
     pub updated_at: u64,
 }
@@ -128,6 +135,7 @@ pub fn validate(mut binding: RepoBinding) -> Result<RepoBinding, String> {
             return Err(format!("\"{file}\" must be a path inside the repository"));
         }
     }
+    validate_services(&binding.services, &binding.env_overrides)?;
     binding.copy_env.sort();
     binding.copy_env.dedup();
     binding.updated_at = std::time::SystemTime::now()
@@ -135,6 +143,65 @@ pub fn validate(mut binding: RepoBinding) -> Result<RepoBinding, String> {
         .map(|d| d.as_millis() as u64)
         .unwrap_or_default();
     Ok(binding)
+}
+
+fn is_env_key(key: &str) -> bool {
+    !key.is_empty()
+        && !key.starts_with(|c: char| c.is_ascii_digit())
+        && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+fn validate_services(services: &[ServiceSpec], overrides: &[EnvVar]) -> Result<(), String> {
+    let mut names = std::collections::BTreeSet::new();
+    for service in services {
+        let name_ok = !service.name.is_empty()
+            && service
+                .name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
+        if !name_ok {
+            return Err(format!(
+                "service name \"{}\" must use lowercase letters, digits, - or _",
+                service.name
+            ));
+        }
+        if !names.insert(service.name.as_str()) {
+            return Err(format!("service \"{}\" is listed twice", service.name));
+        }
+        if service.image.trim().is_empty() || service.image.contains(char::is_whitespace) {
+            return Err(format!("service \"{}\" needs an image", service.name));
+        }
+        if service.port == 0 {
+            return Err(format!(
+                "service \"{}\" needs the port it listens on",
+                service.name
+            ));
+        }
+        if service.env.iter().any(|var| !is_env_key(&var.key)) {
+            return Err(format!(
+                "service \"{}\" has an invalid env key",
+                service.name
+            ));
+        }
+    }
+    for var in overrides {
+        if !is_env_key(&var.key) || var.value.contains('\n') {
+            return Err(format!("override \"{}\" is not a valid env entry", var.key));
+        }
+        let mut rest = var.value.as_str();
+        while let Some(start) = rest.find("{services.") {
+            let reference = &rest[start + "{services.".len()..];
+            let name = reference.split('.').next().unwrap_or("");
+            if !names.contains(name) {
+                return Err(format!(
+                    "override {} uses unknown service \"{name}\"",
+                    var.key
+                ));
+            }
+            rest = reference;
+        }
+    }
+    Ok(())
 }
 
 pub fn save(path: &Path, binding: RepoBinding) -> Result<RepoBinding, String> {
@@ -189,6 +256,8 @@ mod tests {
                 ..RepoCommands::default()
             },
             copy_env: vec![".env".into(), ".env".into()],
+            services: vec![],
+            env_overrides: vec![],
             updated_at: 0,
         }
     }
@@ -263,6 +332,56 @@ mod tests {
         assert!(save(&file, bad).unwrap_err().contains("no executable"));
 
         assert!(!file.exists(), "a rejected binding never creates the file");
+    }
+
+    #[test]
+    fn services_and_overrides_are_checked_before_saving() {
+        use crate::harness::docker::{EnvVar, ServiceSpec};
+        let db = || ServiceSpec {
+            name: "db".into(),
+            image: "postgres:16".into(),
+            port: 5432,
+            ..ServiceSpec::default()
+        };
+        let var = |key: &str, value: &str| EnvVar {
+            key: key.into(),
+            value: value.into(),
+        };
+        assert!(validate_services(
+            &[db()],
+            &[var(
+                "DATABASE_URL",
+                "postgres://{services.db.host}:{services.db.port}/x"
+            )]
+        )
+        .is_ok());
+        let renamed = ServiceSpec {
+            name: "DB main".into(),
+            ..db()
+        };
+        let no_image = ServiceSpec {
+            image: " ".into(),
+            ..db()
+        };
+        let no_port = ServiceSpec { port: 0, ..db() };
+        let bad_env = ServiceSpec {
+            env: vec![var("1BAD", "x")],
+            ..db()
+        };
+        for (services, reason) in [
+            (vec![renamed], "name"),
+            (vec![db(), db()], "listed twice"),
+            (vec![no_image], "image"),
+            (vec![no_port], "port"),
+            (vec![bad_env], "env key"),
+        ] {
+            let error = validate_services(&services, &[]).unwrap_err();
+            assert!(error.contains(reason), "{error}");
+        }
+        let unknown = validate_services(&[db()], &[var("REDIS_URL", "{services.cache.port}")]);
+        assert!(unknown.unwrap_err().contains("unknown service \"cache\""));
+        assert!(validate_services(&[], &[var("BAD KEY", "1")]).is_err());
+        assert!(validate_services(&[], &[var("PORT", "1\nINJECT=1")]).is_err());
     }
 
     #[test]

@@ -2,6 +2,7 @@
 // implement → the app runs the final checks itself → repair rounds → ready for review.
 // Each step is one CLI invocation that resumes the same session the app chose up front.
 use super::claude::{self, AgentLauncher, Invocation, Session};
+use super::docker::{self, DockerEndpoint, EnvVar};
 use super::exec::git;
 use super::mcp::McpServer;
 use super::repo::CommandSpec;
@@ -51,6 +52,8 @@ pub struct AgentEnv {
     pub launcher: AgentLauncher,
     /// How `gh` is started for publishing (a fake in tests).
     pub gh: AgentLauncher,
+    /// Docker engine for service containers; `None` reads the current Docker context.
+    pub docker: Option<DockerEndpoint>,
     pub skills_dir: PathBuf,
     /// Working-time budget per owner-approved step; time the app spends executing is excluded.
     pub budget: Duration,
@@ -63,6 +66,7 @@ impl AgentEnv {
         Self {
             launcher,
             gh: AgentLauncher::claude(PathBuf::from("gh")),
+            docker: None,
             skills_dir,
             budget,
             model: None,
@@ -276,8 +280,116 @@ impl AgentRun<'_> {
         Ok(RunStatus::AwaitingPlan)
     }
 
+    /// Starts the run's service containers, writes the per-run env values into the worktree
+    /// `.env`, runs migrations, does `work`, then always removes the containers.
+    fn with_services<T>(&self, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+        let record = self.journal.record();
+        let migrate = record.commands.migrate.clone();
+        if record.services.is_empty() && record.env_overrides.is_empty() && migrate.is_none() {
+            return work();
+        }
+        let worktree = self.worktree()?;
+        let mut running = Vec::new();
+        let endpoint = if record.services.is_empty() {
+            None
+        } else {
+            let endpoint = match &self.env.docker {
+                Some(endpoint) => endpoint.clone(),
+                None => DockerEndpoint::from_context()?,
+            };
+            self.journal.push(EventKind::StepStart {
+                step: "services".into(),
+                command: format!(
+                    "docker: {}",
+                    record
+                        .services
+                        .iter()
+                        .map(|s| format!("{} ({})", s.name, s.image))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            });
+            let started = Instant::now();
+            let _ = docker::remove_leftovers(&endpoint);
+            let log = |text: String| {
+                self.journal.push(EventKind::Output {
+                    step: "services".into(),
+                    stream: "stdout".into(),
+                    text,
+                })
+            };
+            let result = docker::start_services(&endpoint, &record.run_id, &record.services, &log);
+            self.journal.push(EventKind::StepEnd {
+                step: "services".into(),
+                exit_code: Some(if result.is_ok() { 0 } else { 1 }),
+                duration_ms: started.elapsed().as_millis() as u64,
+            });
+            running = result?;
+            Some(endpoint)
+        };
+        let outcome = (|| {
+            if !record.env_overrides.is_empty() {
+                let run_port = std::net::TcpListener::bind("127.0.0.1:0")
+                    .and_then(|listener| listener.local_addr())
+                    .map_err(|e| e.to_string())?
+                    .port();
+                let values: Vec<EnvVar> = record
+                    .env_overrides
+                    .iter()
+                    .map(|var| EnvVar {
+                        key: var.key.clone(),
+                        value: docker::render(&var.value, &running, run_port),
+                    })
+                    .collect();
+                docker::apply_env(&worktree.join(".env"), &values)?;
+                self.journal.push(EventKind::Output {
+                    step: "services".into(),
+                    stream: "stdout".into(),
+                    text: format!(
+                        "set for this run in .env: {}",
+                        values
+                            .iter()
+                            .map(|v| v.key.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                });
+            }
+            if let Some(command) = &migrate {
+                match run_step(
+                    self.journal,
+                    self.control,
+                    &Step::new("migrate", command, &worktree, CHECK_TIMEOUT),
+                )? {
+                    StepOutcome::Exited(0) => {}
+                    StepOutcome::Exited(code) => {
+                        return Err(format!("migrate failed (exit code {code})"))
+                    }
+                    StepOutcome::Cancelled => return Err("stopped".into()),
+                    StepOutcome::TimedOut | StepOutcome::OverBudget => {
+                        return Err("migrate timed out".into())
+                    }
+                }
+            }
+            work()
+        })();
+        if let Some(endpoint) = endpoint {
+            docker::stop_services(&endpoint, &running);
+            self.journal.push(EventKind::Output {
+                step: "services".into(),
+                stream: "stdout".into(),
+                text: "service containers removed".into(),
+            });
+        }
+        outcome
+    }
+
     /// Implement → final checks by the app → up to two repair rounds → ready for review.
     pub fn implement(&self, first_prompt: String) -> Result<RunStatus, String> {
+        self.with_services(|| self.implement_rounds(first_prompt))
+    }
+
+    fn implement_rounds(&self, first_prompt: String) -> Result<RunStatus, String> {
         let mut prompt = first_prompt;
         let mut repairs = 0;
         loop {
@@ -463,7 +575,7 @@ impl AgentRun<'_> {
 
         if record.verified_digest.as_deref() != Some(tree_digest(&worktree)?.as_str()) {
             self.note("the change moved after its checks; running them again");
-            let checks = self.verify()?;
+            let checks = self.with_services(|| self.verify())?;
             let failed: Vec<&str> = checks
                 .iter()
                 .filter(|check| check.status != "passed")

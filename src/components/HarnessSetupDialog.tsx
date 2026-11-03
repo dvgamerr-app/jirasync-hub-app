@@ -9,10 +9,13 @@ import {
   detectRepo,
   formatCommand,
   parseCommand,
+  parseEnvLines,
+  formatEnvLines,
   type CommandName,
   type RepoBinding,
   type RepoCommands,
   type RepoDetection,
+  type ServiceSpec,
 } from "@/lib/harness";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
@@ -115,6 +118,8 @@ function ToolsSection() {
 
 const DEFAULT_COPY_ENV = new Set([".env", ".env.local"]);
 
+type EditableService = ServiceSpec & { include: boolean };
+
 function commandTexts(commands: RepoCommands): Record<CommandName, string> {
   return Object.fromEntries(
     COMMAND_NAMES.map((name) => [name, formatCommand(commands[name])]),
@@ -131,6 +136,10 @@ function BindingEditor({ project, binding }: { project: Project; binding?: RepoB
   const [worktreeRoot, setWorktreeRoot] = useState(binding?.worktreeRoot ?? "");
   const [commands, setCommands] = useState(commandTexts(binding?.commands ?? {}));
   const [copyEnv, setCopyEnv] = useState<string[]>(binding?.copyEnv ?? []);
+  const [services, setServices] = useState<EditableService[]>(
+    (binding?.services ?? []).map((service) => ({ ...service, include: true })),
+  );
+  const [overrides, setOverrides] = useState(formatEnvLines(binding?.envOverrides ?? []));
   const [busy, setBusy] = useState<"detect" | "save" | "remove" | null>(null);
   const [error, setError] = useState("");
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -151,6 +160,8 @@ function BindingEditor({ project, binding }: { project: Project; binding?: RepoB
       setBaseBranch(result.defaultBranch);
       setCommands(commandTexts(result.commands));
       setCopyEnv(result.envFiles.filter((file) => DEFAULT_COPY_ENV.has(file)));
+      setServices(result.services.map((service) => ({ ...service, include: true })));
+      setOverrides(formatEnvLines(result.envOverrides));
       if (!worktreeRoot) setWorktreeRoot(await defaultWorktreeRoot(result.root));
     } catch (detectError) {
       setError(getErrorMessage(detectError));
@@ -180,6 +191,10 @@ function BindingEditor({ project, binding }: { project: Project; binding?: RepoB
         worktreeRoot,
         commands: parsed,
         copyEnv,
+        services: services
+          .filter((service) => service.include)
+          .map(({ include: _include, ...service }) => service),
+        envOverrides: parseEnvLines(overrides),
         updatedAt: 0,
       });
       toast({ title: "Repository saved", description: `${project.name} runs in ${repoPath}` });
@@ -315,6 +330,75 @@ function BindingEditor({ project, binding }: { project: Project; binding?: RepoB
             />
           </div>
         ))}
+      </fieldset>
+
+      <fieldset className="space-y-2" aria-label="Services">
+        <legend className="text-[12px] font-medium">
+          Services started per run with Docker (own database, random local ports)
+        </legend>
+        {services.length === 0 && (
+          <p className="text-muted-foreground text-[12px]">
+            None. The run uses whatever its .env points at.
+          </p>
+        )}
+        {services.map((service, index) => (
+          <div
+            key={service.name}
+            className="grid grid-cols-[auto_80px_1fr_72px] items-center gap-2"
+            aria-label={`Service ${service.name}`}
+          >
+            <input
+              type="checkbox"
+              aria-label={`Start ${service.name}`}
+              checked={service.include}
+              onChange={(event) =>
+                setServices((current) =>
+                  current.map((entry, i) =>
+                    i === index ? { ...entry, include: event.target.checked } : entry,
+                  ),
+                )
+              }
+            />
+            <span className="font-mono text-[12px]">{service.name}</span>
+            <Input
+              aria-label={`${service.name} image`}
+              className="font-mono text-[12px]"
+              value={service.image}
+              onChange={(event) =>
+                setServices((current) =>
+                  current.map((entry, i) =>
+                    i === index ? { ...entry, image: event.target.value } : entry,
+                  ),
+                )
+              }
+            />
+            <Input
+              aria-label={`${service.name} port`}
+              className="font-mono text-[12px]"
+              inputMode="numeric"
+              value={service.port || ""}
+              onChange={(event) =>
+                setServices((current) =>
+                  current.map((entry, i) =>
+                    i === index ? { ...entry, port: Number(event.target.value) || 0 } : entry,
+                  ),
+                )
+              }
+            />
+          </div>
+        ))}
+        <Label htmlFor="harness-env-overrides" className="text-[12px]">
+          Per-run .env values (KEY=value; use {"{services.<name>.host}"}, {"{services.<name>.port}"}
+          , {"{run.port}"})
+        </Label>
+        <textarea
+          id="harness-env-overrides"
+          className="border-input bg-background w-full rounded-md border p-2 font-mono text-[12px]"
+          rows={3}
+          value={overrides}
+          placeholder="DATABASE_URL=postgres://app:app@{services.db.host}:{services.db.port}/app"
+          onChange={(event) => setOverrides(event.target.value)}
+        />
       </fieldset>
 
       {envChoices.length > 0 && (

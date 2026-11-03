@@ -14,6 +14,8 @@ const binding: RepoBinding = {
   worktreeRoot: "C:\\wt",
   commands: { test: { executable: "bun", args: ["test"] } },
   copyEnv: [],
+  services: [],
+  envOverrides: [],
   updatedAt: 1,
 };
 

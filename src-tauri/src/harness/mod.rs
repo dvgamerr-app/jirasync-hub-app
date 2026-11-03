@@ -3,6 +3,7 @@
 mod agent;
 mod bindings;
 mod claude;
+mod docker;
 mod doctor;
 mod exec;
 mod mcp;

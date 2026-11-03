@@ -55,6 +55,8 @@ const detection: RepoDetection = {
   composeFiles: ["docker-compose.yml"],
   notes: [],
   missingExecutables: [],
+  services: [],
+  envOverrides: [],
 };
 
 async function seedHarness(page: Page, harness: Partial<E2EHarnessState>, openPath?: string) {
@@ -213,6 +215,8 @@ test("removing a binding asks first and keeps it when the owner backs out", asyn
     worktreeRoot: "D:\\wt",
     commands: { test: { executable: "npm", args: ["test"] } },
     copyEnv: [".env"],
+    services: [],
+    envOverrides: [],
     updatedAt: 1,
   };
   await seedHarness(page, { doctor: report(), bindings: [existing] });
@@ -233,5 +237,68 @@ test("removing a binding asks first and keeps it when the owner backs out", asyn
   await dialog.getByRole("button", { name: "Remove binding" }).click();
   await dialog.getByRole("button", { name: "Confirm remove" }).click();
   await expect(project).toContainText("Not bound");
+  expect((await readE2EState(page)).harness?.bindings).toEqual([]);
+});
+
+const withServices: RepoDetection = {
+  ...detection,
+  commands: { ...detection.commands, migrate: { executable: "bun", args: ["run", "db:migrate"] } },
+  services: [
+    { name: "db", image: "postgres:16", port: 5432, env: [], healthcheck: ["CMD", "pg_isready"] },
+    { name: "cache", image: "redis:7", port: 6379, env: [], healthcheck: [] },
+  ],
+  envOverrides: [
+    { key: "DATABASE_URL", value: "postgres://app:app@{services.db.host}:{services.db.port}/app" },
+  ],
+};
+
+async function openRepoEditor(page: Page) {
+  await page.getByRole("button", { name: "Agent setup" }).click();
+  const dialog = page.getByRole("dialog", { name: "Agent setup" });
+  await dialog.getByRole("tab", { name: "repositories" }).click();
+  await dialog.getByRole("button", { name: "Acme: Project PRJ" }).click();
+  return dialog;
+}
+
+test("services, per-run env values and migrations are reviewed and saved", async ({ page }) => {
+  await seedHarness(page, { doctor: report(), detections: { [REPO]: withServices } }, REPO);
+  await openBoard(page);
+  const dialog = await openRepoEditor(page);
+  await dialog.getByRole("button", { name: "Browse" }).click();
+
+  await expect(dialog.getByLabel("db image")).toHaveValue("postgres:16");
+  await expect(dialog.getByLabel("migrate command")).toHaveValue("bun run db:migrate");
+  await dialog.getByLabel("Start cache").uncheck();
+  await dialog.getByLabel("db image").fill("postgres:16-alpine");
+  await dialog
+    .getByLabel(/Per-run \.env values/)
+    .fill(
+      "DATABASE_URL=postgres://app:app@{services.db.host}:{services.db.port}/app\nPORT={run.port}",
+    );
+  await dialog.getByRole("button", { name: "Save repository" }).click();
+  await expect(dialog.getByRole("button", { name: "Acme: Project PRJ" })).toContainText(
+    "C:/src/service",
+  );
+
+  const [saved] = (await readE2EState(page)).harness?.bindings ?? [];
+  expect(saved.services.map((service) => [service.name, service.image])).toEqual([
+    ["db", "postgres:16-alpine"],
+  ]);
+  expect(saved.services[0]).not.toHaveProperty("include");
+  expect(saved.envOverrides).toEqual([
+    { key: "DATABASE_URL", value: "postgres://app:app@{services.db.host}:{services.db.port}/app" },
+    { key: "PORT", value: "{run.port}" },
+  ]);
+  expect(saved.commands.migrate).toEqual({ executable: "bun", args: ["run", "db:migrate"] });
+});
+
+test("a malformed per-run env line is rejected before anything is saved", async ({ page }) => {
+  await seedHarness(page, { doctor: report(), detections: { [REPO]: withServices } }, REPO);
+  await openBoard(page);
+  const dialog = await openRepoEditor(page);
+  await dialog.getByRole("button", { name: "Browse" }).click();
+  await dialog.getByLabel(/Per-run \.env values/).fill("JUSTTEXT");
+  await dialog.getByRole("button", { name: "Save repository" }).click();
+  await expect(dialog.getByRole("alert")).toContainText('"JUSTTEXT" is not KEY=value');
   expect((await readE2EState(page)).harness?.bindings).toEqual([]);
 });

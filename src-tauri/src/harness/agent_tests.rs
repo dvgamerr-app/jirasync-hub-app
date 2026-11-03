@@ -288,6 +288,8 @@ fn binding(fx: &Fixture) -> RepoBinding {
             ..RepoCommands::default()
         },
         copy_env: vec![],
+        services: vec![],
+        env_overrides: vec![],
         updated_at: 0,
     }
 }
@@ -742,6 +744,138 @@ fn a_reviewer_that_does_not_answer_does_not_block_the_owner() {
     assert!(review.summary.contains("without submitting a review"));
 }
 
+fn start_with(manager: &RunManager, binding: RepoBinding) -> RunRecord {
+    manager
+        .start(StartRun {
+            task_id: "task-acc1-PRJ-7".into(),
+            issue_key: "PRJ-7".into(),
+            binding,
+            context: Some("# PRJ-7\n".into()),
+            agent: None,
+            jira_url: None,
+        })
+        .unwrap()
+}
+
+#[test]
+fn migrations_and_run_env_values_are_applied_before_the_agent_works() {
+    let fx = fixture();
+    fx.clone.write(".env", "# mine\nPORT=3000\nAPI_KEY=keep\n");
+    let manager = manager(&fx, &[], Duration::from_secs(600));
+    let mut binding = binding(&fx);
+    binding.copy_env = vec![".env".into()];
+    binding.commands.migrate = Some(CommandSpec {
+        executable: "git".into(),
+        args: vec!["--version".into()],
+    });
+    binding.env_overrides = vec![crate::harness::docker::EnvVar {
+        key: "PORT".into(),
+        value: "{run.port}".into(),
+    }];
+    let run = start_with(&manager, binding);
+    settle(&manager, &run.run_id);
+    manager.resume(&run.run_id, Decision::ApprovePlan).unwrap();
+    let done = settle(&manager, &run.run_id);
+    assert_eq!(done.status, RunStatus::ReadyForReview, "{:?}", done.error);
+
+    let env = fs::read_to_string(PathBuf::from(done.worktree.unwrap().path).join(".env")).unwrap();
+    assert!(env.contains("API_KEY=keep") && env.contains("# mine"));
+    let port = env
+        .lines()
+        .find_map(|line| line.strip_prefix("PORT="))
+        .unwrap();
+    assert_ne!(port, "3000", "the run gets its own port, not the owner's");
+    let base = fs::read_to_string(fx.clone.path().join(".env")).unwrap();
+    assert!(
+        base.contains("PORT=3000"),
+        "the base repo .env is untouched"
+    );
+
+    let events = manager.events(&run.run_id, 0, usize::MAX).unwrap();
+    let order: Vec<&str> = events
+        .iter()
+        .filter_map(|e| match &e.kind {
+            EventKind::StepStart { step, .. } => Some(step.as_str()),
+            _ => None,
+        })
+        .collect();
+    let migrate = order.iter().position(|step| *step == "migrate").unwrap();
+    let agent = order.iter().rposition(|step| *step == "agent").unwrap();
+    assert!(
+        migrate < agent,
+        "migrations run before the agent implements: {order:?}"
+    );
+    assert_eq!(order.iter().filter(|step| **step == "migrate").count(), 1);
+}
+
+#[test]
+fn a_failed_migration_stops_before_the_agent_changes_anything() {
+    let fx = fixture();
+    let manager = manager(&fx, &[], Duration::from_secs(600));
+    let mut binding = binding(&fx);
+    binding.commands.migrate = Some(CommandSpec {
+        executable: "git".into(),
+        args: vec!["not-a-command".into()],
+    });
+    let run = start_with(&manager, binding);
+    settle(&manager, &run.run_id);
+    manager.resume(&run.run_id, Decision::ApprovePlan).unwrap();
+    let failed = settle(&manager, &run.run_id);
+    assert_eq!(failed.status, RunStatus::Failed);
+    assert!(failed.error.unwrap().contains("migrate failed"));
+    let worktree = PathBuf::from(failed.worktree.unwrap().path);
+    assert!(!worktree.join("result.txt").exists(), "the agent never ran");
+}
+
+/// Needs a local Docker engine: `cargo test --lib real_docker_services_live_only_while_implementing -- --ignored`.
+#[test]
+#[ignore]
+fn real_docker_services_live_only_while_implementing() {
+    let fx = fixture();
+    let manager = manager(&fx, &[], Duration::from_secs(600));
+    let mut binding = binding(&fx);
+    binding.services = vec![crate::harness::docker::ServiceSpec {
+        name: "cache".into(),
+        image: "redis:7-alpine".into(),
+        port: 6379,
+        env: vec![],
+        healthcheck: vec!["CMD".into(), "redis-cli".into(), "ping".into()],
+    }];
+    binding.env_overrides = vec![crate::harness::docker::EnvVar {
+        key: "REDIS_URL".into(),
+        value: "redis://{services.cache.host}:{services.cache.port}".into(),
+    }];
+    let run = start_with(&manager, binding);
+    settle(&manager, &run.run_id);
+    manager.resume(&run.run_id, Decision::ApprovePlan).unwrap();
+    let done = settle(&manager, &run.run_id);
+    assert_eq!(done.status, RunStatus::ReadyForReview, "{:?}", done.error);
+
+    let env = fs::read_to_string(PathBuf::from(done.worktree.unwrap().path).join(".env")).unwrap();
+    assert!(env.contains("REDIS_URL=redis://127.0.0.1:"), "{env}");
+    let events = manager.events(&run.run_id, 0, usize::MAX).unwrap();
+    let lines: Vec<String> = events
+        .iter()
+        .filter_map(|e| match &e.kind {
+            EventKind::Output { step, text, .. } if step == "services" => Some(text.clone()),
+            _ => None,
+        })
+        .collect();
+    println!("{lines:#?}");
+    assert!(lines
+        .iter()
+        .any(|line| line.starts_with("cache (redis:7-alpine) ready on 127.0.0.1:")));
+    assert!(lines
+        .iter()
+        .any(|line| line == "service containers removed"));
+    let docker = crate::harness::docker::DockerEndpoint::from_context().unwrap();
+    assert_eq!(
+        crate::harness::docker::remove_leftovers(&docker).unwrap(),
+        0,
+        "nothing is left running after the step"
+    );
+}
+
 fn published(manager: &RunManager, fx: &Fixture) -> RunRecord {
     let run = reviewed(manager, fx);
     manager.resume(&run.run_id, Decision::Accept).unwrap();
@@ -857,6 +991,8 @@ fn real_claude_plans_then_implements() {
             ..RepoCommands::default()
         },
         copy_env: vec![],
+        services: vec![],
+        env_overrides: vec![],
         updated_at: 0,
     };
     let run = manager

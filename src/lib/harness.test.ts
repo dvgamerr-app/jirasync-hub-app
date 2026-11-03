@@ -5,6 +5,8 @@ import {
   isRunBusy,
   mergeRunEvents,
   parseCommand,
+  parseEnvLines,
+  formatEnvLines,
   type RunEvent,
 } from "./harness";
 
@@ -84,5 +86,26 @@ describe("agent run status", () => {
     expect(isRunBusy("awaiting_plan")).toBe(false);
     expect(isRunBusy("ready_for_review")).toBe(false);
     expect(isRunBusy("completed")).toBe(false);
+  });
+});
+
+describe("env override lines", () => {
+  it("round-trips KEY=value lines and keeps = inside values", () => {
+    const vars = parseEnvLines(
+      "# per run\nDATABASE_URL=postgres://a:b@{services.db.host}:{services.db.port}/x?ssl=1\n\nPORT={run.port}\n",
+    );
+    expect(vars).toEqual([
+      {
+        key: "DATABASE_URL",
+        value: "postgres://a:b@{services.db.host}:{services.db.port}/x?ssl=1",
+      },
+      { key: "PORT", value: "{run.port}" },
+    ]);
+    expect(parseEnvLines(formatEnvLines(vars))).toEqual(vars);
+  });
+
+  it("rejects a line without a key", () => {
+    expect(() => parseEnvLines("=value")).toThrow("not KEY=value");
+    expect(() => parseEnvLines("JUSTTEXT")).toThrow("not KEY=value");
   });
 });

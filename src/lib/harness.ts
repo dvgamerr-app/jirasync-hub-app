@@ -3,7 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-export const COMMAND_NAMES = ["install", "build", "test", "lint", "dev"] as const;
+export const COMMAND_NAMES = ["install", "build", "test", "lint", "dev", "migrate"] as const;
 export type CommandName = (typeof COMMAND_NAMES)[number];
 
 export interface CommandSpec {
@@ -38,6 +38,20 @@ export interface DoctorReport {
   checkedAt: number;
 }
 
+export interface EnvVar {
+  key: string;
+  value: string;
+}
+
+export interface ServiceSpec {
+  name: string;
+  image: string;
+  /** Port inside the container; published on a random 127.0.0.1 port per run. */
+  port: number;
+  env: EnvVar[];
+  healthcheck: string[];
+}
+
 export interface RepoDetection {
   root: string;
   remoteUrl: string | null;
@@ -49,6 +63,10 @@ export interface RepoDetection {
   missingEnvKeys: string[];
   serviceEnvKeys: string[];
   composeFiles: string[];
+  /** Services proposed from the compose file; the owner reviews them. */
+  services: ServiceSpec[];
+  /** Per-run values for service env keys, from the example file only. */
+  envOverrides: EnvVar[];
   notes: string[];
   missingExecutables: string[];
 }
@@ -60,6 +78,10 @@ export interface RepoBinding {
   worktreeRoot: string;
   commands: RepoCommands;
   copyEnv: string[];
+  /** Containers started per run while the agent implements (Docker Engine API). */
+  services: ServiceSpec[];
+  /** Values written into the worktree .env per run, e.g. `{services.db.port}`. */
+  envOverrides: EnvVar[];
   updatedAt: number;
 }
 
@@ -303,3 +325,20 @@ export interface CiStatus {
 export const getPrChecks = (runId: string) => invoke<CiStatus>("harness_pr_checks", { runId });
 /** Draft → ready for review; the native core refuses unless CI passed. */
 export const markPrReady = (runId: string) => invoke<RunRecord>("harness_mark_pr_ready", { runId });
+
+/** `KEY=value` lines → env entries (blank lines and `#` comments are skipped). */
+export function parseEnvLines(text: string): EnvVar[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"))
+    .map((line) => {
+      const index = line.indexOf("=");
+      if (index <= 0) throw new Error(`"${line}" is not KEY=value`);
+      return { key: line.slice(0, index).trim(), value: line.slice(index + 1).trim() };
+    });
+}
+
+export function formatEnvLines(vars: EnvVar[]): string {
+  return vars.map((v) => `${v.key}=${v.value}`).join("\n");
+}

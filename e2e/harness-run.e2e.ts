@@ -14,6 +14,8 @@ const binding: RepoBinding = {
   worktreeRoot: "C:\\wt",
   commands: { install: { executable: "bun", args: ["install", "--frozen-lockfile"] } },
   copyEnv: [".env"],
+  services: [],
+  envOverrides: [],
   updatedAt: 1,
 };
 

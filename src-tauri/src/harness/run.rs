@@ -5,6 +5,7 @@
 use super::agent::{mark_pr_ready, pr_ci_status, AgentEnv, AgentRun, CheckResult, CiStatus};
 use super::bindings::RepoBinding;
 use super::claude;
+use super::docker::{EnvVar, ServiceSpec};
 use super::exec::{hide_console, resolve_executable};
 use super::repo::{CommandSpec, RepoCommands};
 use super::tools::AgentReview;
@@ -118,6 +119,9 @@ pub struct RunRecord {
     pub review: Option<AgentReview>,
     /// Env files copied into the worktree; never committed even if the repo does not ignore them.
     pub copy_env: Vec<String>,
+    /// Service containers and per-run env values from the binding when the run started.
+    pub services: Vec<ServiceSpec>,
+    pub env_overrides: Vec<EnvVar>,
     pub base_branch: String,
     pub jira_url: Option<String>,
     /// Digest of the worktree changes the last checks ran on (stale checks are re-run).
@@ -852,6 +856,8 @@ impl RunManager {
             mode: if env.is_some() { "agent" } else { "prepare" }.into(),
             commands: request.binding.commands.clone(),
             copy_env: request.binding.copy_env.clone(),
+            services: request.binding.services.clone(),
+            env_overrides: request.binding.env_overrides.clone(),
             base_branch: request.binding.base_branch.clone(),
             jira_url: request.jira_url.clone(),
             ..RunRecord::default()
@@ -1130,6 +1136,8 @@ mod tests {
                     ..RepoCommands::default()
                 },
                 copy_env: vec![".env".into()],
+                services: vec![],
+                env_overrides: vec![],
                 updated_at: 0,
             }
         }
