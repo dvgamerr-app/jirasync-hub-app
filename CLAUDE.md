@@ -21,3 +21,11 @@ Validation: `bun test --isolate` (185 pass), `bun run lint`, `bun x tsc --noEmit
 - Updated store and table tests for indexed loading, local sync reconciliation, and the single filtered-task data path.
 
 Validation: `bun test`, `bun run lint`, `bun run build`, and `bun run cg:check` pass. ESLint still reports the pre-existing `react-refresh/only-export-components` warning in `TypeIcon.tsx`. `bun audit` improved from 14 to 8 advisories; the remaining advisories are currently transitive or lack compatible patched releases in the current dependency graph.
+
+## Agent harness log — 2026-11-03
+
+- Branch `feat/agent-harness`: run Claude or Codex on a Jira task from the AI Board — worktree from the latest `origin/<base>`, app-run install/services/migrations, read-only plan → owner approval → implement with no shell (everything executes through the in-app MCP `run` tool), app-run checks with repair rounds, independent reviewer agent, Accept → Draft PR (Ready only after CI passes).
+- Phase 5: Setup → External agents grants time-limited MCP board access (ready tasks without notes; requests wait for owner approval). Phase 6: Setup → Sync exports/imports AI progress and syncs it through a git folder (no credentials, matched by Jira site + email + issue key).
+- Plan and per-phase status: `docs/agent-execution-harness-plan.md`; open items: `docs/technical-debt.md` (macOS + installed build not verified yet).
+
+Validation: `cargo test --lib` in `src-tauri` (74; also on Linux in Docker), `bun test --isolate` (221), `bun run lint`, `bun x tsc --noEmit` (+ e2e), `bun run test:e2e` (127). Opt-in real-tool tests: `cargo test --lib -- --ignored` (needs Claude, Codex, Docker).

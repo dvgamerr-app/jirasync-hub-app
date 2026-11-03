@@ -82,6 +82,21 @@ Setting severity to `NA` or clearing mandays sends nothing to Jira but the task 
 
 Two edits in the same millisecond are indistinguishable. A monotonic revision counter on `Task` would be exact.
 
+**Agent harness: not yet verified on macOS or in an installed build**
+
+Checked: Rust harness tests (74) on Windows and on Linux in Docker, including process-group and Job Object stops; a release NSIS build whose installer script includes `resources/harness-skills`; the real Claude and Codex CLIs through the opt-in tests. Also checked (2026-11-03): a release build with a separate identifier (`com.scg.wedo.jirasync-hub.harness-smoke`, so it cannot touch the installed app data) driven over WebView2 CDP — the real Doctor found git/claude/codex/gh/hurl/docker, and the real board MCP server listed its five tools, answered 401 without the token, 403 with an `Origin` header and 401 after access was turned off. The NSIS installer of that smoke identity was also installed silently into a temp folder, carried `resources/harness-skills` byte-identical, and the installed app ran a real Claude task through its own IPC (bind repo → plan → approve → implement → app checks passed → reviewer approved, skill loaded from the installed files, no shell calls), then uninstalled cleanly. Not checked: macOS (the PR CI matrix runs it after the branch is pushed).
+
+**Agent harness: one unexplained e2e failure in `harness-board.e2e.ts`**
+
+After fixing a toast that the test matched twice, 420 repeated runs passed; one earlier run failed with `toBeVisible` and its trace was not kept. If it shows up again, keep the trace (`--trace on`) before changing the test.
+
+**Agent harness: limits that are known and accepted for the personal MVP**
+
+- Worktree isolation is not a security sandbox; the agent CLI runs with the owner's OS permissions (see `docs/agent-execution-harness-plan.md` §7).
+- Codex has no flag to drop its shell; the app enforces "no shell" by declining every command approval, which depends on Codex asking first (`approvalPolicy: untrusted`).
+- Board access (MCP) has no persisted request queue: requests and report keys live in memory and are gone after the app restarts.
+- The board MCP server keeps listening on its loopback port after access is turned off; only the token is revoked.
+
 ### Low Priority
 
 **`eslint-disable` for React 19 + TanStack Virtual incompatibility** (`TaskTable.tsx`)
