@@ -303,6 +303,7 @@ fn start(manager: &RunManager, fx: &Fixture) -> RunRecord {
             context: Some("# PRJ-7: write PASS\n\nPut PASS into result.txt.\n".into()),
             agent: None,
             jira_url: None,
+            provider: "claude".into(),
         })
         .unwrap()
 }
@@ -500,6 +501,7 @@ fn prepare_only_runs_cannot_be_resumed_as_agent_runs() {
             context: None,
             agent: None,
             jira_url: None,
+            provider: "claude".into(),
         })
         .unwrap();
     assert_eq!(settle(&manager, &run.run_id).status, RunStatus::Prepared);
@@ -525,6 +527,7 @@ fn accept_commits_pushes_and_opens_a_draft_pr() {
             context: Some("# PRJ-9\n".into()),
             agent: None,
             jira_url: Some("https://acme.atlassian.net/browse/PRJ-9".into()),
+            provider: "claude".into(),
         })
         .unwrap();
     settle(&manager, &run.run_id);
@@ -753,6 +756,7 @@ fn start_with(manager: &RunManager, binding: RepoBinding) -> RunRecord {
             context: Some("# PRJ-7\n".into()),
             agent: None,
             jira_url: None,
+            provider: "claude".into(),
         })
         .unwrap()
 }
@@ -1003,6 +1007,7 @@ fn real_claude_plans_then_implements() {
             context: Some("# DEMO-1: implement sum\n\nImplement `sum` in src/sum.ts so the unit test passes.\n".into()),
             agent: None,
             jira_url: None,
+            provider: "claude".into(),
         })
         .unwrap();
     let planned = settle(&manager, &run.run_id);
@@ -1061,3 +1066,6 @@ fn real_claude_plans_then_implements() {
     assert!(crate::harness::tools::is_conventional_header(&subject));
     assert!(body.contains("- [x] `test`"));
 }
+
+#[path = "agent_codex_tests.rs"]
+mod codex;

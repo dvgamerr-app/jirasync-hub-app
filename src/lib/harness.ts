@@ -164,6 +164,8 @@ export interface RunRecord {
   error: string | null;
   /** "agent" when a coding agent works on the task, "prepare" for a workspace only. */
   mode: "agent" | "prepare" | "";
+  /** "" in older journals means Claude. */
+  provider: AgentProvider | "";
   sessionId: string | null;
   plan: string | null;
   /** Agent working time in ms (time the app spent executing is not counted). */
@@ -205,6 +207,9 @@ export type RunEvent = { runId: string; seq: number; at: number } & RunEventKind
 /** Live run output from the native journal (it is written to disk before it is sent). */
 export const RUN_EVENT = "harness://run-event";
 
+/** The coding agent CLI a run uses; both follow the same harness gates. */
+export type AgentProvider = "claude" | "codex";
+
 /** `context` (the task snapshot as markdown) starts a coding agent; without it, only prepare. */
 export const startRun = (
   taskId: string,
@@ -212,7 +217,16 @@ export const startRun = (
   issueKey: string,
   context: string | null,
   jiraUrl: string | null = null,
-) => invoke<RunRecord>("harness_start_run", { taskId, projectId, issueKey, context, jiraUrl });
+  provider: AgentProvider = "claude",
+) =>
+  invoke<RunRecord>("harness_start_run", {
+    taskId,
+    projectId,
+    issueKey,
+    context,
+    jiraUrl,
+    provider,
+  });
 export const resumeRun = (runId: string, decision: RunDecision, feedback?: string) =>
   invoke<RunRecord>("harness_resume_run", { runId, decision, feedback: feedback ?? null });
 export const stopRun = (runId: string) => invoke<void>("harness_stop_run", { runId });

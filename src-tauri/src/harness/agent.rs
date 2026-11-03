@@ -2,6 +2,7 @@
 // implement → the app runs the final checks itself → repair rounds → ready for review.
 // Each step is one CLI invocation that resumes the same session the app chose up front.
 use super::claude::{self, AgentLauncher, Invocation, Session};
+use super::codex::{self, AppServer};
 use super::docker::{self, DockerEndpoint, EnvVar};
 use super::exec::git;
 use super::mcp::McpServer;
@@ -9,6 +10,7 @@ use super::repo::CommandSpec;
 use super::run::{run_step, Control, EventKind, Journal, RunStatus, Step, StepOutcome};
 use super::tools::{AgentReview, Phase, PrDraft, RunTools};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -50,6 +52,8 @@ pub struct CheckResult {
 /// What every agent run shares: how to start the agent, the app's skills, the MCP server.
 pub struct AgentEnv {
     pub launcher: AgentLauncher,
+    /// How `codex` is started for runs that use Codex (a fake app-server in tests).
+    pub codex: AgentLauncher,
     /// How `gh` is started for publishing (a fake in tests).
     pub gh: AgentLauncher,
     /// Docker engine for service containers; `None` reads the current Docker context.
@@ -65,7 +69,8 @@ impl AgentEnv {
     pub fn new(launcher: AgentLauncher, skills_dir: PathBuf, budget: Duration) -> Self {
         Self {
             launcher,
-            gh: AgentLauncher::claude(PathBuf::from("gh")),
+            gh: AgentLauncher::plain(PathBuf::from("gh")),
+            codex: AgentLauncher::plain(PathBuf::from("codex")),
             docker: None,
             skills_dir,
             budget,
@@ -163,10 +168,18 @@ impl AgentRun<'_> {
         let mcp = self.env.mcp()?;
         let token = mcp.register(tools.clone());
         let config_path = self.run_dir.join("mcp.json");
-        let config = mcp.client_config(&token).to_string();
-        let result = fs::write(&config_path, config)
-            .map_err(|e| e.to_string())
-            .and_then(|_| self.run_agent(&tools, phase, prompt, &worktree, &config_path));
+        let config = mcp.client_config(&token);
+        let result = if record.provider == "codex" {
+            let url = config["mcpServers"]["harness"]["url"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            self.run_codex(&tools, phase, prompt, &worktree, &url, &token)
+        } else {
+            fs::write(&config_path, config.to_string())
+                .map_err(|e| e.to_string())
+                .and_then(|_| self.run_agent(&tools, phase, prompt, &worktree, &config_path))
+        };
         mcp.unregister(&token);
         let _ = fs::remove_file(&config_path);
         tools.shutdown();
@@ -246,6 +259,188 @@ impl AgentRun<'_> {
         let spent = ai_time().as_millis() as u64;
         self.journal.update(|record| record.ai_ms += spent);
         outcome
+    }
+
+    /// One Codex turn through `codex app-server`, under the same rules as Claude: the app
+    /// declines every shell command, accepts file changes only while implementing and only
+    /// inside the worktree, and lets the agent reach only the harness MCP server.
+    fn run_codex(
+        &self,
+        tools: &RunTools,
+        phase: Phase,
+        prompt: &str,
+        worktree: &Path,
+        mcp_url: &str,
+        token: &str,
+    ) -> Result<StepOutcome, String> {
+        const TOKEN_ENV: &str = "JIRASYNC_MCP_TOKEN";
+        self.journal.push(EventKind::StepStart {
+            step: "agent".into(),
+            command: "codex app-server".into(),
+        });
+        let started = Instant::now();
+        let exec_at_start = tools.exec_ms();
+        let ai_time = || {
+            let exec = Duration::from_millis(tools.exec_ms() - exec_at_start);
+            started.elapsed().saturating_sub(exec)
+        };
+        let env = [(TOKEN_ENV.to_string(), token.to_string())];
+        let outcome = AppServer::start(&self.env.codex, worktree, &env).and_then(|mut server| {
+            self.control.track(server.pid());
+            let outcome = self.codex_turn(
+                &mut server,
+                phase,
+                prompt,
+                worktree,
+                mcp_url,
+                TOKEN_ENV,
+                &ai_time,
+            );
+            self.control.untrack(server.pid());
+            outcome
+        });
+        let spent = ai_time().as_millis() as u64;
+        self.journal.update(|record| record.ai_ms += spent);
+        self.journal.push(EventKind::StepEnd {
+            step: "agent".into(),
+            exit_code: match outcome {
+                Ok(StepOutcome::Exited(code)) => Some(code),
+                Err(_) => Some(1),
+                _ => None,
+            },
+            duration_ms: started.elapsed().as_millis() as u64,
+        });
+        outcome
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn codex_turn(
+        &self,
+        server: &mut AppServer,
+        phase: Phase,
+        prompt: &str,
+        worktree: &Path,
+        mcp_url: &str,
+        token_env: &str,
+        ai_time: &dyn Fn() -> Duration,
+    ) -> Result<StepOutcome, String> {
+        let writable = phase == Phase::Implementing;
+        let mut params = codex::thread_params(
+            worktree,
+            mcp_url,
+            token_env,
+            writable,
+            claude::SYSTEM_PROMPT,
+        );
+        // The reviewer is independent: a fresh thread, never the implementer's.
+        let existing = if phase == Phase::Reviewing {
+            None
+        } else {
+            self.journal.record().session_id
+        };
+        let thread_id = match existing {
+            Some(id) => {
+                params["threadId"] = Value::String(id.clone());
+                server.call("thread/resume", params, Duration::from_secs(120))?;
+                id
+            }
+            None => {
+                let thread = server.call("thread/start", params, Duration::from_secs(120))?;
+                let id = thread
+                    .pointer("/thread/id")
+                    .and_then(Value::as_str)
+                    .ok_or("codex did not return a thread id")?
+                    .to_string();
+                if phase != Phase::Reviewing {
+                    let saved = id.clone();
+                    self.journal
+                        .update(|record| record.session_id = Some(saved));
+                }
+                id
+            }
+        };
+        let policy = codex::TurnPolicy {
+            worktree,
+            allow_file_changes: writable,
+        };
+        let budget = self.env.budget;
+        let stop = || {
+            if self.control.cancelled() {
+                Some("cancelled")
+            } else if ai_time() > budget {
+                Some("over_budget")
+            } else {
+                None
+            }
+        };
+        let journal = self.journal;
+        let mut on_event = |kind: &str, value: &Value| {
+            let agent = |kind: &str, text: String| EventKind::Agent {
+                kind: kind.into(),
+                text: text.chars().take(4000).collect(),
+            };
+            match kind {
+                "decision" => {
+                    let what = value["kind"].as_str().unwrap_or("");
+                    let detail = value["detail"].as_str().unwrap_or("");
+                    let tool = match what {
+                        "command" => format!("Shell {detail}"),
+                        "file" => format!("Edit {detail}"),
+                        "mcp" => format!("mcp {detail}"),
+                        other => other.to_string(),
+                    };
+                    journal.push(EventKind::Permission {
+                        tool: tool.chars().take(300).collect(),
+                        decision: if value["allowed"].as_bool() == Some(true) {
+                            "allow"
+                        } else {
+                            "deny"
+                        }
+                        .into(),
+                    });
+                }
+                "item/started" => {
+                    if let (Some(name), Some(arguments)) =
+                        (value["tool"].as_str(), value.get("arguments"))
+                    {
+                        journal.push(agent("tool", claude::tool_summary(name, arguments)));
+                    }
+                }
+                "item/completed" if value["type"] == "agentMessage" => {
+                    if let Some(text) = value["text"].as_str().filter(|t| !t.trim().is_empty()) {
+                        journal.push(agent("text", text.to_string()));
+                    }
+                }
+                "error" => journal.push(EventKind::Output {
+                    step: "agent".into(),
+                    stream: "stderr".into(),
+                    text: value.to_string().chars().take(1000).collect(),
+                }),
+                _ => {}
+            }
+        };
+        let report = match server.run_turn(
+            &thread_id,
+            prompt,
+            &policy,
+            &mut on_event,
+            &stop,
+            AGENT_TIMEOUT,
+        ) {
+            Ok(report) => report,
+            Err(error) if error.contains("timed out") => return Ok(StepOutcome::TimedOut),
+            Err(error) => return Err(error),
+        };
+        self.journal.push(EventKind::Agent {
+            kind: "result".into(),
+            text: format!("{} · codex", report.status),
+        });
+        Ok(match report.status.as_str() {
+            "completed" => StepOutcome::Exited(0),
+            "cancelled" => StepOutcome::Cancelled,
+            "over_budget" => StepOutcome::OverBudget,
+            _ => StepOutcome::Exited(1),
+        })
     }
 
     fn agent_outcome(&self, outcome: StepOutcome) -> Result<Option<RunStatus>, String> {

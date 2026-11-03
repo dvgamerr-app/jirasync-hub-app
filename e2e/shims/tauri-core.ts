@@ -46,6 +46,7 @@ function runCommand(cmd: string, args?: Record<string, unknown>): unknown {
         repoPath: "C:/src/service",
         createdAt: Date.now(),
         mode: args?.context ? "agent" : "prepare",
+        provider: args?.context ? (args?.provider === "codex" ? "codex" : "claude") : "",
       };
       state.runs = [record, ...runs];
       pushRunEvent({

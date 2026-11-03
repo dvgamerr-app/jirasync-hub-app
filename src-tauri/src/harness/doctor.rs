@@ -60,6 +60,12 @@ const PROBES: &[Probe] = &[
         version_args: &["--version"],
     },
     Probe {
+        name: "codex",
+        required: false,
+        purpose: "Coding agent (Codex CLI), instead of Claude",
+        version_args: &["--version"],
+    },
+    Probe {
         name: "gh",
         required: true,
         purpose: "Push and open Draft PRs",

@@ -67,6 +67,7 @@ import {
   type RunEvent,
   type RunRecord,
   type RunDecision,
+  type AgentProvider,
 } from "@/lib/harness";
 
 function getVisibleWorkLogsForTask(workLogs: WorkLog[], taskId: string): WorkLog[] {
@@ -156,11 +157,12 @@ export interface TaskStore {
   applyRunEvent: (event: RunEvent) => void;
   /**
    * Starts a run for the task in the repo bound to its project (one busy run at a time).
-   * `agent` sends the task snapshot to Claude, which plans first and waits for approval.
+   * `agent` sends the task snapshot to the coding agent (`provider`, Claude by default), which
+   * plans first and waits for approval.
    */
   startTaskRun: (
     taskId: string,
-    options?: { agent?: boolean; includeNote?: boolean },
+    options?: { agent?: boolean; includeNote?: boolean; provider?: AgentProvider },
   ) => Promise<RunRecord>;
   /** The owner decision at a gate of an agent run (plan approval, review). */
   resumeTaskRun: (runId: string, decision: RunDecision, feedback?: string) => Promise<void>;
@@ -1042,6 +1044,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         task.jiraTaskId,
         context,
         getSafeExternalUrl(task.refUrl),
+        options.provider,
       );
       set((state) => ({
         runs: [record, ...state.runs.filter((run) => run.runId !== record.runId)],

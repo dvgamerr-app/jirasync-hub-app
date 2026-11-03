@@ -3,6 +3,7 @@
 mod agent;
 mod bindings;
 mod claude;
+mod codex;
 mod docker;
 mod doctor;
 mod exec;
@@ -117,6 +118,7 @@ const AGENT_BUDGET_MINUTES: u64 = 30;
 /// Starts a run for a task: worktree from the latest origin base, env files, install, then
 /// (with `context`) a coding agent that plans first and waits for the owner.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn harness_start_run(
     app: tauri::AppHandle,
     runs: tauri::State<'_, RunManager>,
@@ -125,7 +127,12 @@ pub async fn harness_start_run(
     issue_key: String,
     context: Option<String>,
     jira_url: Option<String>,
+    provider: Option<String>,
 ) -> Result<RunRecord, String> {
+    let provider = provider.unwrap_or_else(|| "claude".into());
+    if !["claude", "codex"].contains(&provider.as_str()) {
+        return Err(format!("unknown coding agent \"{provider}\""));
+    }
     let file = bindings_file(&app)?;
     let manager = runs.inner().clone();
     blocking(move || {
@@ -139,6 +146,7 @@ pub async fn harness_start_run(
             binding,
             agent: None,
             jira_url,
+            provider,
             context,
         })
     })

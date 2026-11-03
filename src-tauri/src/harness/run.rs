@@ -103,6 +103,8 @@ pub struct RunRecord {
     pub error: Option<String>,
     /// "agent" when a coding agent works on the task, "prepare" for a workspace only.
     pub mode: String,
+    /// Coding agent CLI: "claude" or "codex" ("" in older journals means claude).
+    pub provider: String,
     /// Commands from the binding when the run started (kept so later steps use the same ones).
     pub commands: RepoCommands,
     pub session_id: Option<String>,
@@ -295,6 +297,18 @@ impl Journal {
             .collect()
     }
 
+    #[cfg(test)]
+    pub(super) fn step_names(&self) -> Vec<String> {
+        read_events(&self.dir, 0, usize::MAX)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|event| match event.kind {
+                EventKind::StepStart { step, .. } => Some(step),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub(super) fn record(&self) -> RunRecord {
         self.state.lock().unwrap().record.clone()
     }
@@ -328,7 +342,7 @@ fn read_events(dir: &Path, after_seq: u64, limit: usize) -> Result<Vec<RunEvent>
 }
 
 /// Kills a process and everything it started (agents spawn shells, test runners, servers).
-fn kill_tree(pid: u32) {
+pub(super) fn kill_tree(pid: u32) {
     #[cfg(windows)]
     {
         if let Some(taskkill) = resolve_executable("taskkill") {
@@ -375,11 +389,11 @@ impl Control {
         self.cancel.load(Ordering::SeqCst)
     }
 
-    fn track(&self, pid: u32) {
+    pub(super) fn track(&self, pid: u32) {
         self.pids.lock().unwrap().push(pid);
     }
 
-    fn untrack(&self, pid: u32) {
+    pub(super) fn untrack(&self, pid: u32) {
         self.pids.lock().unwrap().retain(|tracked| *tracked != pid);
     }
 }
@@ -732,6 +746,8 @@ pub struct StartRun {
     pub agent: Option<CommandSpec>,
     /// Link to the Jira issue, for the pull request.
     pub jira_url: Option<String>,
+    /// Coding agent CLI for an agent run: `claude` (default) or `codex`.
+    pub provider: String,
 }
 
 /// What the owner decided at a gate of an agent run.
@@ -959,6 +975,7 @@ impl RunManager {
             env_overrides: request.binding.env_overrides.clone(),
             base_branch: request.binding.base_branch.clone(),
             jira_url: request.jira_url.clone(),
+            provider: request.provider.clone(),
             ..RunRecord::default()
         };
         let dir = self.run_dir(&run_id);
@@ -1269,6 +1286,7 @@ mod tests {
                 binding,
                 agent,
                 jira_url: None,
+                provider: "claude".into(),
                 context: None,
             })
             .unwrap()
@@ -1390,6 +1408,7 @@ mod tests {
                 binding: fx.binding(None),
                 agent: None,
                 jira_url: None,
+                provider: "claude".into(),
                 context: None,
             })
             .unwrap_err();
@@ -1552,6 +1571,7 @@ mod tests {
                 binding: fx.binding(None),
                 agent: None,
                 jira_url: None,
+                provider: "claude".into(),
                 context: None,
             })
             .unwrap_err();

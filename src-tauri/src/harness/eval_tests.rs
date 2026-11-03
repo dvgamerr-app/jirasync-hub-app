@@ -171,6 +171,7 @@ fn harness_eval_set() {
                 context: Some(format!("# EVAL-1: {}\n\n{}\n", task.id, task.title)),
                 agent: None,
                 jira_url: None,
+                provider: "claude".into(),
             })
             .unwrap();
         let planned = settle(&manager, &run.run_id);

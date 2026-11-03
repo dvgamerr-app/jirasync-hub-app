@@ -404,3 +404,47 @@ test("an approving or missing review offers no findings to copy", async ({ page 
   );
   await expect(panel.getByRole("button", { name: "Use findings as feedback" })).toHaveCount(0);
 });
+
+test("Plan with Codex is offered when Doctor saw Codex start, and starts a Codex run", async ({
+  page,
+}) => {
+  const doctor = readyDoctorReport();
+  doctor.tools.push({
+    name: "codex",
+    required: false,
+    purpose: "Coding agent (Codex CLI), instead of Claude",
+    path: "C:/tools/codex.exe",
+    version: "codex-cli 0.166.0",
+    ok: true,
+    detail: null,
+  });
+  await seed(page, { bindings: [binding], doctor });
+  const panel = await openTaskOnBoard(page);
+  await panel.getByRole("button", { name: "Plan with Codex" }).click();
+  await expect.poll(() => calls(page, "harness_start_run")).toHaveLength(1);
+  const [start] = await calls(page, "harness_start_run");
+  expect(start.args).toMatchObject({ issueKey: "PRJ-1", provider: "codex" });
+  expect(String(start.args?.context)).toContain("PRJ-1");
+  await expect(panel.getByLabel("Coding agent")).toHaveText("Codex");
+});
+
+test("without a working Codex only Claude is offered, and Claude runs say so", async ({ page }) => {
+  const doctor = readyDoctorReport();
+  doctor.tools.push({
+    name: "codex",
+    required: false,
+    purpose: "Coding agent (Codex CLI), instead of Claude",
+    path: "C:/tools/codex.exe",
+    version: null,
+    ok: false,
+    detail: "found but could not start: exit code 1",
+  });
+  await seed(page, { bindings: [binding], doctor });
+  const panel = await openTaskOnBoard(page);
+  await expect(panel.getByRole("button", { name: "Plan with Claude" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Plan with Codex" })).toHaveCount(0);
+  await panel.getByRole("button", { name: "Plan with Claude" }).click();
+  await expect.poll(() => calls(page, "harness_start_run")).toHaveLength(1);
+  expect((await calls(page, "harness_start_run"))[0].args?.provider).toBe("claude");
+  await expect(panel.getByLabel("Coding agent")).toHaveText("Claude");
+});

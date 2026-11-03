@@ -167,20 +167,31 @@ function canContinue(run: RunRecord): boolean {
 }
 
 export function TaskRunPanel({ task }: { task: Task }) {
-  const { runs, runEvents, bindings, start, resume, stop, loadEvents, removeWorktree, openSetup } =
-    useTaskStore(
-      useShallow((state) => ({
-        runs: state.runs,
-        runEvents: state.runEvents,
-        bindings: state.repoBindings,
-        start: state.startTaskRun,
-        resume: state.resumeTaskRun,
-        stop: state.stopTaskRun,
-        loadEvents: state.loadRunEvents,
-        removeWorktree: state.removeTaskRunWorktree,
-        openSetup: state.setHarnessSetupOpen,
-      })),
-    );
+  const {
+    runs,
+    runEvents,
+    bindings,
+    start,
+    doctor,
+    resume,
+    stop,
+    loadEvents,
+    removeWorktree,
+    openSetup,
+  } = useTaskStore(
+    useShallow((state) => ({
+      runs: state.runs,
+      runEvents: state.runEvents,
+      bindings: state.repoBindings,
+      start: state.startTaskRun,
+      doctor: state.harnessDoctor,
+      resume: state.resumeTaskRun,
+      stop: state.stopTaskRun,
+      loadEvents: state.loadRunEvents,
+      removeWorktree: state.removeTaskRunWorktree,
+      openSetup: state.setHarnessSetupOpen,
+    })),
+  );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -189,6 +200,8 @@ export function TaskRunPanel({ task }: { task: Task }) {
 
   const binding = bindings.find((entry) => entry.projectId === task.projectId);
   const run = runs.find((candidate) => candidate.taskId === task.id);
+  // Codex is optional: offer it only when Doctor saw it start on this machine.
+  const codexReady = !!doctor?.tools.some((tool) => tool.name === "codex" && tool.ok);
   const activeElsewhere = runs.find(
     (candidate) => candidate.taskId !== task.id && isRunBusy(candidate.status),
   );
@@ -279,6 +292,11 @@ export function TaskRunPanel({ task }: { task: Task }) {
             {STATUS_LABEL[run.status]}
           </span>
           {run.error && <span className="text-muted-foreground"> · {run.error}</span>}
+        </p>
+      )}
+      {run?.mode === "agent" && (
+        <p className="text-muted-foreground text-[11px]" aria-label="Coding agent">
+          {run.provider === "codex" ? "Codex" : "Claude"}
         </p>
       )}
       {run?.mode === "agent" && (
@@ -481,6 +499,24 @@ export function TaskRunPanel({ task }: { task: Task }) {
               {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Bot className="h-3 w-3" />}
               Plan with Claude
             </Button>
+            {codexReady && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 text-[12px]"
+                disabled={busy || !!startBlocked}
+                title={
+                  startBlocked ||
+                  "Same gates as Claude: Codex plans read-only, has no shell, and waits for your approval"
+                }
+                onClick={() =>
+                  void act(() => start(task.id, { agent: true, includeNote, provider: "codex" }))
+                }
+              >
+                <Bot className="h-3 w-3" />
+                Plan with Codex
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"

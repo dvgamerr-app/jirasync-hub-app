@@ -101,6 +101,7 @@ export function emptyRunRecord(): RunRecord {
     checks: [],
     changedFiles: [],
     progress: null,
+    provider: "",
     copyEnv: [],
     baseBranch: "main",
     jiraUrl: null,

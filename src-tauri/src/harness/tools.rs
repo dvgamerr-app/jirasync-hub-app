@@ -20,7 +20,15 @@ const DEV_READY_TIMEOUT: Duration = Duration::from_secs(60);
 const TAIL_LINES: usize = 40;
 const MAX_PLAN_CHARS: usize = 20_000;
 /// Files the agent may never write: git internals, tool configuration, and the task snapshot.
-const PROTECTED: &[&str] = &[".git", ".claude", ".mcp.json", ".harness/task.md"];
+const PROTECTED: &[&str] = &[".git", ".claude", ".codex", ".mcp.json", ".harness/task.md"];
+
+/// True for git internals, agent tool configuration and the task snapshot (relative path).
+pub fn is_protected(relative: &str) -> bool {
+    let relative = relative.replace('\\', "/");
+    PROTECTED
+        .iter()
+        .any(|blocked| relative == *blocked || relative.starts_with(&format!("{blocked}/")))
+}
 
 /// The agent's draft for publishing. The app adds the testing section (from its own checks)
 /// and the Jira link itself; the agent never writes test results.
@@ -335,9 +343,7 @@ impl RunTools {
                 let relative = self
                     .in_worktree(file)
                     .ok_or("only files inside the run worktree can be changed")?;
-                if PROTECTED.iter().any(|blocked| {
-                    relative == *blocked || relative.starts_with(&format!("{blocked}/"))
-                }) {
+                if is_protected(&relative) {
                     return Err(format!("{relative} is protected in a harness run"));
                 }
                 Ok(())

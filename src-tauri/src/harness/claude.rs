@@ -10,7 +10,7 @@ const MAX_EVENT_CHARS: usize = 4000;
 pub const PLANNING_TOOLS: &str = "Read,Glob,Grep";
 pub const IMPLEMENTING_TOOLS: &str = "Read,Glob,Grep,Edit,Write";
 
-const SYSTEM_PROMPT: &str = "This is a JiraSync Hub harness run. Skills are provided by the \
+pub const SYSTEM_PROMPT: &str = "This is a JiraSync Hub harness run. Skills are provided by the \
 JiraSync Hub app over MCP, not by Claude Code. You have no shell: the app executes commands for \
 you through the harness tools and the owner watches them live.";
 
@@ -25,6 +25,11 @@ pub struct AgentLauncher {
 }
 
 impl AgentLauncher {
+    /// Runs `executable` directly with the CLI arguments (Claude, Codex, gh).
+    pub fn plain(executable: PathBuf) -> Self {
+        Self::claude(executable)
+    }
+
     pub fn claude(executable: PathBuf) -> Self {
         Self {
             executable,
@@ -177,7 +182,7 @@ fn clip(text: &str) -> String {
     format!("{clipped}…")
 }
 
-fn tool_summary(name: &str, input: &Value) -> String {
+pub fn tool_summary(name: &str, input: &Value) -> String {
     let short = name.strip_prefix("mcp__harness__").unwrap_or(name);
     let detail = ["command", "file_path", "pattern", "op", "name", "logId"]
         .iter()
