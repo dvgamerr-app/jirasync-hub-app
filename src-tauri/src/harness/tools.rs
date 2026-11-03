@@ -21,6 +21,108 @@ const MAX_PLAN_CHARS: usize = 20_000;
 /// Files the agent may never write: git internals, tool configuration, and the task snapshot.
 const PROTECTED: &[&str] = &[".git", ".claude", ".mcp.json", ".harness/task.md"];
 
+/// The agent's draft for publishing. The app adds the testing section (from its own checks)
+/// and the Jira link itself; the agent never writes test results.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrDraft {
+    /// English, conventional commit (`feat: ...`).
+    pub title: String,
+    /// English commit message; first line is a conventional commit header.
+    pub commit_message: String,
+    /// Thai sections of the PR body.
+    pub summary: String,
+    pub reason: String,
+    pub changes: String,
+    pub impact: String,
+}
+
+const COMMIT_TYPES: &[&str] = &[
+    "feat", "fix", "refactor", "perf", "docs", "test", "chore", "build", "ci", "style", "revert",
+];
+
+/// `type(scope)!: subject` in ASCII, at most 72 characters.
+pub fn is_conventional_header(line: &str) -> bool {
+    let Some((head, subject)) = line.split_once(": ") else {
+        return false;
+    };
+    let head = head.strip_suffix('!').unwrap_or(head);
+    let kind = match head.split_once('(') {
+        Some((kind, scope)) => {
+            let Some(scope) = scope.strip_suffix(')') else {
+                return false;
+            };
+            if scope.is_empty()
+                || !scope
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+            {
+                return false;
+            }
+            kind
+        }
+        None => head,
+    };
+    COMMIT_TYPES.contains(&kind)
+        && !subject.trim().is_empty()
+        && line.is_ascii()
+        && line.chars().count() <= 72
+}
+
+fn has_thai(text: &str) -> bool {
+    text.chars().any(|c| ('\u{0E00}'..='\u{0E7F}').contains(&c))
+}
+
+/// Mechanical rules from the team PR convention: English title and commit, Thai body,
+/// no AI attribution anywhere.
+pub fn validate_pr_draft(arguments: &Value) -> Result<PrDraft, String> {
+    let field = |name: &str| -> Result<String, String> {
+        let value = arguments
+            .get(name)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if value.is_empty() {
+            return Err(format!("{name} is required"));
+        }
+        if value.chars().count() > 8000 {
+            return Err(format!("{name} is too long"));
+        }
+        let lower = value.to_lowercase();
+        if lower.contains("co-authored-by") || lower.contains("generated with") {
+            return Err(format!("{name} must not contain AI attribution"));
+        }
+        Ok(value)
+    };
+    let draft = PrDraft {
+        title: field("title")?,
+        commit_message: field("commitMessage")?,
+        summary: field("summary")?,
+        reason: field("reason")?,
+        changes: field("changes")?,
+        impact: field("impact")?,
+    };
+    if !is_conventional_header(&draft.title) {
+        return Err("title must be an English conventional commit header, e.g. \"feat: add sum\" (ASCII, ≤ 72 chars)".into());
+    }
+    let header = draft.commit_message.lines().next().unwrap_or("");
+    if !is_conventional_header(header) || !draft.commit_message.is_ascii() {
+        return Err(
+            "commitMessage must be English and start with a conventional commit header".into(),
+        );
+    }
+    for (name, text) in [
+        ("summary", &draft.summary),
+        ("reason", &draft.reason),
+        ("changes", &draft.changes),
+    ] {
+        if !has_thai(text) {
+            return Err(format!("{name} must be written in Thai"));
+        }
+    }
+    Ok(draft)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum Phase {
@@ -30,6 +132,8 @@ pub enum Phase {
     Implementing = 1,
     /// Read-only review of the finished change (reviewer agent).
     Reviewing = 2,
+    /// Read-only: write the commit message and pull request draft with `submit_pr_draft`.
+    Drafting = 3,
 }
 
 pub struct RunTools {
@@ -40,6 +144,7 @@ pub struct RunTools {
     skills_dir: PathBuf,
     phase: AtomicU8,
     plan: Mutex<Option<String>>,
+    pr_draft: Mutex<Option<PrDraft>>,
     dev: Mutex<Option<(Background, u16)>>,
     exec_ms: AtomicU64,
     calls: AtomicU32,
@@ -61,6 +166,7 @@ impl RunTools {
             skills_dir,
             phase: AtomicU8::new(Phase::Planning as u8),
             plan: Mutex::new(None),
+            pr_draft: Mutex::new(None),
             dev: Mutex::new(None),
             exec_ms: AtomicU64::new(0),
             calls: AtomicU32::new(0),
@@ -75,8 +181,14 @@ impl RunTools {
         match self.phase.load(Ordering::SeqCst) {
             0 => Phase::Planning,
             1 => Phase::Implementing,
-            _ => Phase::Reviewing,
+            2 => Phase::Reviewing,
+            _ => Phase::Drafting,
         }
+    }
+
+    /// The pull request draft submitted in the drafting step, if any.
+    pub fn take_pr_draft(&self) -> Option<PrDraft> {
+        self.pr_draft.lock().unwrap().take()
     }
 
     /// The plan submitted in the last planning round, if any (taking it clears it).
@@ -115,6 +227,13 @@ impl RunTools {
             Phase::Planning => &["skill_list", "skill_get", "git", "get_log", "submit_plan"],
             Phase::Implementing => &["skill_list", "skill_get", "git", "get_log", "run"],
             Phase::Reviewing => &["skill_list", "skill_get", "git", "get_log"],
+            Phase::Drafting => &[
+                "skill_list",
+                "skill_get",
+                "git",
+                "get_log",
+                "submit_pr_draft",
+            ],
         }
     }
 
@@ -411,6 +530,7 @@ impl ToolHost for RunTools {
             json!({ "name": "get_log", "description": "Read a page of the full output of an earlier run (its logId) or of the dev server (\"dev\").", "inputSchema": { "type": "object", "properties": { "logId": string, "offset": { "type": "number" }, "limit": { "type": "number" } }, "required": ["logId"] } }),
             json!({ "name": "run", "description": "Ask the app to execute a project command in the worktree: build, test, lint, dev (starts the dev server) or hurl (runs .hurl files against dev). The owner sees it live. Returns status, exitCode, logId and the output tail.", "inputSchema": { "type": "object", "properties": { "command": { "type": "string", "enum": ["build", "test", "lint", "dev", "hurl"] }, "files": { "type": "array", "items": string } }, "required": ["command"] } }),
             json!({ "name": "submit_plan", "description": "Submit your implementation plan (markdown: goal, files to change, steps, checks to run) for the owner to approve. Only during planning.", "inputSchema": { "type": "object", "properties": { "plan": string }, "required": ["plan"] } }),
+            json!({ "name": "submit_pr_draft", "description": "Submit the commit message and pull request text for the accepted change. title and commitMessage: English conventional commit (feat: ..., fix: ...). summary, reason, changes, impact: Thai markdown bullets grounded in the actual diff. Do not write test results or AI attribution; the app adds the testing section from its own checks.", "inputSchema": { "type": "object", "properties": { "title": string, "commitMessage": string, "summary": string, "reason": string, "changes": string, "impact": string }, "required": ["title", "commitMessage", "summary", "reason", "changes", "impact"] } }),
             json!({ "name": "approve", "description": "Permission handler used by the app. Not for the agent.", "inputSchema": { "type": "object", "properties": { "tool_name": string, "input": { "type": "object" }, "tool_use_id": string }, "required": ["tool_name", "input"] } }),
         ];
         let allowed = self.allowed_tools();
@@ -439,6 +559,15 @@ impl ToolHost for RunTools {
             "get_log" => self.get_log(&arguments),
             "run" => self.run(&arguments),
             "submit_plan" => self.submit_plan(&arguments),
+            "submit_pr_draft" => {
+                let draft = validate_pr_draft(&arguments)?;
+                self.journal.push(EventKind::Agent {
+                    kind: "pr_draft".into(),
+                    text: draft.title.clone(),
+                });
+                *self.pr_draft.lock().unwrap() = Some(draft);
+                Ok("Draft received. Stop now: the app commits, pushes and opens the Draft PR.".into())
+            }
             _ => Err(format!("unknown tool {name}")),
         }
     }
@@ -714,6 +843,82 @@ mod tests {
         assert!(
             TcpStream::connect(address).is_err(),
             "dev server stops with the run"
+        );
+    }
+
+    fn draft(overrides: Value) -> Value {
+        let mut base = json!({
+            "title": "feat(sum): implement sum",
+            "commitMessage": "feat(sum): implement sum\n\nReturn a + b instead of throwing.",
+            "summary": "- เพิ่มการคำนวณ `sum`",
+            "reason": "ฟังก์ชันเดิม throw error ทำให้ test ไม่ผ่าน",
+            "changes": "- แก้ `src/sum.ts` ให้คืนค่า `a + b`",
+            "impact": "- Breaking change: ไม่มี"
+        });
+        for (key, value) in overrides.as_object().unwrap() {
+            base[key] = value.clone();
+        }
+        base
+    }
+
+    #[test]
+    fn pr_drafts_follow_the_team_convention() {
+        let ok = validate_pr_draft(&draft(json!({}))).unwrap();
+        assert_eq!(ok.title, "feat(sum): implement sum");
+        for (field, value, reason) in [
+            ("title", "เพิ่ม sum", "title must be English"),
+            ("title", "implement sum", "title needs a conventional type"),
+            ("title", "feature: add sum", "unknown type"),
+            (
+                "commitMessage",
+                "add sum",
+                "commit needs a conventional header",
+            ),
+            ("commitMessage", "feat: เพิ่ม sum", "commit must be English"),
+            ("summary", "- add sum", "body must be Thai"),
+            ("changes", "", "empty section"),
+            (
+                "impact",
+                "- ไม่มี\n\nCo-Authored-By: Claude <noreply@anthropic.com>",
+                "no AI attribution",
+            ),
+        ] {
+            let result = validate_pr_draft(&draft(json!({ field: value })));
+            assert!(result.is_err(), "{reason}");
+        }
+        assert!(is_conventional_header("fix!: drop the old api"));
+        assert!(!is_conventional_header(&format!(
+            "feat: {}",
+            "x".repeat(80)
+        )));
+    }
+
+    #[test]
+    fn pr_draft_tool_is_only_available_while_drafting() {
+        let fx = fixture(RepoCommands::default());
+        let tools = &fx.tools;
+        tools.set_phase(Phase::Implementing);
+        assert!(tools.call("submit_pr_draft", draft(json!({}))).is_err());
+        tools.set_phase(Phase::Drafting);
+        assert!(
+            !names(tools).contains(&"run".to_string()),
+            "drafting cannot execute"
+        );
+        let readme = fx.repo.path().join("README.md").display().to_string();
+        assert_eq!(
+            decision(tools, "Edit", json!({ "file_path": readme })),
+            "deny"
+        );
+        let rejected = tools.call("submit_pr_draft", draft(json!({ "summary": "- add sum" })));
+        assert!(rejected.unwrap_err().contains("Thai"));
+        assert!(
+            tools.take_pr_draft().is_none(),
+            "a rejected draft is not kept"
+        );
+        tools.call("submit_pr_draft", draft(json!({}))).unwrap();
+        assert_eq!(
+            tools.take_pr_draft().unwrap().title,
+            "feat(sum): implement sum"
         );
     }
 }

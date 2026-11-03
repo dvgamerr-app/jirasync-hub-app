@@ -81,6 +81,7 @@ export type RunStatus =
   | "running"
   | "verifying"
   | "ready_for_review"
+  | "publishing"
   | "completed"
   | "prepared"
   | "finished"
@@ -148,6 +149,14 @@ export interface RunRecord {
   checks: CheckResult[];
   changedFiles: string[];
   progress: string | null;
+  copyEnv: string[];
+  baseBranch: string;
+  jiraUrl: string | null;
+  verifiedDigest: string | null;
+  /** The Draft PR the app opened when the owner accepted. */
+  prUrl: string | null;
+  /** Marked ready for review after CI passed. */
+  prReady: boolean;
 }
 
 export type RunEventKind =
@@ -156,7 +165,11 @@ export type RunEventKind =
   | { type: "output"; step: string; stream: "stdout" | "stderr"; text: string }
   | { type: "step_end"; step: string; exitCode: number | null; durationMs: number }
   | { type: "permission"; tool: string; decision: "allow" | "deny" }
-  | { type: "agent"; kind: "init" | "text" | "tool" | "plan" | "result"; text: string };
+  | {
+      type: "agent";
+      kind: "init" | "text" | "tool" | "plan" | "pr_draft" | "result";
+      text: string;
+    };
 
 export type RunEvent = { runId: string; seq: number; at: number } & RunEventKind;
 
@@ -169,7 +182,8 @@ export const startRun = (
   projectId: string,
   issueKey: string,
   context: string | null,
-) => invoke<RunRecord>("harness_start_run", { taskId, projectId, issueKey, context });
+  jiraUrl: string | null = null,
+) => invoke<RunRecord>("harness_start_run", { taskId, projectId, issueKey, context, jiraUrl });
 export const resumeRun = (runId: string, decision: RunDecision, feedback?: string) =>
   invoke<RunRecord>("harness_resume_run", { runId, decision, feedback: feedback ?? null });
 export const stopRun = (runId: string) => invoke<void>("harness_stop_run", { runId });
@@ -256,7 +270,7 @@ export const RUN_EVENT_PAGE = 2000;
  * Review, accepted → Done. Other statuses (stopped, failed) leave the board as it is.
  */
 export function aiBoardStatusForRun(status: RunStatus): "doing" | "review" | "done" | null {
-  if (status === "ready_for_review") return "review";
+  if (status === "ready_for_review" || status === "publishing") return "review";
   if (status === "completed") return "done";
   if (
     ["preparing", "installing", "planning", "awaiting_plan", "running", "verifying"].includes(
@@ -266,3 +280,13 @@ export function aiBoardStatusForRun(status: RunStatus): "doing" | "review" | "do
     return "doing";
   return null;
 }
+
+export interface CiStatus {
+  checks: { name: string; bucket: "pass" | "fail" | "pending" | "skipping" | "cancel" }[];
+  /** At least one check and none pending or failing. */
+  allPassed: boolean;
+}
+
+export const getPrChecks = (runId: string) => invoke<CiStatus>("harness_pr_checks", { runId });
+/** Draft → ready for review; the native core refuses unless CI passed. */
+export const markPrReady = (runId: string) => invoke<RunRecord>("harness_mark_pr_ready", { runId });

@@ -54,6 +54,27 @@ fn fake_agent_entry() {
         json!({"type": "system", "subtype": "init", "model": "fake", "tools": []})
     );
 
+    if prompt.contains("pull request") {
+        let english = std::env::var("JIRASYNC_FAKE_DRAFT").as_deref() == Ok("english");
+        let reply = call(
+            "submit_pr_draft",
+            json!({
+                "title": "feat(result): write pass into result",
+                "commitMessage": "feat(result): write pass into result\n\nThe task asks for PASS in result.txt.",
+                "summary": if english { "- write PASS" } else { "- เขียน PASS ลง result.txt" },
+                "reason": "งานใน ticket ต้องการค่า PASS",
+                "changes": "- เพิ่มไฟล์ `result.txt`",
+                "impact": "- Breaking change: ไม่มี\n- DB migration: ไม่มี\n- Config change: ไม่มี"
+            }),
+        );
+        println!(
+            "{}",
+            json!({"type": "assistant", "message": {"content": [
+                {"type": "text", "text": format!("draft: {}", reply["result"]["content"][0]["text"])}
+            ]}})
+        );
+        return;
+    }
     if !flag("--tools").contains("Edit") {
         let summary: String = prompt.chars().take(80).collect();
         call(
@@ -96,11 +117,40 @@ fn fake_agent_entry() {
     );
 }
 
+const FAKE_GH_ARGS: &str = "JIRASYNC_FAKE_GH_ARGS";
+
+/// Not a real test: the stand-in for `gh` during publishing. Logs its arguments and answers
+/// `pr list` from `JIRASYNC_FAKE_GH_LIST` (default: no PR yet).
+#[test]
+fn fake_gh_entry() {
+    let Ok(raw) = std::env::var(FAKE_GH_ARGS) else {
+        return;
+    };
+    let args: Vec<String> = serde_json::from_str(&raw).unwrap();
+    let log = std::env::var("JIRASYNC_FAKE_GH_LOG").unwrap();
+    let mut previous = fs::read_to_string(&log).unwrap_or_default();
+    previous.push_str(&format!("{raw}\n"));
+    fs::write(&log, previous).unwrap();
+    match (args[0].as_str(), args[1].as_str()) {
+        ("pr", "list") => println!(
+            "{}",
+            std::env::var("JIRASYNC_FAKE_GH_LIST").unwrap_or_else(|_| "[]".into())
+        ),
+        ("pr", "create") => println!("https://github.com/acme/service/pull/42"),
+        ("pr", "checks") => println!(
+            "{}",
+            std::env::var("JIRASYNC_FAKE_GH_CHECKS").unwrap_or_else(|_| "[]".into())
+        ),
+        _ => println!("ok"),
+    }
+}
+
 struct Fixture {
-    _upstream: TempDir,
+    upstream: TempDir,
     clone: TempDir,
     worktrees: TempDir,
     runs: TempDir,
+    gh_log: TempDir,
 }
 
 fn fixture() -> Fixture {
@@ -118,33 +168,75 @@ fn fixture() -> Fixture {
             &clone.path().display().to_string(),
         ],
     );
+    run_git(clone.path(), &["config", "user.name", "owner"]);
+    run_git(
+        clone.path(),
+        &["config", "user.email", "owner@example.invalid"],
+    );
     Fixture {
-        _upstream: upstream,
+        upstream,
         clone,
         worktrees: TempDir::new("agent-wt"),
         runs: TempDir::new("agent-runs"),
+        gh_log: TempDir::new("agent-gh"),
+    }
+}
+
+impl Fixture {
+    fn gh_calls(&self) -> Vec<Vec<String>> {
+        fs::read_to_string(self.gh_log.path().join("gh.log"))
+            .unwrap_or_default()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+}
+
+fn self_launcher(entry: &str, args_env: &str, env: Vec<(String, String)>) -> AgentLauncher {
+    AgentLauncher {
+        executable: std::env::current_exe().unwrap(),
+        prefix_args: [entry, "--exact", "--nocapture"].map(String::from).to_vec(),
+        args_env: Some(args_env.into()),
+        env,
     }
 }
 
 fn manager(fx: &Fixture, env: &[(&str, &str)], budget: Duration) -> RunManager {
-    let launcher = AgentLauncher {
-        executable: std::env::current_exe().unwrap(),
-        prefix_args: [
-            "harness::agent::tests::fake_agent_entry",
-            "--exact",
-            "--nocapture",
-        ]
-        .map(String::from)
-        .to_vec(),
-        args_env: Some(FAKE_ARGS.into()),
-        env: env
-            .iter()
-            .map(|(key, value)| (key.to_string(), value.to_string()))
-            .collect(),
-    };
+    let mut env: Vec<(String, String)> = env
+        .iter()
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect();
+    env.push((
+        "JIRASYNC_FAKE_GH_LOG".into(),
+        fx.gh_log.path().join("gh.log").display().to_string(),
+    ));
     let skills = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/harness-skills");
-    RunManager::new(fx.runs.path().to_path_buf(), Arc::new(|_| {}))
-        .with_agent(AgentEnv::new(launcher, skills, budget))
+    let mut agent = AgentEnv::new(
+        self_launcher(
+            "harness::agent::tests::fake_agent_entry",
+            FAKE_ARGS,
+            env.clone(),
+        ),
+        skills,
+        budget,
+    );
+    agent.gh = self_launcher("harness::agent::tests::fake_gh_entry", FAKE_GH_ARGS, env);
+    RunManager::new(fx.runs.path().to_path_buf(), Arc::new(|_| {})).with_agent(agent)
+}
+
+/// Runs a task up to `ready_for_review`.
+fn reviewed(manager: &RunManager, fx: &Fixture) -> RunRecord {
+    let run = start(manager, fx);
+    settle(manager, &run.run_id);
+    manager.resume(&run.run_id, Decision::ApprovePlan).unwrap();
+    let record = settle(manager, &run.run_id);
+    assert_eq!(
+        record.status,
+        RunStatus::ReadyForReview,
+        "{:?}",
+        record.error
+    );
+    record
 }
 
 fn binding(fx: &Fixture) -> RepoBinding {
@@ -175,6 +267,7 @@ fn start(manager: &RunManager, fx: &Fixture) -> RunRecord {
             binding: binding(fx),
             context: Some("# PRJ-7: write PASS\n\nPut PASS into result.txt.\n".into()),
             agent: None,
+            jira_url: None,
         })
         .unwrap()
 }
@@ -254,8 +347,18 @@ fn plan_approve_implement_verify_review_accept() {
         EventKind::StepEnd { step, exit_code: Some(0), .. } if step == "verify:test")));
 
     assert!(manager.resume(&run.run_id, Decision::ApprovePlan).is_err());
-    let accepted = manager.resume(&run.run_id, Decision::Accept).unwrap();
-    assert_eq!(accepted.status, RunStatus::Completed);
+    manager.resume(&run.run_id, Decision::Accept).unwrap();
+    let published = settle(&manager, &run.run_id);
+    assert_eq!(
+        published.status,
+        RunStatus::Completed,
+        "{:?}",
+        published.error
+    );
+    assert_eq!(
+        published.pr_url.as_deref(),
+        Some("https://github.com/acme/service/pull/42")
+    );
 }
 
 #[test]
@@ -360,6 +463,7 @@ fn prepare_only_runs_cannot_be_resumed_as_agent_runs() {
             binding: binding(&fx),
             context: None,
             agent: None,
+            jira_url: None,
         })
         .unwrap();
     assert_eq!(settle(&manager, &run.run_id).status, RunStatus::Prepared);
@@ -367,6 +471,218 @@ fn prepare_only_runs_cannot_be_resumed_as_agent_runs() {
         .resume(&run.run_id, Decision::ApprovePlan)
         .unwrap_err();
     assert!(error.contains("only prepared a workspace"), "{error}");
+}
+
+#[test]
+fn accept_commits_pushes_and_opens_a_draft_pr() {
+    let fx = fixture();
+    // Not ignored by the repo: the app must still never commit the env file it copied in.
+    fx.clone.write(".env", "SECRET=1\n");
+    let manager = manager(&fx, &[], Duration::from_secs(600));
+    let mut binding_with_env = binding(&fx);
+    binding_with_env.copy_env = vec![".env".into()];
+    let run = manager
+        .start(StartRun {
+            task_id: "task-acc1-PRJ-9".into(),
+            issue_key: "PRJ-9".into(),
+            binding: binding_with_env,
+            context: Some("# PRJ-9\n".into()),
+            agent: None,
+            jira_url: Some("https://acme.atlassian.net/browse/PRJ-9".into()),
+        })
+        .unwrap();
+    settle(&manager, &run.run_id);
+    manager.resume(&run.run_id, Decision::ApprovePlan).unwrap();
+    assert_eq!(
+        settle(&manager, &run.run_id).status,
+        RunStatus::ReadyForReview
+    );
+    manager.resume(&run.run_id, Decision::Accept).unwrap();
+    let done = settle(&manager, &run.run_id);
+    assert_eq!(done.status, RunStatus::Completed, "{:?}", done.error);
+
+    let branch = done.worktree.clone().unwrap().branch;
+    let pushed = run_git(
+        fx.upstream.path(),
+        &["log", "-1", "--format=%s%n%b", &branch],
+    );
+    assert!(
+        pushed.starts_with("feat(result): write pass into result"),
+        "{pushed}"
+    );
+    assert!(!pushed.to_lowercase().contains("co-authored-by"));
+    let files = run_git(
+        fx.upstream.path(),
+        &["show", "--name-only", "--format=", &branch],
+    );
+    assert_eq!(
+        files.trim(),
+        "result.txt",
+        "the copied .env is not committed"
+    );
+
+    let calls = fx.gh_calls();
+    let create = calls.iter().find(|call| call[1] == "create").unwrap();
+    let flag = |name: &str| create[create.iter().position(|a| a == name).unwrap() + 1].clone();
+    assert!(create.contains(&"--draft".to_string()));
+    assert_eq!(flag("--base"), "main");
+    assert_eq!(flag("--head"), branch);
+    assert_eq!(flag("--title"), "feat(result): write pass into result");
+    let body = fs::read_to_string(flag("--body-file")).unwrap();
+    for section in [
+        "## สรุป",
+        "## เหตุผล",
+        "## การเปลี่ยนแปลง",
+        "## การทดสอบ",
+        "## ผลกระทบ",
+    ] {
+        assert!(body.contains(section), "{section}");
+    }
+    assert!(
+        body.contains("- [x] `test`"),
+        "testing comes from the app checks:\n{body}"
+    );
+    assert!(body.contains("[PRJ-9](https://acme.atlassian.net/browse/PRJ-9)"));
+}
+
+#[test]
+fn an_open_pr_is_updated_and_a_merged_one_is_not_reused() {
+    let fx = fixture();
+    let open = r#"[{"number":5,"state":"OPEN","url":"https://github.com/acme/service/pull/5"}]"#;
+    let manager_open = manager(
+        &fx,
+        &[("JIRASYNC_FAKE_GH_LIST", open)],
+        Duration::from_secs(600),
+    );
+    let run = reviewed(&manager_open, &fx);
+    manager_open.resume(&run.run_id, Decision::Accept).unwrap();
+    let done = settle(&manager_open, &run.run_id);
+    assert_eq!(
+        done.pr_url.as_deref(),
+        Some("https://github.com/acme/service/pull/5")
+    );
+    let calls = fx.gh_calls();
+    assert!(calls.iter().any(|call| call[1] == "edit" && call[2] == "5"));
+    assert!(
+        !calls.iter().any(|call| call[1] == "create"),
+        "no duplicate PR"
+    );
+
+    let fx = fixture();
+    let merged =
+        r#"[{"number":3,"state":"MERGED","url":"https://github.com/acme/service/pull/3"}]"#;
+    let manager_merged = manager(
+        &fx,
+        &[("JIRASYNC_FAKE_GH_LIST", merged)],
+        Duration::from_secs(600),
+    );
+    let run = reviewed(&manager_merged, &fx);
+    manager_merged
+        .resume(&run.run_id, Decision::Accept)
+        .unwrap();
+    let blocked = settle(&manager_merged, &run.run_id);
+    assert_eq!(
+        blocked.status,
+        RunStatus::ReadyForReview,
+        "stays reviewable"
+    );
+    assert!(blocked.error.unwrap().contains("already merged"));
+    assert!(blocked.pr_url.is_none());
+}
+
+#[test]
+fn a_draft_that_breaks_the_convention_publishes_nothing() {
+    let fx = fixture();
+    let manager = manager(
+        &fx,
+        &[("JIRASYNC_FAKE_DRAFT", "english")],
+        Duration::from_secs(600),
+    );
+    let run = reviewed(&manager, &fx);
+    manager.resume(&run.run_id, Decision::Accept).unwrap();
+    let blocked = settle(&manager, &run.run_id);
+    assert_eq!(blocked.status, RunStatus::ReadyForReview);
+    assert!(blocked
+        .error
+        .unwrap()
+        .contains("did not submit a pull request draft"));
+    let branch = blocked.worktree.unwrap().branch;
+    let remote = run_git(fx.upstream.path(), &["branch", "--list", &branch]);
+    assert!(remote.is_empty(), "nothing was pushed");
+    assert!(fx.gh_calls().is_empty());
+}
+
+#[test]
+fn a_change_made_after_the_checks_is_checked_again_before_publishing() {
+    let fx = fixture();
+    let manager = manager(&fx, &[], Duration::from_secs(600));
+    let run = reviewed(&manager, &fx);
+    let worktree = PathBuf::from(run.worktree.clone().unwrap().path);
+    fs::write(worktree.join("result.txt"), "FAIL").unwrap();
+
+    manager.resume(&run.run_id, Decision::Accept).unwrap();
+    let blocked = settle(&manager, &run.run_id);
+    assert_eq!(blocked.status, RunStatus::ReadyForReview);
+    let error = blocked.error.clone().unwrap();
+    assert!(
+        error.contains("checks fail on the current change: test"),
+        "{error}"
+    );
+    assert_eq!(
+        blocked.checks[0].status, "failed",
+        "the stale pass was replaced"
+    );
+    assert!(fx.gh_calls().is_empty(), "nothing was published");
+}
+
+fn published(manager: &RunManager, fx: &Fixture) -> RunRecord {
+    let run = reviewed(manager, fx);
+    manager.resume(&run.run_id, Decision::Accept).unwrap();
+    let done = settle(manager, &run.run_id);
+    assert_eq!(done.status, RunStatus::Completed, "{:?}", done.error);
+    done
+}
+
+#[test]
+fn a_draft_pr_becomes_ready_only_after_ci_passes() {
+    for (checks, why) in [
+        ("[]", "no CI checks yet"),
+        (
+            r#"[{"name":"build","bucket":"pass"},{"name":"e2e","bucket":"pending"}]"#,
+            "pending",
+        ),
+        (r#"[{"name":"build","bucket":"fail"}]"#, "failing"),
+    ] {
+        let fx = fixture();
+        let manager = manager(
+            &fx,
+            &[("JIRASYNC_FAKE_GH_CHECKS", checks)],
+            Duration::from_secs(600),
+        );
+        let run = published(&manager, &fx);
+        let status = manager.pr_checks(&run.run_id).unwrap();
+        assert!(!status.all_passed, "{why}");
+        assert!(manager.mark_pr_ready(&run.run_id).is_err(), "{why}");
+        assert!(
+            !fx.gh_calls().iter().any(|call| call[1] == "ready"),
+            "{why}"
+        );
+    }
+
+    let fx = fixture();
+    let green = r#"[{"name":"build","bucket":"pass"},{"name":"docs","bucket":"skipping"}]"#;
+    let manager = manager(
+        &fx,
+        &[("JIRASYNC_FAKE_GH_CHECKS", green)],
+        Duration::from_secs(600),
+    );
+    let run = published(&manager, &fx);
+    assert!(manager.pr_checks(&run.run_id).unwrap().all_passed);
+    let ready = manager.mark_pr_ready(&run.run_id).unwrap();
+    assert!(ready.pr_ready);
+    let calls = fx.gh_calls();
+    let call = calls.iter().find(|call| call[1] == "ready").unwrap();
+    assert_eq!(call[2], "https://github.com/acme/service/pull/42");
 }
 
 /// Spends real tokens (haiku): `cargo test --lib real_claude_plans_then_implements -- --ignored --nocapture`.
@@ -399,8 +715,14 @@ fn real_claude_plans_then_implements() {
             &clone.path().display().to_string(),
         ],
     );
+    run_git(clone.path(), &["config", "user.name", "owner"]);
+    run_git(
+        clone.path(),
+        &["config", "user.email", "owner@example.invalid"],
+    );
     let worktrees = TempDir::new("real-wt");
     let runs = TempDir::new("real-runs");
+    let gh_log = TempDir::new("real-gh");
     let skills = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/harness-skills");
     let mut env = AgentEnv::new(
         AgentLauncher::claude(PathBuf::from("claude")),
@@ -408,6 +730,12 @@ fn real_claude_plans_then_implements() {
         Duration::from_secs(600),
     );
     env.model = Some("haiku".into());
+    // Real Claude drafts the PR; publishing pushes to the local upstream and a fake gh.
+    let gh_env = vec![(
+        "JIRASYNC_FAKE_GH_LOG".to_string(),
+        gh_log.path().join("gh.log").display().to_string(),
+    )];
+    env.gh = self_launcher("harness::agent::tests::fake_gh_entry", FAKE_GH_ARGS, gh_env);
     let manager = RunManager::new(runs.path().to_path_buf(), Arc::new(|_| {})).with_agent(env);
     let binding = RepoBinding {
         project_id: "proj-acc1-DEMO".into(),
@@ -431,6 +759,7 @@ fn real_claude_plans_then_implements() {
             binding,
             context: Some("# DEMO-1: implement sum\n\nImplement `sum` in src/sum.ts so the unit test passes.\n".into()),
             agent: None,
+            jira_url: None,
         })
         .unwrap();
     let planned = settle(&manager, &run.run_id);
@@ -471,4 +800,21 @@ fn real_claude_plans_then_implements() {
     assert!(reviewed.changed_files.contains(&"src/sum.ts".to_string()));
     assert!(!events.iter().any(|e| matches!(&e.kind,
         EventKind::Agent { kind, text } if kind == "tool" && text.starts_with("Bash"))));
+
+    manager.resume(&run.run_id, Decision::Accept).unwrap();
+    let published = settle(&manager, &run.run_id);
+    let body =
+        fs::read_to_string(runs.path().join(&run.run_id).join("pr-body.md")).unwrap_or_default();
+    println!("PR BODY:\n{body}");
+    assert_eq!(
+        published.status,
+        RunStatus::Completed,
+        "{:?}",
+        published.error
+    );
+    let branch = published.worktree.unwrap().branch;
+    let subject = run_git(upstream.path(), &["log", "-1", "--format=%s", &branch]);
+    println!("COMMIT: {subject}");
+    assert!(crate::harness::tools::is_conventional_header(&subject));
+    assert!(body.contains("- [x] `test`"));
 }

@@ -1,7 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { Bot, Check, FolderOpen, Loader2, Play, Square, Trash2, X } from "lucide-react";
+import {
+  ArrowUpRight,
+  Bot,
+  Check,
+  FolderOpen,
+  Loader2,
+  Play,
+  Square,
+  Trash2,
+  X,
+} from "lucide-react";
+import { openExternal } from "@/lib/desktop";
 import { useTaskStore } from "@/store/task-store";
 import {
   isRunBusy,
@@ -9,6 +20,8 @@ import {
   type RunEvent,
   type RunRecord,
   type RunStatus,
+  getPrChecks,
+  type CiStatus,
 } from "@/lib/harness";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -22,7 +35,9 @@ const STATUS_LABEL: Record<RunStatus, string> = {
   running: "Agent working",
   verifying: "App running checks",
   ready_for_review: "Ready for review",
+  publishing: "Committing, pushing and opening the Draft PR",
   completed: "Accepted",
+
   prepared: "Workspace ready",
   finished: "Agent finished",
   failed: "Failed",
@@ -52,6 +67,91 @@ function logLine(event: RunEvent): string | null {
     default:
       return null;
   }
+}
+
+const CI_LABEL: Record<CiStatus["checks"][number]["bucket"], string> = {
+  pass: "passed",
+  fail: "failed",
+  pending: "running",
+  skipping: "skipped",
+  cancel: "cancelled",
+};
+
+/** The Draft PR of an accepted run: it becomes ready for review only after CI passes. */
+function PullRequestPanel({ run }: { run: RunRecord }) {
+  const markReady = useTaskStore((state) => state.markTaskPrReady);
+  const [ci, setCi] = useState<CiStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const url = run.prUrl ?? "";
+
+  async function act(action: () => Promise<void>) {
+    setBusy(true);
+    setError("");
+    try {
+      await action();
+    } catch (actionError) {
+      setError(getErrorMessage(actionError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2" aria-label="Pull request">
+      <button
+        type="button"
+        className="text-primary flex items-center gap-1 text-[12px] underline"
+        onClick={() => void openExternal(url)}
+      >
+        {run.prReady ? "Pull request (ready for review)" : "Draft pull request"}
+        <ArrowUpRight className="h-3 w-3" />
+      </button>
+      {!run.prReady && (
+        <>
+          {ci && (
+            <ul className="text-[12px]" aria-label="CI checks">
+              {ci.checks.length === 0 && <li>CI has not reported any checks yet.</li>}
+              {ci.checks.map((check) => (
+                <li key={check.name}>
+                  {check.name} {CI_LABEL[check.bucket] ?? check.bucket}
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-[12px]"
+              disabled={busy}
+              onClick={() => void act(async () => setCi(await getPrChecks(run.runId)))}
+            >
+              Check CI
+            </Button>
+            <Button
+              size="sm"
+              className="h-7 text-[12px]"
+              disabled={busy || !ci?.allPassed}
+              title={
+                ci?.allPassed
+                  ? "Mark the pull request ready for review"
+                  : "Enabled when every CI check passed"
+              }
+              onClick={() => void act(() => markReady(run.runId))}
+            >
+              Ready for review
+            </Button>
+          </div>
+        </>
+      )}
+      {error && (
+        <p className="text-destructive text-[12px]" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
+  );
 }
 
 /** The agent can continue in the same session after a failure, a stop or an app restart. */
@@ -259,7 +359,7 @@ export function TaskRunPanel({ task }: { task: Task }) {
               onClick={() => decide("accept")}
             >
               <Check className="h-3 w-3" />
-              Accept
+              Accept &amp; open Draft PR
             </Button>
             <Button
               variant="outline"
@@ -273,6 +373,8 @@ export function TaskRunPanel({ task }: { task: Task }) {
           </div>
         </div>
       )}
+
+      {run?.status === "completed" && run.prUrl && <PullRequestPanel run={run} />}
 
       {run && canContinue(run) && (
         <div className="space-y-2">

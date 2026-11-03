@@ -123,6 +123,7 @@ pub async fn harness_start_run(
     project_id: String,
     issue_key: String,
     context: Option<String>,
+    jira_url: Option<String>,
 ) -> Result<RunRecord, String> {
     let file = bindings_file(&app)?;
     let manager = runs.inner().clone();
@@ -136,10 +137,31 @@ pub async fn harness_start_run(
             issue_key,
             binding,
             agent: None,
+            jira_url,
             context,
         })
     })
     .await
+}
+
+/// CI checks of an accepted run's Draft PR (`gh pr checks`).
+#[tauri::command]
+pub async fn harness_pr_checks(
+    runs: tauri::State<'_, RunManager>,
+    run_id: String,
+) -> Result<agent::CiStatus, String> {
+    let manager = runs.inner().clone();
+    blocking(move || manager.pr_checks(&run_id)).await
+}
+
+/// Draft → ready for review; refused unless every CI check passed.
+#[tauri::command]
+pub async fn harness_mark_pr_ready(
+    runs: tauri::State<'_, RunManager>,
+    run_id: String,
+) -> Result<RunRecord, String> {
+    let manager = runs.inner().clone();
+    blocking(move || manager.mark_pr_ready(&run_id)).await
 }
 
 /// The owner decision at a gate: approve or revise the plan, accept or ask for changes.

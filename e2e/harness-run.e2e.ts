@@ -100,6 +100,7 @@ test("preparing a workspace streams the app's output live and ends ready", async
     projectId: PROJECT_ID,
     issueKey: "PRJ-1",
     context: null,
+    jiraUrl: expect.stringMatching(/\/browse\/PRJ-1$/),
   });
 
   const runId = "run001abc";

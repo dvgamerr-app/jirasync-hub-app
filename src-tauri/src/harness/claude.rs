@@ -141,6 +141,20 @@ update .harness/progress.md, then finish with a short report."
     )
 }
 
+pub fn drafting_prompt(issue_key: &str) -> String {
+    format!(
+        "The owner accepted your change for {issue_key}. Write the commit and pull request text now; \
+you can only read. Look at the real change with mcp__harness__git (op \"status\" and \"diff\") and \
+ground every bullet in it. Then call mcp__harness__submit_pr_draft with:\n\
+- title and commitMessage in English, conventional commit style (e.g. \"fix(api): handle empty ids\"), \
+header at most 72 characters;\n\
+- summary, reason, changes, impact in Thai as short markdown bullets (impact lists \
+Breaking change / DB migration / Config change as มี or ไม่มี).\n\
+Do not write test results (the app adds them from its own checks) and never add AI attribution \
+or Co-Authored-By lines. If the tool rejects the draft, fix what it says and submit again. Then stop."
+    )
+}
+
 fn clip(text: &str) -> String {
     if text.chars().count() <= MAX_EVENT_CHARS {
         return text.to_string();

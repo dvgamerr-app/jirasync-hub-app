@@ -11,7 +11,7 @@ import {
 } from "@/types/jira";
 import { isSyncLockHeld, runExclusiveSync } from "@/lib/sync-lock";
 import { syncNow, type SyncResult } from "@/lib/sync-service";
-import { getDescriptionSearchText } from "@/lib/adf-content";
+import { getDescriptionSearchText, getSafeExternalUrl } from "@/lib/adf-content";
 import { buildAiContext } from "@/lib/ai-context";
 import { db, getJiraAccounts, getStoryPointFieldMap, type JiraAccount } from "@/lib/jira-db";
 import {
@@ -57,6 +57,7 @@ import {
   RUN_EVENT_PAGE,
   removeRunWorktree,
   resumeRun,
+  markPrReady,
   aiBoardStatusForRun,
   saveRepoBinding,
   startRun,
@@ -163,6 +164,8 @@ export interface TaskStore {
   ) => Promise<RunRecord>;
   /** The owner decision at a gate of an agent run (plan approval, review). */
   resumeTaskRun: (runId: string, decision: RunDecision, feedback?: string) => Promise<void>;
+  /** Draft PR → ready for review (refused natively unless CI passed). */
+  markTaskPrReady: (runId: string) => Promise<void>;
   stopTaskRun: (runId: string) => Promise<void>;
   removeTaskRunWorktree: (runId: string, discardChanges: boolean) => Promise<void>;
 
@@ -1033,11 +1036,23 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       const context = options.agent
         ? buildAiContext(task, { parent, includeNote: options.includeNote })
         : null;
-      const record = await startRun(task.id, task.projectId, task.jiraTaskId, context);
+      const record = await startRun(
+        task.id,
+        task.projectId,
+        task.jiraTaskId,
+        context,
+        getSafeExternalUrl(task.refUrl),
+      );
       set((state) => ({
         runs: [record, ...state.runs.filter((run) => run.runId !== record.runId)],
       }));
       return record;
+    },
+    markTaskPrReady: async (runId) => {
+      const record = await markPrReady(runId);
+      set((state) => ({
+        runs: state.runs.map((run) => (run.runId === record.runId ? record : run)),
+      }));
     },
     resumeTaskRun: async (runId, decision, feedback) => {
       const record = await resumeRun(runId, decision, feedback);

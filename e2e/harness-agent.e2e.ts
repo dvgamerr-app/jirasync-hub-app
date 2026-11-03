@@ -245,3 +245,107 @@ test("a failed prepare-only run offers no agent continuation", async ({ page }) 
   await expect(panel.getByRole("button", { name: "Continue with instructions" })).toHaveCount(0);
   await expect(panel.getByRole("button", { name: "Plan with Claude" })).toBeEnabled();
 });
+
+test("Accept opens a Draft PR, and Ready for review unlocks only after CI passes", async ({
+  page,
+}) => {
+  await seed(page, {
+    bindings: [binding],
+    runs: [
+      agentRun({
+        status: "ready_for_review",
+        checks: [
+          { name: "test", status: "passed", exitCode: 0, logId: "verify:test", durationMs: 9 },
+        ],
+        changedFiles: ["src/sum.ts"],
+      }),
+    ],
+    journal: { agent01abc: [] },
+  });
+  const panel = await openTaskOnBoard(page);
+  await panel.getByRole("button", { name: "Accept & open Draft PR" }).click();
+  await expect.poll(() => calls(page, "harness_resume_run")).toHaveLength(1);
+  await push(page, {
+    runId: "agent01abc",
+    seq: 1,
+    at: 1,
+    type: "status",
+    status: "publishing",
+    message: null,
+  });
+  await expect(panel.getByRole("status", { name: "Run status" })).toHaveText(
+    "Committing, pushing and opening the Draft PR",
+  );
+  await expect(
+    column(page, "Review").getByRole("button", { name: "PRJ-1: Board work" }),
+  ).toBeVisible();
+
+  const url = "https://github.com/acme/service/pull/42";
+  await setRecord(page, { status: "completed", prUrl: url });
+  await push(page, {
+    runId: "agent01abc",
+    seq: 2,
+    at: 2,
+    type: "status",
+    status: "completed",
+    message: null,
+  });
+  const pr = panel
+    .getByRole("group", { name: "Pull request" })
+    .or(panel.getByLabel("Pull request"));
+  await expect(pr.getByRole("button", { name: "Draft pull request" })).toBeVisible();
+  const ready = pr.getByRole("button", { name: "Ready for review" });
+  await expect(ready, "nothing to judge before CI is checked").toBeDisabled();
+
+  await page.evaluate(() => {
+    window.__e2e!.harness!.ci = {
+      checks: [
+        { name: "build", bucket: "pass" },
+        { name: "e2e", bucket: "pending" },
+      ],
+      allPassed: false,
+    };
+  });
+  await pr.getByRole("button", { name: "Check CI" }).click();
+  await expect(pr.getByLabel("CI checks")).toContainText("e2e running");
+  await expect(ready).toBeDisabled();
+
+  await page.evaluate(() => {
+    window.__e2e!.harness!.ci = { checks: [{ name: "build", bucket: "pass" }], allPassed: true };
+  });
+  await pr.getByRole("button", { name: "Check CI" }).click();
+  await expect(ready).toBeEnabled();
+  await ready.click();
+  await expect.poll(() => calls(page, "harness_mark_pr_ready")).toHaveLength(1);
+  await expect(pr.getByRole("button", { name: "Pull request (ready for review)" })).toBeVisible();
+  // Outside Tauri openExternal falls back to window.open; record it instead of opening a tab.
+  await page.evaluate(() => {
+    const w = window as unknown as { __opened: string[] };
+    w.__opened = [];
+    window.open = (target) => {
+      w.__opened.push(String(target));
+      return null;
+    };
+  });
+  await pr.getByRole("button", { name: "Pull request (ready for review)" }).click();
+  expect(
+    await page.evaluate(() => (window as unknown as { __opened: string[] }).__opened),
+  ).toContain(url);
+});
+
+test("a failed publish keeps the run reviewable and says why", async ({ page }) => {
+  await seed(page, {
+    bindings: [binding],
+    runs: [
+      agentRun({
+        status: "ready_for_review",
+        error:
+          "a pull request for this branch was already merged: https://github.com/acme/service/pull/3",
+      }),
+    ],
+  });
+  const panel = await openTaskOnBoard(page);
+  await expect(panel.getByRole("status", { name: "Run status" })).toContainText("already merged");
+  await expect(panel.getByRole("button", { name: "Accept & open Draft PR" })).toBeEnabled();
+  await expect(panel.getByLabel("Pull request")).toHaveCount(0);
+});

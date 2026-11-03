@@ -6,7 +6,7 @@ use super::exec::git;
 use super::mcp::McpServer;
 use super::repo::CommandSpec;
 use super::run::{run_step, Control, EventKind, Journal, RunStatus, Step, StepOutcome};
-use super::tools::{Phase, RunTools};
+use super::tools::{Phase, PrDraft, RunTools};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -49,6 +49,8 @@ pub struct CheckResult {
 /// What every agent run shares: how to start the agent, the app's skills, the MCP server.
 pub struct AgentEnv {
     pub launcher: AgentLauncher,
+    /// How `gh` is started for publishing (a fake in tests).
+    pub gh: AgentLauncher,
     pub skills_dir: PathBuf,
     /// Working-time budget per owner-approved step; time the app spends executing is excluded.
     pub budget: Duration,
@@ -60,6 +62,7 @@ impl AgentEnv {
     pub fn new(launcher: AgentLauncher, skills_dir: PathBuf, budget: Duration) -> Self {
         Self {
             launcher,
+            gh: AgentLauncher::claude(PathBuf::from("gh")),
             skills_dir,
             budget,
             model: None,
@@ -188,10 +191,11 @@ impl AgentRun<'_> {
             } else {
                 Session::New(&session_id)
             },
-            tools: if phase == Phase::Planning {
-                claude::PLANNING_TOOLS
-            } else {
+            // Only implementing may edit files; every other step is read-only.
+            tools: if phase == Phase::Implementing {
                 claude::IMPLEMENTING_TOOLS
+            } else {
+                claude::PLANNING_TOOLS
             },
             mcp_config: &config,
             model: self.env.model.as_deref(),
@@ -225,6 +229,7 @@ impl AgentRun<'_> {
             timeout: AGENT_TIMEOUT,
             env: &env,
             parse_stdout: Some(claude::parse_stream_line),
+            keep_secrets: false,
             over_budget: Some(&over_budget),
         };
         let outcome = run_step(self.journal, self.control, &step);
@@ -287,10 +292,12 @@ impl AgentRun<'_> {
                 .filter(|check| check.status != "passed")
                 .cloned()
                 .collect();
+            let digest = tree_digest(&worktree)?;
             self.journal.update(|record| {
                 record.checks = checks;
                 record.changed_files = changed;
                 record.progress = progress;
+                record.verified_digest = Some(digest);
             });
             if self.control.cancelled() {
                 return Ok(RunStatus::Cancelled);
@@ -391,6 +398,418 @@ impl AgentRun<'_> {
         }
         Ok(results)
     }
+}
+
+impl AgentRun<'_> {
+    /// Accept → (re-check if the change moved since its checks) → the agent drafts the text
+    /// read-only → the app commits, pushes and opens or updates a Draft PR. Any failure keeps
+    /// the run ready for review with the reason, so Accept can be retried.
+    pub fn publish(&self) -> Result<RunStatus, String> {
+        self.journal.set_status(RunStatus::Publishing, None);
+        match self.publish_steps() {
+            Ok(Some(url)) => {
+                self.journal.update(|record| {
+                    record.pr_url = Some(url);
+                    record.error = None;
+                });
+                Ok(RunStatus::Completed)
+            }
+            Ok(None) => Ok(RunStatus::Cancelled),
+            Err(_) if self.control.cancelled() => Ok(RunStatus::Cancelled),
+            Err(error) => {
+                self.journal.update(|record| record.error = Some(error));
+                Ok(RunStatus::ReadyForReview)
+            }
+        }
+    }
+
+    fn publish_steps(&self) -> Result<Option<String>, String> {
+        let worktree = self.worktree()?;
+        let record = self.journal.record();
+        let info = record.worktree.clone().ok_or("this run has no worktree")?;
+
+        if record.verified_digest.as_deref() != Some(tree_digest(&worktree)?.as_str()) {
+            self.note("the change moved after its checks; running them again");
+            let checks = self.verify()?;
+            let failed: Vec<&str> = checks
+                .iter()
+                .filter(|check| check.status != "passed")
+                .map(|check| check.name.as_str())
+                .collect();
+            let digest = tree_digest(&worktree)?;
+            let names = failed.join(", ");
+            self.journal.update(|record| {
+                record.checks = checks;
+                record.verified_digest = Some(digest);
+            });
+            if !names.is_empty() {
+                return Err(format!("checks fail on the current change: {names}"));
+            }
+        }
+        let changed = changed_files(&worktree)?;
+        let ahead = git(
+            &["rev-list", "--count", &format!("{}..HEAD", info.base_sha)],
+            &worktree,
+            Duration::from_secs(20),
+        )?;
+        if changed.is_empty() && ahead.trim() == "0" {
+            return Err("nothing to publish: no files changed".into());
+        }
+
+        let (outcome, tools) =
+            self.invoke(Phase::Drafting, &claude::drafting_prompt(&record.issue_key))?;
+        if let Some(status) = self.agent_outcome(outcome)? {
+            return if status == RunStatus::Cancelled {
+                Ok(None)
+            } else {
+                Err("drafting stopped".into())
+            };
+        }
+        let draft = tools
+            .take_pr_draft()
+            .ok_or("the agent did not submit a pull request draft")?;
+        let record = self.journal.record();
+        let body = pr_body(&record, &draft);
+        let body_file = self.run_dir.join("pr-body.md");
+        let message_file = self.run_dir.join("commit-message.txt");
+        fs::write(&body_file, &body).map_err(|e| e.to_string())?;
+        fs::write(&message_file, format!("{}\n", draft.commit_message))
+            .map_err(|e| e.to_string())?;
+        let body_arg = body_file.display().to_string();
+
+        if !changed.is_empty() {
+            // Env files the app copied in are never committed, even if the repo does not ignore them.
+            let mut add = vec!["add".to_string(), "-A".into(), "--".into(), ".".into()];
+            add.extend(
+                record
+                    .copy_env
+                    .iter()
+                    .map(|file| format!(":(exclude){file}")),
+            );
+            self.app_step("publish:add", "git", add)?;
+            let message = message_file.display().to_string();
+            self.app_step(
+                "publish:commit",
+                "git",
+                vec!["commit".into(), "-F".into(), message],
+            )?;
+        }
+        self.app_step(
+            "publish:push",
+            "git",
+            vec![
+                "push".into(),
+                "-u".into(),
+                "origin".into(),
+                info.branch.clone(),
+            ],
+        )?;
+
+        let list = self.gh_step(
+            "publish:pr-list",
+            [
+                "pr",
+                "list",
+                "--head",
+                &info.branch,
+                "--state",
+                "all",
+                "--json",
+                "number,state,url",
+                "--limit",
+                "1",
+            ],
+        )?;
+        let existing: Vec<serde_json::Value> = list
+            .iter()
+            .rev()
+            .find_map(|line| serde_json::from_str(line.trim()).ok())
+            .unwrap_or_default();
+        if let Some(pr) = existing.first() {
+            let url = pr["url"].as_str().unwrap_or("").to_string();
+            match pr["state"].as_str() {
+                Some("MERGED") => {
+                    return Err(format!(
+                        "a pull request for this branch was already merged: {url}"
+                    ))
+                }
+                Some("OPEN") => {
+                    let number = pr["number"].to_string();
+                    self.gh_step(
+                        "publish:pr-edit",
+                        [
+                            "pr",
+                            "edit",
+                            &number,
+                            "--title",
+                            &draft.title,
+                            "--body-file",
+                            &body_arg,
+                        ],
+                    )?;
+                    return Ok(Some(url));
+                }
+                _ => {}
+            }
+        }
+        let created = self.gh_step(
+            "publish:pr-create",
+            [
+                "pr",
+                "create",
+                "--draft",
+                "--base",
+                &record.base_branch,
+                "--head",
+                &info.branch,
+                "--title",
+                &draft.title,
+                "--body-file",
+                &body_arg,
+            ],
+        )?;
+        created
+            .iter()
+            .rev()
+            .map(|line| line.trim())
+            .find(|line| line.starts_with("https://"))
+            .map(|url| Some(url.to_string()))
+            .ok_or_else(|| "gh did not report the pull request URL".into())
+    }
+
+    fn note(&self, text: &str) {
+        self.journal.push(EventKind::Output {
+            step: "publish".into(),
+            stream: "stdout".into(),
+            text: text.into(),
+        });
+    }
+
+    /// A git command the app runs with the owner credentials, shown in the run log.
+    fn app_step(
+        &self,
+        name: &str,
+        executable: &str,
+        args: Vec<String>,
+    ) -> Result<Vec<String>, String> {
+        let worktree = self.worktree()?;
+        let command = CommandSpec {
+            executable: executable.into(),
+            args,
+        };
+        self.checked(name, &command, &[], &worktree)
+    }
+
+    fn gh_step<const N: usize>(&self, name: &str, args: [&str; N]) -> Result<Vec<String>, String> {
+        let worktree = self.worktree()?;
+        let gh = &self.env.gh;
+        let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+        let mut env = gh.env.clone();
+        let mut argv = gh.prefix_args.clone();
+        match &gh.args_env {
+            Some(var) => env.push((var.clone(), serde_json::to_string(&args).unwrap())),
+            None => argv.extend(args),
+        }
+        let command = CommandSpec {
+            executable: gh.executable.display().to_string(),
+            args: argv,
+        };
+        self.checked(name, &command, &env, &worktree)
+    }
+
+    fn checked(
+        &self,
+        name: &str,
+        command: &CommandSpec,
+        env: &[(String, String)],
+        cwd: &Path,
+    ) -> Result<Vec<String>, String> {
+        let mut step = Step::new(name, command, cwd, CHECK_TIMEOUT);
+        step.env = env;
+        step.keep_secrets = true;
+        match run_step(self.journal, self.control, &step)? {
+            StepOutcome::Exited(0) => Ok(self.journal.step_lines(name)),
+            StepOutcome::Exited(code) => {
+                let lines = self.journal.step_lines(name);
+                let last = lines.last().cloned().unwrap_or_default();
+                Err(format!("{name} failed (exit code {code}): {last}"))
+            }
+            StepOutcome::Cancelled => Err("stopped".into()),
+            StepOutcome::TimedOut | StepOutcome::OverBudget => Err(format!("{name} timed out")),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CiCheck {
+    pub name: String,
+    /// `pass`, `fail`, `pending`, `skipping` or `cancel` (gh's bucket).
+    pub bucket: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CiStatus {
+    pub checks: Vec<CiCheck>,
+    /// True only when there is at least one check and none is pending or failing.
+    pub all_passed: bool,
+}
+
+fn run_gh(gh: &AgentLauncher, args: &[&str], cwd: &Path) -> Result<std::process::Output, String> {
+    let program = super::exec::resolve_executable(&gh.executable.display().to_string())
+        .ok_or("gh is not installed or not on PATH")?;
+    let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+    let mut command = std::process::Command::new(program);
+    command.current_dir(cwd).args(&gh.prefix_args);
+    match &gh.args_env {
+        Some(var) => {
+            command.env(var, serde_json::to_string(&args).unwrap());
+        }
+        None => {
+            command.args(&args);
+        }
+    }
+    command.envs(gh.env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+    super::exec::hide_console(&mut command);
+    command.output().map_err(|e| e.to_string())
+}
+
+/// CI state of the run's Draft PR, from `gh pr checks` (non-zero exits mean failing/pending,
+/// so the JSON on stdout is what counts).
+pub fn pr_ci_status(env: &AgentEnv, record: &super::run::RunRecord) -> Result<CiStatus, String> {
+    let url = record
+        .pr_url
+        .as_deref()
+        .ok_or("this run has no pull request yet")?;
+    let cwd = PathBuf::from(&record.repo_path);
+    let output = run_gh(
+        &env.gh,
+        &["pr", "checks", url, "--json", "name,bucket"],
+        &cwd,
+    )?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let checks: Vec<CiCheck> = stdout
+        .lines()
+        .rev()
+        .find_map(|line| serde_json::from_str(line.trim()).ok())
+        .unwrap_or_default();
+    let all_passed = !checks.is_empty()
+        && checks
+            .iter()
+            .all(|check| check.bucket == "pass" || check.bucket == "skipping");
+    Ok(CiStatus { checks, all_passed })
+}
+
+/// Marks the Draft PR ready for review, only after the app itself sees every CI check pass.
+pub fn mark_pr_ready(env: &AgentEnv, record: &super::run::RunRecord) -> Result<CiStatus, String> {
+    let status = pr_ci_status(env, record)?;
+    if status.checks.is_empty() {
+        return Err("CI reported no checks for this pull request yet".into());
+    }
+    if !status.all_passed {
+        let open: Vec<&str> = status
+            .checks
+            .iter()
+            .filter(|check| check.bucket != "pass" && check.bucket != "skipping")
+            .map(|check| check.name.as_str())
+            .collect();
+        return Err(format!("CI has not passed yet: {}", open.join(", ")));
+    }
+    let url = record.pr_url.as_deref().unwrap_or_default();
+    let output = run_gh(
+        &env.gh,
+        &["pr", "ready", url],
+        &PathBuf::from(&record.repo_path),
+    )?;
+    if !output.status.success() {
+        return Err(format!(
+            "gh pr ready failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(status)
+}
+
+/// The PR body in the team template (Thai). The testing section comes only from the checks
+/// the app ran itself on this revision; the agent cannot claim results.
+fn pr_body(record: &super::run::RunRecord, draft: &PrDraft) -> String {
+    let commands = &record.commands;
+    let shown = |name: &str| {
+        [
+            ("build", &commands.build),
+            ("lint", &commands.lint),
+            ("test", &commands.test),
+            ("install", &commands.install),
+        ]
+        .iter()
+        .find(|(candidate, _)| *candidate == name)
+        .and_then(|(_, command)| command.as_ref())
+        .map(|command| {
+            std::iter::once(command.executable.as_str())
+                .chain(command.args.iter().map(String::as_str))
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+    };
+    let testing = if record.checks.is_empty() {
+        "- [ ] ยังไม่มีคำสั่งตรวจ (build / lint / test) ที่ตั้งไว้ใน Setup".to_string()
+    } else {
+        record
+            .checks
+            .iter()
+            .map(|check| {
+                let mark = if check.status == "passed" { "x" } else { " " };
+                let result = if check.status == "passed" {
+                    "ผ่าน"
+                } else {
+                    "ไม่ผ่าน"
+                };
+                let command = shown(&check.name)
+                    .map(|command| format!(" (`{command}`)"))
+                    .unwrap_or_default();
+                format!(
+                    "- [{mark}] `{}`{command} {result} — JiraSync Hub รันบน revision นี้",
+                    check.name
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let related = match &record.jira_url {
+        Some(url) => format!("- Jira: [{}]({url})", record.issue_key),
+        None => format!("- Jira: {}", record.issue_key),
+    };
+    format!(
+        "## สรุป\n{}\n\n## เหตุผล\n{}\n\n## การเปลี่ยนแปลง\n{}\n\n## การทดสอบ\n{testing}\n\n## ผลกระทบ\n{}\n\n## ที่เกี่ยวข้อง\n{related}\n",
+        draft.summary, draft.reason, draft.changes, draft.impact
+    )
+}
+
+/// Identifies the exact change: tracked diff against HEAD plus every untracked file.
+pub fn tree_digest(worktree: &Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(git(
+        &["diff", "HEAD", "--binary"],
+        worktree,
+        Duration::from_secs(60),
+    )?);
+    let untracked = git(
+        &["ls-files", "--others", "--exclude-standard"],
+        worktree,
+        Duration::from_secs(30),
+    )?;
+    for file in untracked.lines() {
+        hasher.update(file.as_bytes());
+        hasher.update(fs::read(worktree.join(file)).unwrap_or_default());
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .take(16)
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 /// Changed and new files in the worktree, excluding the harness scratch folder.

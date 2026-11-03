@@ -66,7 +66,7 @@ function runCommand(cmd: string, args?: Record<string, unknown>): unknown {
         throw "write what should change";
       const status =
         args?.decision === "accept"
-          ? "completed"
+          ? "publishing"
           : args?.decision === "revise_plan"
             ? "planning"
             : "running";
@@ -74,6 +74,13 @@ function runCommand(cmd: string, args?: Record<string, unknown>): unknown {
         candidate === run ? { ...candidate, status } : candidate,
       );
       return state.runs.find((candidate) => candidate.runId === run.runId);
+    }
+    case "harness_pr_checks":
+      return state.ci ?? { checks: [], allPassed: false };
+    case "harness_mark_pr_ready": {
+      if (!state.ci?.allPassed) throw "CI has not passed yet";
+      state.runs = runs.map((run) => (run.runId === args?.runId ? { ...run, prReady: true } : run));
+      return state.runs.find((run) => run.runId === args?.runId);
     }
     case "harness_stop_run":
       return null;

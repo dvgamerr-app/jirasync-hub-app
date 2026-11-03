@@ -2,7 +2,7 @@
 // (`runs/<id>/run.json` + `events.ndjson`); every event is written there before the UI sees
 // it, so a reload can replay from a sequence number without applying anything twice.
 // Every step is a process the app starts itself, streamed live and stoppable as a tree.
-use super::agent::{AgentEnv, AgentRun, CheckResult};
+use super::agent::{mark_pr_ready, pr_ci_status, AgentEnv, AgentRun, CheckResult, CiStatus};
 use super::bindings::RepoBinding;
 use super::claude;
 use super::exec::{hide_console, resolve_executable};
@@ -45,6 +45,8 @@ pub enum RunStatus {
     Verifying,
     /// Checks passed; waiting for the owner to accept or ask for changes.
     ReadyForReview,
+    /// Accepted: the app commits, pushes and opens the Draft PR.
+    Publishing,
     /// The owner accepted the change.
     Completed,
     /// Workspace is ready (worktree + env + install) without an agent.
@@ -109,6 +111,15 @@ pub struct RunRecord {
     pub checks: Vec<CheckResult>,
     pub changed_files: Vec<String>,
     pub progress: Option<String>,
+    /// Env files copied into the worktree; never committed even if the repo does not ignore them.
+    pub copy_env: Vec<String>,
+    pub base_branch: String,
+    pub jira_url: Option<String>,
+    /// Digest of the worktree changes the last checks ran on (stale checks are re-run).
+    pub verified_digest: Option<String>,
+    pub pr_url: Option<String>,
+    /// The Draft PR was marked ready for review after CI passed.
+    pub pr_ready: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -383,6 +394,8 @@ pub(super) struct Step<'a> {
     pub timeout: Duration,
     pub env: &'a [(String, String)],
     pub parse_stdout: Option<LineParser>,
+    /// Keep the owner credentials in the env (git push / gh run by the app, never the agent).
+    pub keep_secrets: bool,
     /// Checked while the step runs; true stops it as over budget.
     pub over_budget: Option<&'a (dyn Fn() -> bool + Sync)>,
 }
@@ -401,6 +414,7 @@ impl<'a> Step<'a> {
             timeout,
             env: &[],
             parse_stdout: None,
+            keep_secrets: false,
             over_budget: None,
         }
     }
@@ -437,8 +451,10 @@ fn spawn_streamed(
         .stderr(Stdio::piped())
         .env("CI", "1")
         .env("NO_COLOR", "1");
-    for name in STRIPPED_ENV {
-        process.env_remove(name);
+    if !step.keep_secrets {
+        for name in STRIPPED_ENV {
+            process.env_remove(name);
+        }
     }
     for (key, value) in step.env {
         process.env(key, value);
@@ -606,6 +622,8 @@ pub struct StartRun {
     pub context: Option<String>,
     /// A raw command run after install instead of the agent (tests only).
     pub agent: Option<CommandSpec>,
+    /// Link to the Jira issue, for the pull request.
+    pub jira_url: Option<String>,
 }
 
 /// What the owner decided at a gate of an agent run.
@@ -747,12 +765,10 @@ impl RunManager {
         enum Next {
             Plan(Option<String>),
             Implement(String),
+            Publish,
         }
         let next = match decision {
-            Decision::Accept if status == RunStatus::ReadyForReview => {
-                journal.set_status(RunStatus::Completed, None);
-                return Ok(journal.record());
-            }
+            Decision::Accept if status == RunStatus::ReadyForReview => Next::Publish,
             Decision::ApprovePlan if status == RunStatus::AwaitingPlan => {
                 Next::Implement(claude::IMPLEMENT_PROMPT.into())
             }
@@ -780,6 +796,7 @@ impl RunManager {
             let result = match next {
                 Next::Plan(feedback) => run.plan(feedback.as_deref()),
                 Next::Implement(prompt) => run.implement(prompt),
+                Next::Publish => run.publish(),
             };
             finish(&journal, &control, &slot, result);
         });
@@ -829,6 +846,9 @@ impl RunManager {
             created_at: now_ms(),
             mode: if env.is_some() { "agent" } else { "prepare" }.into(),
             commands: request.binding.commands.clone(),
+            copy_env: request.binding.copy_env.clone(),
+            base_branch: request.binding.base_branch.clone(),
+            jira_url: request.jira_url.clone(),
             ..RunRecord::default()
         };
         let dir = self.run_dir(&run_id);
@@ -875,6 +895,37 @@ impl RunManager {
             }
             _ => Err(format!("run {run_id} is not active")),
         }
+    }
+
+    /// CI checks of the run's Draft PR.
+    pub fn pr_checks(&self, run_id: &str) -> Result<CiStatus, String> {
+        let env = self
+            .agent
+            .clone()
+            .ok_or("coding-agent runs are not available")?;
+        let record = read_record(&self.checked_dir(run_id)?)?;
+        pr_ci_status(&env, &record)
+    }
+
+    /// Draft → ready for review, only when every CI check passed (checked again here).
+    pub fn mark_pr_ready(&self, run_id: &str) -> Result<RunRecord, String> {
+        let env = self
+            .agent
+            .clone()
+            .ok_or("coding-agent runs are not available")?;
+        let journal = Journal::open(self.checked_dir(run_id)?, self.emit.clone())?;
+        let record = journal.record();
+        if record.status != RunStatus::Completed {
+            return Err("only an accepted run has a pull request to mark ready".into());
+        }
+        mark_pr_ready(&env, &record)?;
+        journal.update(|record| record.pr_ready = true);
+        journal.push(EventKind::Output {
+            step: "publish".into(),
+            stream: "stdout".into(),
+            text: "pull request marked ready for review (CI passed)".into(),
+        });
+        Ok(journal.record())
     }
 
     pub fn list(&self, limit: usize) -> Vec<RunRecord> {
@@ -1105,6 +1156,7 @@ mod tests {
                 issue_key: "PRJ-1".into(),
                 binding,
                 agent,
+                jira_url: None,
                 context: None,
             })
             .unwrap()
@@ -1225,6 +1277,7 @@ mod tests {
                 issue_key: "PRJ-2".into(),
                 binding: fx.binding(None),
                 agent: None,
+                jira_url: None,
                 context: None,
             })
             .unwrap_err();
@@ -1338,6 +1391,7 @@ mod tests {
                 issue_key: "bad key".into(),
                 binding: fx.binding(None),
                 agent: None,
+                jira_url: None,
                 context: None,
             })
             .unwrap_err();

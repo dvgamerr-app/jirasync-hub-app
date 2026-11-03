@@ -1,5 +1,12 @@
 // Shared in-page state for the e2e shims. Tests read it back via page.evaluate.
-import type { DoctorReport, RepoBinding, RepoDetection, RunEvent, RunRecord } from "@/lib/harness";
+import type {
+  CiStatus,
+  DoctorReport,
+  RepoBinding,
+  RepoDetection,
+  RunEvent,
+  RunRecord,
+} from "@/lib/harness";
 
 export interface E2EHarnessState {
   doctor: DoctorReport;
@@ -9,6 +16,8 @@ export interface E2EHarnessState {
   /** Fake native run journal: records (newest first) and their events. */
   runs?: RunRecord[];
   journal?: Record<string, RunEvent[]>;
+  /** CI answer for `harness_pr_checks`. */
+  ci?: CiStatus;
   /** Run IDs whose worktree has uncommitted changes (removal needs confirmation). */
   dirtyWorktrees?: string[];
   /** Every harness command the app invoked, in order. */
@@ -92,5 +101,11 @@ export function emptyRunRecord(): RunRecord {
     checks: [],
     changedFiles: [],
     progress: null,
+    copyEnv: [],
+    baseBranch: "main",
+    jiraUrl: null,
+    verifiedDigest: null,
+    prUrl: null,
+    prReady: false,
   };
 }
