@@ -2,7 +2,7 @@
 // reversible, non-secret encoding so the real encrypt/decrypt call sites still run.
 // Harness commands answer from window.__e2e.harness (see state.ts) and record every call.
 import type { RepoBinding, RunEvent, RunRecord } from "@/lib/harness";
-import { getHarnessState } from "./state";
+import { emptyRunRecord, getHarnessState } from "./state";
 import { emit } from "./tauri-event";
 
 /** Appends to the fake journal and sends it live, like the native core does. */
@@ -32,23 +32,20 @@ function runCommand(cmd: string, args?: Record<string, unknown>): unknown {
   switch (cmd) {
     case "harness_start_run": {
       const active = runs.find((run) =>
-        ["preparing", "installing", "running"].includes(run.status),
+        ["preparing", "installing", "planning", "running", "verifying"].includes(run.status),
       );
       if (active) throw `another run (${active.runId}) is active; stop it or wait for it to finish`;
       if (!state.bindings.some((binding) => binding.projectId === args?.projectId))
         throw "bind this project to a repository in Setup first";
       const record: RunRecord = {
+        ...emptyRunRecord(),
         runId: `run${String(runs.length + 1).padStart(3, "0")}abc`,
         taskId: String(args?.taskId),
         projectId: String(args?.projectId),
         issueKey: String(args?.issueKey),
         repoPath: "C:/src/service",
-        status: "preparing",
-        worktree: null,
-        worktreeRemoved: false,
         createdAt: Date.now(),
-        endedAt: null,
-        error: null,
+        mode: args?.context ? "agent" : "prepare",
       };
       state.runs = [record, ...runs];
       pushRunEvent({
@@ -60,6 +57,23 @@ function runCommand(cmd: string, args?: Record<string, unknown>): unknown {
         message: null,
       });
       return record;
+    }
+    case "harness_resume_run": {
+      // The real gate rules are tested natively; the shim records the decision and moves on.
+      const run = runs.find((candidate) => candidate.runId === args?.runId);
+      if (!run) throw `run ${args?.runId} not found`;
+      if (["revise_plan", "request_changes"].includes(String(args?.decision)) && !args?.feedback)
+        throw "write what should change";
+      const status =
+        args?.decision === "accept"
+          ? "completed"
+          : args?.decision === "revise_plan"
+            ? "planning"
+            : "running";
+      state.runs = runs.map((candidate) =>
+        candidate === run ? { ...candidate, status } : candidate,
+      );
+      return state.runs.find((candidate) => candidate.runId === run.runId);
     }
     case "harness_stop_run":
       return null;

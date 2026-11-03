@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { FolderOpen, Loader2, Play, Square, Trash2 } from "lucide-react";
+import { Bot, Check, FolderOpen, Loader2, Play, Square, Trash2, X } from "lucide-react";
 import { useTaskStore } from "@/store/task-store";
-import { TERMINAL_RUN_STATUSES, type RunEvent, type RunStatus } from "@/lib/harness";
+import {
+  isRunBusy,
+  type RunDecision,
+  type RunEvent,
+  type RunRecord,
+  type RunStatus,
+} from "@/lib/harness";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import type { Task } from "@/types/jira";
@@ -11,7 +17,12 @@ import type { Task } from "@/types/jira";
 const STATUS_LABEL: Record<RunStatus, string> = {
   preparing: "Creating worktree",
   installing: "Installing dependencies",
+  planning: "Agent planning",
+  awaiting_plan: "Plan ready for your review",
   running: "Agent working",
+  verifying: "App running checks",
+  ready_for_review: "Ready for review",
+  completed: "Accepted",
   prepared: "Workspace ready",
   finished: "Agent finished",
   failed: "Failed",
@@ -30,19 +41,39 @@ function logLine(event: RunEvent): string | null {
       return event.text;
     case "step_end":
       return `■ ${event.step} ${event.exitCode === null ? "stopped" : `exit ${event.exitCode}`} · ${(event.durationMs / 1000).toFixed(1)}s`;
+    case "agent":
+      if (event.kind === "tool") return `→ ${event.text}`;
+      if (event.kind === "plan") return "▣ plan submitted";
+      if (event.kind === "result") return `✓ agent ${event.text}`;
+      if (event.kind === "init") return `◆ agent started · ${event.text}`;
+      return `◆ ${event.text}`;
+    case "permission":
+      return event.decision === "deny" ? `⛔ denied ${event.tool}` : null;
     default:
       return null;
   }
 }
 
+/** The agent can continue in the same session after a failure, a stop or an app restart. */
+function canContinue(run: RunRecord): boolean {
+  return (
+    run.mode === "agent" &&
+    !!run.sessionId &&
+    !!run.worktree &&
+    !run.worktreeRemoved &&
+    ["failed", "cancelled", "interrupted"].includes(run.status)
+  );
+}
+
 export function TaskRunPanel({ task }: { task: Task }) {
-  const { runs, runEvents, bindings, start, stop, loadEvents, removeWorktree, openSetup } =
+  const { runs, runEvents, bindings, start, resume, stop, loadEvents, removeWorktree, openSetup } =
     useTaskStore(
       useShallow((state) => ({
         runs: state.runs,
         runEvents: state.runEvents,
         bindings: state.repoBindings,
         start: state.startTaskRun,
+        resume: state.resumeTaskRun,
         stop: state.stopTaskRun,
         loadEvents: state.loadRunEvents,
         removeWorktree: state.removeTaskRunWorktree,
@@ -52,13 +83,15 @@ export function TaskRunPanel({ task }: { task: Task }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const [includeNote, setIncludeNote] = useState(false);
 
   const binding = bindings.find((entry) => entry.projectId === task.projectId);
   const run = runs.find((candidate) => candidate.taskId === task.id);
   const activeElsewhere = runs.find(
-    (candidate) => candidate.taskId !== task.id && !TERMINAL_RUN_STATUSES.has(candidate.status),
+    (candidate) => candidate.taskId !== task.id && isRunBusy(candidate.status),
   );
-  const active = !!run && !TERMINAL_RUN_STATUSES.has(run.status);
+  const active = !!run && isRunBusy(run.status);
   const events = run ? runEvents[run.runId] : undefined;
   const lines = useMemo(
     () =>
@@ -66,7 +99,8 @@ export function TaskRunPanel({ task }: { task: Task }) {
         .map((event) => ({
           seq: event.seq,
           text: logLine(event),
-          err: event.type === "output" && event.stream === "stderr",
+          err:
+            (event.type === "output" && event.stream === "stderr") || event.type === "permission",
         }))
         .filter((line) => line.text !== null)
         .slice(-VISIBLE_LINES),
@@ -90,6 +124,14 @@ export function TaskRunPanel({ task }: { task: Task }) {
     }
   }
 
+  function decide(decision: RunDecision) {
+    if (!run) return;
+    void act(async () => {
+      await resume(run.runId, decision, feedback);
+      setFeedback("");
+    });
+  }
+
   if (!binding && !run) {
     return (
       <section className="board-detail-section" aria-label="Agent run">
@@ -110,11 +152,22 @@ export function TaskRunPanel({ task }: { task: Task }) {
   }
 
   const worktree = run?.worktree && !run.worktreeRemoved ? run.worktree : null;
+  const waiting = run?.status === "awaiting_plan" || run?.status === "ready_for_review";
   const startBlocked = activeElsewhere
     ? `Another run (${activeElsewhere.issueKey}) is active. Stop it or wait for it to finish.`
     : !binding
       ? "This project has no repository anymore."
       : "";
+  const feedbackBox = (placeholder: string) => (
+    <textarea
+      aria-label="Feedback for the agent"
+      className="border-input bg-background w-full rounded-md border p-2 text-[12px]"
+      rows={3}
+      placeholder={placeholder}
+      value={feedback}
+      onChange={(event) => setFeedback(event.target.value)}
+    />
+  );
 
   return (
     <section className="board-detail-section" aria-label="Agent run">
@@ -127,11 +180,115 @@ export function TaskRunPanel({ task }: { task: Task }) {
           {run.error && <span className="text-muted-foreground"> · {run.error}</span>}
         </p>
       )}
+      {run?.mode === "agent" && (
+        <p className="text-muted-foreground text-[11px]">
+          Agent working time {Math.round(run.aiMs / 1000)}s
+          {run.attempts > 0 && ` · ${run.attempts} repair round${run.attempts > 1 ? "s" : ""}`}
+        </p>
+      )}
       {worktree && (
         <p className="text-muted-foreground truncate font-mono text-[11px]" title={worktree.path}>
           {worktree.branch} · {worktree.path}
         </p>
       )}
+
+      {run?.status === "awaiting_plan" && (
+        <div className="space-y-2" aria-label="Plan review">
+          <pre className="board-run-log" aria-label="Agent plan">
+            {run.plan}
+          </pre>
+          {feedbackBox("Optional: what should change in the plan?")}
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              className="h-7 gap-1.5 text-[12px]"
+              disabled={busy || !!activeElsewhere}
+              onClick={() => decide("approve_plan")}
+            >
+              <Check className="h-3 w-3" />
+              Approve plan
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-[12px]"
+              disabled={busy || !feedback.trim() || !!activeElsewhere}
+              onClick={() => decide("revise_plan")}
+            >
+              Revise plan
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {run?.status === "ready_for_review" && (
+        <div className="space-y-2" aria-label="Change review">
+          <ul className="text-[12px]" aria-label="Checks">
+            {run.checks.length === 0 && (
+              <li className="text-amber-600 dark:text-amber-400">
+                No build, lint or test command is set; nothing was checked.
+              </li>
+            )}
+            {run.checks.map((check) => (
+              <li key={check.name} className="flex items-center gap-1.5">
+                {check.status === "passed" ? (
+                  <Check className="h-3 w-3 text-emerald-500" />
+                ) : (
+                  <X className="text-destructive h-3 w-3" />
+                )}
+                {check.name} {check.status}
+              </li>
+            ))}
+          </ul>
+          <p className="text-[12px]" aria-label="Changed files">
+            {run.changedFiles.length === 0
+              ? "No files changed."
+              : `Changed: ${run.changedFiles.join(", ")}`}
+          </p>
+          {run.progress && (
+            <pre className="board-run-log" aria-label="Agent progress">
+              {run.progress}
+            </pre>
+          )}
+          {feedbackBox("What should the agent change?")}
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              className="h-7 gap-1.5 text-[12px]"
+              disabled={busy}
+              onClick={() => decide("accept")}
+            >
+              <Check className="h-3 w-3" />
+              Accept
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-[12px]"
+              disabled={busy || !feedback.trim() || !!activeElsewhere}
+              onClick={() => decide("request_changes")}
+            >
+              Request changes
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {run && canContinue(run) && (
+        <div className="space-y-2">
+          {feedbackBox("Tell the agent how to continue")}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-[12px]"
+            disabled={busy || !feedback.trim() || !!activeElsewhere}
+            onClick={() => decide("request_changes")}
+          >
+            Continue with instructions
+          </Button>
+        </div>
+      )}
+
       {lines.length > 0 && (
         <pre className="board-run-log" aria-label="Run log">
           {lines.map((line) => (
@@ -147,7 +304,7 @@ export function TaskRunPanel({ task }: { task: Task }) {
         </p>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        {active ? (
+        {active && run && (
           <Button
             variant="outline"
             size="sm"
@@ -158,19 +315,44 @@ export function TaskRunPanel({ task }: { task: Task }) {
             <Square className="h-3 w-3" />
             Stop
           </Button>
-        ) : (
-          <Button
-            size="sm"
-            className="h-7 gap-1.5 text-[12px]"
-            disabled={busy || !!startBlocked}
-            title={
-              startBlocked || "Create a worktree from the latest base, copy env files and install"
-            }
-            onClick={() => void act(() => start(task.id))}
-          >
-            {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
-            {run ? "Prepare again" : "Prepare workspace"}
-          </Button>
+        )}
+        {!active && !waiting && (
+          <>
+            <Button
+              size="sm"
+              className="h-7 gap-1.5 text-[12px]"
+              disabled={busy || !!startBlocked}
+              title={
+                startBlocked ||
+                "Prepare the workspace, then Claude plans read-only and waits for your approval"
+              }
+              onClick={() => void act(() => start(task.id, { agent: true, includeNote }))}
+            >
+              {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Bot className="h-3 w-3" />}
+              Plan with Claude
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 text-[12px]"
+              disabled={busy || !!startBlocked}
+              title={
+                startBlocked || "Create a worktree from the latest base, copy env files and install"
+              }
+              onClick={() => void act(() => start(task.id))}
+            >
+              <Play className="h-3 w-3" />
+              {run ? "Prepare again" : "Prepare workspace"}
+            </Button>
+            <label className="flex items-center gap-1.5 text-[11px]">
+              <input
+                type="checkbox"
+                checked={includeNote}
+                onChange={(event) => setIncludeNote(event.target.checked)}
+              />
+              Send my local note to the agent
+            </label>
+          </>
         )}
         {worktree && (
           <Button
@@ -221,7 +403,7 @@ export function TaskRunPanel({ task }: { task: Task }) {
           </Button>
         )}
       </div>
-      {startBlocked && !active && (
+      {startBlocked && !active && !waiting && (
         <p className="text-muted-foreground text-[11px]">{startBlocked}</p>
       )}
     </section>

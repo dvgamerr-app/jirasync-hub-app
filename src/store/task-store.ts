@@ -12,6 +12,7 @@ import {
 import { isSyncLockHeld, runExclusiveSync } from "@/lib/sync-lock";
 import { syncNow, type SyncResult } from "@/lib/sync-service";
 import { getDescriptionSearchText } from "@/lib/adf-content";
+import { buildAiContext } from "@/lib/ai-context";
 import { db, getJiraAccounts, getStoryPointFieldMap, type JiraAccount } from "@/lib/jira-db";
 import {
   getAccountIdFromTask,
@@ -43,6 +44,7 @@ import {
   isJiraDone,
   isAiBoardCompletedByJira,
   isAiBoardStatus,
+  getAiBoardStatus,
   type AiBoardTaskState,
 } from "@/lib/ai-board";
 import {
@@ -54,6 +56,8 @@ import {
   mergeRunEvents,
   RUN_EVENT_PAGE,
   removeRunWorktree,
+  resumeRun,
+  aiBoardStatusForRun,
   saveRepoBinding,
   startRun,
   stopRun,
@@ -61,6 +65,7 @@ import {
   type RepoBinding,
   type RunEvent,
   type RunRecord,
+  type RunDecision,
 } from "@/lib/harness";
 
 function getVisibleWorkLogsForTask(workLogs: WorkLog[], taskId: string): WorkLog[] {
@@ -148,8 +153,16 @@ export interface TaskStore {
   /** Replays journal events after the last one this window has (fills gaps, no duplicates). */
   loadRunEvents: (runId: string) => Promise<void>;
   applyRunEvent: (event: RunEvent) => void;
-  /** Prepares a workspace for the task in the repo bound to its project. One run at a time. */
-  startTaskRun: (taskId: string) => Promise<RunRecord>;
+  /**
+   * Starts a run for the task in the repo bound to its project (one busy run at a time).
+   * `agent` sends the task snapshot to Claude, which plans first and waits for approval.
+   */
+  startTaskRun: (
+    taskId: string,
+    options?: { agent?: boolean; includeNote?: boolean },
+  ) => Promise<RunRecord>;
+  /** The owner decision at a gate of an agent run (plan approval, review). */
+  resumeTaskRun: (runId: string, decision: RunDecision, feedback?: string) => Promise<void>;
   stopTaskRun: (runId: string) => Promise<void>;
   removeTaskRunWorktree: (runId: string, discardChanges: boolean) => Promise<void>;
 
@@ -991,20 +1004,46 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       set((state) => ({
         runEvents: { ...state.runEvents, [event.runId]: mergeRunEvents(current, [event]) },
       }));
-      // Status changes also update the record (worktree path, error, end time).
-      if (event.type === "status")
-        void get()
-          .loadRuns()
-          .catch(() => {});
+      // Status changes also update the record (worktree path, plan, checks, error).
+      if (event.type !== "status") return;
+      const status = event.status;
+      void get()
+        .loadRuns()
+        .then(() => {
+          // Agent progress shows on the AI Board; the board never changes Jira.
+          const run = get().runs.find((candidate) => candidate.runId === event.runId);
+          const target = aiBoardStatusForRun(status);
+          const task = run ? getLatestTask(run.taskId) : undefined;
+          if (!run || run.mode !== "agent" || !target || !task) return;
+          const state = get().aiBoardStates.find((candidate) => candidate.id === task.id);
+          if (isAiBoardCompletedByJira(task, state) || getAiBoardStatus(task, state) === target)
+            return;
+          return get().moveBoardTask(task.id, target);
+        })
+        .catch(() => {});
     },
-    startTaskRun: async (taskId) => {
+    startTaskRun: async (taskId, options = {}) => {
       const task = getLatestTask(taskId);
       if (!task) throw new Error("This ticket is no longer available");
-      const record = await startRun(task.id, task.projectId, task.jiraTaskId);
+      const parent = get().tasks.find(
+        (candidate) =>
+          candidate.jiraTaskId === task.parentKey &&
+          getAccountIdFromTask(candidate) === getAccountIdFromTask(task),
+      );
+      const context = options.agent
+        ? buildAiContext(task, { parent, includeNote: options.includeNote })
+        : null;
+      const record = await startRun(task.id, task.projectId, task.jiraTaskId, context);
       set((state) => ({
         runs: [record, ...state.runs.filter((run) => run.runId !== record.runId)],
       }));
       return record;
+    },
+    resumeTaskRun: async (runId, decision, feedback) => {
+      const record = await resumeRun(runId, decision, feedback);
+      set((state) => ({
+        runs: state.runs.map((run) => (run.runId === record.runId ? record : run)),
+      }));
     },
     stopTaskRun: async (runId) => {
       await stopRun(runId);

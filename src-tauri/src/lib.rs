@@ -172,6 +172,7 @@ pub fn run() {
             harness::harness_save_binding,
             harness::harness_delete_binding,
             harness::harness_start_run,
+            harness::harness_resume_run,
             harness::harness_stop_run,
             harness::harness_list_runs,
             harness::harness_run_events,

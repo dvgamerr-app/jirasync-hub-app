@@ -1,12 +1,16 @@
 // Harness core: the native side of "run a coding agent on a Jira task". The WebView only gets
 // typed commands with validated inputs; it can never ask for an arbitrary command line.
+mod agent;
 mod bindings;
+mod claude;
 mod doctor;
 mod exec;
+mod mcp;
 mod repo;
 mod run;
 #[cfg(test)]
 mod testutil;
+mod tools;
 mod worktree;
 
 use std::path::{Path, PathBuf};
@@ -83,16 +87,34 @@ pub fn create_run_manager(app: &tauri::AppHandle) -> Result<RunManager, String> 
         .join("harness")
         .join("runs");
     let handle = app.clone();
+    // Skills ship with the app (bundle resources); a dev build reads them from the source tree.
+    let bundled = app
+        .path()
+        .resource_dir()
+        .map(|dir| dir.join("resources").join("harness-skills"))
+        .ok()
+        .filter(|dir| dir.is_dir());
+    let skills_dir = bundled
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/harness-skills"));
+    let agent = agent::AgentEnv::new(
+        claude::AgentLauncher::claude(PathBuf::from("claude")),
+        skills_dir,
+        std::time::Duration::from_secs(AGENT_BUDGET_MINUTES * 60),
+    );
     Ok(RunManager::new(
         root,
         std::sync::Arc::new(move |event: &RunEvent| {
             let _ = handle.emit(RUN_EVENT, event);
         }),
-    ))
+    )
+    .with_agent(agent))
 }
 
-/// Prepares a workspace for a task: worktree from the latest origin base, env files, install.
-/// The agent step is added by the provider adapter in the next phase.
+/// Agent working time per owner-approved step (time the app spends executing is excluded).
+const AGENT_BUDGET_MINUTES: u64 = 30;
+
+/// Starts a run for a task: worktree from the latest origin base, env files, install, then
+/// (with `context`) a coding agent that plans first and waits for the owner.
 #[tauri::command]
 pub async fn harness_start_run(
     app: tauri::AppHandle,
@@ -100,6 +122,7 @@ pub async fn harness_start_run(
     task_id: String,
     project_id: String,
     issue_key: String,
+    context: Option<String>,
 ) -> Result<RunRecord, String> {
     let file = bindings_file(&app)?;
     let manager = runs.inner().clone();
@@ -113,9 +136,30 @@ pub async fn harness_start_run(
             issue_key,
             binding,
             agent: None,
+            context,
         })
     })
     .await
+}
+
+/// The owner decision at a gate: approve or revise the plan, accept or ask for changes.
+#[tauri::command]
+pub async fn harness_resume_run(
+    runs: tauri::State<'_, RunManager>,
+    run_id: String,
+    decision: String,
+    feedback: Option<String>,
+) -> Result<RunRecord, String> {
+    let manager = runs.inner().clone();
+    let feedback = feedback.unwrap_or_default();
+    let decision = match decision.as_str() {
+        "approve_plan" => run::Decision::ApprovePlan,
+        "revise_plan" => run::Decision::RevisePlan(feedback),
+        "request_changes" => run::Decision::RequestChanges(feedback),
+        "accept" => run::Decision::Accept,
+        other => return Err(format!("unknown decision {other}")),
+    };
+    blocking(move || manager.resume(&run_id, decision)).await
 }
 
 #[tauri::command]

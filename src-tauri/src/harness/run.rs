@@ -2,9 +2,11 @@
 // (`runs/<id>/run.json` + `events.ndjson`); every event is written there before the UI sees
 // it, so a reload can replay from a sequence number without applying anything twice.
 // Every step is a process the app starts itself, streamed live and stoppable as a tree.
+use super::agent::{AgentEnv, AgentRun, CheckResult};
 use super::bindings::RepoBinding;
+use super::claude;
 use super::exec::{hide_console, resolve_executable};
-use super::repo::CommandSpec;
+use super::repo::{CommandSpec, RepoCommands};
 use super::worktree::{self, CreateWorktree, WorktreeInfo};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
@@ -27,19 +29,31 @@ pub fn now_ms() -> u64 {
         .unwrap_or_default()
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
+    #[default]
     Preparing,
     Installing,
+    /// The agent explores read-only and submits a plan.
+    Planning,
+    /// Waiting for the owner to approve or revise the plan.
+    AwaitingPlan,
+    /// The agent implements the approved plan.
     Running,
-    /// Workspace is ready (worktree + env + install); the agent step comes later.
+    /// The app runs the final checks itself.
+    Verifying,
+    /// Checks passed; waiting for the owner to accept or ask for changes.
+    ReadyForReview,
+    /// The owner accepted the change.
+    Completed,
+    /// Workspace is ready (worktree + env + install) without an agent.
     Prepared,
-    /// The agent process exited 0. Not "done": checks and review still decide that.
+    /// A raw agent command exited 0 (tests only). Not "done": review still decides that.
     Finished,
     Failed,
     Cancelled,
-    /// The app stopped while the run was active; never resumed automatically.
+    /// The app stopped while the run was busy; never resumed automatically.
     Interrupted,
 }
 
@@ -47,13 +61,28 @@ impl RunStatus {
     pub fn is_terminal(self) -> bool {
         matches!(
             self,
-            Self::Prepared | Self::Finished | Self::Failed | Self::Cancelled | Self::Interrupted
+            Self::Prepared
+                | Self::Finished
+                | Self::Completed
+                | Self::Failed
+                | Self::Cancelled
+                | Self::Interrupted
         )
+    }
+
+    /// Nothing is running; the run waits for an owner decision.
+    pub fn is_waiting(self) -> bool {
+        matches!(self, Self::AwaitingPlan | Self::ReadyForReview)
+    }
+
+    /// A process of this run may be running right now.
+    pub fn is_busy(self) -> bool {
+        !self.is_terminal() && !self.is_waiting()
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase", default)]
 pub struct RunRecord {
     pub run_id: String,
     pub task_id: String,
@@ -62,11 +91,24 @@ pub struct RunRecord {
     pub repo_path: String,
     pub status: RunStatus,
     pub worktree: Option<WorktreeInfo>,
-    #[serde(default)]
     pub worktree_removed: bool,
     pub created_at: u64,
     pub ended_at: Option<u64>,
     pub error: Option<String>,
+    /// "agent" when a coding agent works on the task, "prepare" for a workspace only.
+    pub mode: String,
+    /// Commands from the binding when the run started (kept so later steps use the same ones).
+    pub commands: RepoCommands,
+    pub session_id: Option<String>,
+    pub context_digest: Option<String>,
+    pub plan: Option<String>,
+    /// Agent working time so far (time the app spent executing is not counted).
+    pub ai_ms: u64,
+    /// Repair rounds used after failed checks.
+    pub attempts: u32,
+    pub checks: Vec<CheckResult>,
+    pub changed_files: Vec<String>,
+    pub progress: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -94,6 +136,16 @@ pub enum EventKind {
         exit_code: Option<i32>,
         duration_ms: u64,
     },
+    /// The app decided a permission request from the agent.
+    Permission {
+        tool: String,
+        decision: String,
+    },
+    /// What the agent said or did (text, tool use, plan, final result), from its event stream.
+    Agent {
+        kind: String,
+        text: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -115,14 +167,14 @@ struct JournalState {
 }
 
 /// Owns a run's files. All writes go through one lock so the sequence never has gaps.
-struct Journal {
+pub(super) struct Journal {
     dir: PathBuf,
     state: Mutex<JournalState>,
     emit: Emit,
 }
 
 impl Journal {
-    fn create(dir: PathBuf, record: RunRecord, emit: Emit) -> Result<Self, String> {
+    pub(super) fn create(dir: PathBuf, record: RunRecord, emit: Emit) -> Result<Self, String> {
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let events = OpenOptions::new()
             .create(true)
@@ -168,7 +220,7 @@ impl Journal {
         write_record(&self.dir, &state.record)
     }
 
-    fn push(&self, kind: EventKind) {
+    pub(super) fn push(&self, kind: EventKind) {
         let event = {
             let mut state = self.state.lock().unwrap();
             state.seq += 1;
@@ -187,7 +239,7 @@ impl Journal {
         (self.emit)(&event);
     }
 
-    fn set_status(&self, status: RunStatus, error: Option<String>) {
+    pub(super) fn set_status(&self, status: RunStatus, error: Option<String>) {
         {
             let mut state = self.state.lock().unwrap();
             state.record.status = status;
@@ -205,13 +257,25 @@ impl Journal {
         });
     }
 
-    fn update(&self, change: impl FnOnce(&mut RunRecord)) {
+    pub(super) fn update(&self, change: impl FnOnce(&mut RunRecord)) {
         let mut state = self.state.lock().unwrap();
         change(&mut state.record);
         let _ = write_record(&self.dir, &state.record);
     }
 
-    fn record(&self) -> RunRecord {
+    /// Output lines of one step, read back from the journal on disk.
+    pub(super) fn step_lines(&self, step: &str) -> Vec<String> {
+        read_events(&self.dir, 0, usize::MAX)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|event| match event.kind {
+                EventKind::Output { step: s, text, .. } if s == step => Some(text),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub(super) fn record(&self) -> RunRecord {
         self.state.lock().unwrap().record.clone()
     }
 }
@@ -271,43 +335,87 @@ fn kill_tree(pid: u32) {
     }
 }
 
+/// Cancellation and the process trees a run owns (the agent, commands it asked for, dev).
 #[derive(Default)]
-struct Control {
+pub(super) struct Control {
     cancel: AtomicBool,
-    pid: Mutex<Option<u32>>,
+    pids: Mutex<Vec<u32>>,
 }
 
 impl Control {
-    fn stop(&self) {
+    pub(super) fn stop(&self) {
         self.cancel.store(true, Ordering::SeqCst);
-        if let Some(pid) = *self.pid.lock().unwrap() {
+        let pids = self.pids.lock().unwrap().clone();
+        for pid in pids {
             kill_tree(pid);
         }
     }
 
-    fn cancelled(&self) -> bool {
+    pub(super) fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::SeqCst)
+    }
+
+    fn track(&self, pid: u32) {
+        self.pids.lock().unwrap().push(pid);
+    }
+
+    fn untrack(&self, pid: u32) {
+        self.pids.lock().unwrap().retain(|tracked| *tracked != pid);
     }
 }
 
-enum StepOutcome {
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum StepOutcome {
     Exited(i32),
     Cancelled,
     TimedOut,
+    /// Stopped because the AI-time budget ran out.
+    OverBudget,
 }
 
-/// Runs one command in `cwd`, streaming each output line into the journal.
-fn run_step(
+/// Turns one stdout line into journal events (e.g. Claude's stream-json); `None` = plain line.
+pub(super) type LineParser = fn(&str, &str) -> Option<Vec<EventKind>>;
+
+pub(super) struct Step<'a> {
+    pub name: &'a str,
+    pub command: &'a CommandSpec,
+    pub cwd: &'a Path,
+    pub timeout: Duration,
+    pub env: &'a [(String, String)],
+    pub parse_stdout: Option<LineParser>,
+    /// Checked while the step runs; true stops it as over budget.
+    pub over_budget: Option<&'a (dyn Fn() -> bool + Sync)>,
+}
+
+impl<'a> Step<'a> {
+    pub(super) fn new(
+        name: &'a str,
+        command: &'a CommandSpec,
+        cwd: &'a Path,
+        timeout: Duration,
+    ) -> Self {
+        Self {
+            name,
+            command,
+            cwd,
+            timeout,
+            env: &[],
+            parse_stdout: None,
+            over_budget: None,
+        }
+    }
+}
+
+fn spawn_streamed(
     journal: &Arc<Journal>,
     control: &Control,
-    step: &str,
-    command: &CommandSpec,
-    cwd: &Path,
-    timeout: Duration,
-) -> Result<StepOutcome, String> {
+    step: &Step,
+) -> Result<(std::process::Child, std::sync::mpsc::Receiver<()>, usize), String> {
+    let command = step.command;
+    let name = step.name;
     let program = resolve_executable(&command.executable).ok_or_else(|| {
         format!(
-            "{step}: `{}` is not installed or not on PATH",
+            "{name}: `{}` is not installed or not on PATH",
             command.executable
         )
     })?;
@@ -316,14 +424,14 @@ fn run_step(
         .collect::<Vec<_>>()
         .join(" ");
     journal.push(EventKind::StepStart {
-        step: step.into(),
+        step: name.into(),
         command: shown,
     });
 
     let mut process = Command::new(&program);
     process
         .args(&command.args)
-        .current_dir(cwd)
+        .current_dir(step.cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -332,20 +440,19 @@ fn run_step(
     for name in STRIPPED_ENV {
         process.env_remove(name);
     }
+    for (key, value) in step.env {
+        process.env(key, value);
+    }
     hide_console(&mut process);
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         process.process_group(0);
     }
-    if control.cancelled() {
-        return Ok(StepOutcome::Cancelled);
-    }
-    let started = Instant::now();
     let mut child = process
         .spawn()
-        .map_err(|e| format!("{step}: could not start {}: {e}", program.display()))?;
-    *control.pid.lock().unwrap() = Some(child.id());
+        .map_err(|e| format!("{name}: could not start {}: {e}", program.display()))?;
+    control.track(child.id());
 
     let pipes: Vec<(&str, Box<dyn std::io::Read + Send>)> = [
         (
@@ -372,7 +479,8 @@ fn run_step(
     let reader_count = pipes.len();
     for (stream, pipe) in pipes {
         let journal = journal.clone();
-        let step = step.to_string();
+        let name = name.to_string();
+        let parse = step.parse_stdout.filter(|_| stream == "stdout");
         let done = done.clone();
         std::thread::spawn(move || {
             let mut reader = BufReader::new(pipe);
@@ -381,18 +489,34 @@ fn run_step(
                 let text = String::from_utf8_lossy(&buffer)
                     .trim_end_matches(['\r', '\n'])
                     .to_string();
-                journal.push(EventKind::Output {
-                    step: step.clone(),
-                    stream: stream.into(),
-                    text,
-                });
+                match parse.and_then(|parse| parse(&name, &text)) {
+                    Some(events) => events.into_iter().for_each(|event| journal.push(event)),
+                    None => journal.push(EventKind::Output {
+                        step: name.clone(),
+                        stream: stream.into(),
+                        text,
+                    }),
+                }
                 buffer.clear();
             }
             let _ = done.send(());
         });
     }
+    Ok((child, finished, reader_count))
+}
 
-    let deadline = started + timeout;
+/// Runs one command to completion, streaming each output line into the journal.
+pub(super) fn run_step(
+    journal: &Arc<Journal>,
+    control: &Control,
+    step: &Step,
+) -> Result<StepOutcome, String> {
+    if control.cancelled() {
+        return Ok(StepOutcome::Cancelled);
+    }
+    let started = Instant::now();
+    let (mut child, finished, reader_count) = spawn_streamed(journal, control, step)?;
+    let deadline = started + step.timeout;
     let outcome = loop {
         match child.try_wait() {
             Ok(Some(status)) => {
@@ -405,19 +529,22 @@ fn run_step(
             Ok(None) => {}
             Err(_) => break StepOutcome::Exited(-1),
         }
-        if control.cancelled() || Instant::now() >= deadline {
-            let timed_out = !control.cancelled();
+        let over_budget = step.over_budget.is_some_and(|check| check());
+        if control.cancelled() || over_budget || Instant::now() >= deadline {
+            let outcome = if control.cancelled() {
+                StepOutcome::Cancelled
+            } else if over_budget {
+                StepOutcome::OverBudget
+            } else {
+                StepOutcome::TimedOut
+            };
             kill_tree(child.id());
             let _ = child.wait();
-            break if timed_out {
-                StepOutcome::TimedOut
-            } else {
-                StepOutcome::Cancelled
-            };
+            break outcome;
         }
         std::thread::sleep(Duration::from_millis(50));
     };
-    *control.pid.lock().unwrap() = None;
+    control.untrack(child.id());
     // After a stop the tree is already killed; after a normal exit a background child
     // (e.g. a server the step started) may keep the pipe open, so do not wait forever.
     let grace = Instant::now() + Duration::from_secs(5);
@@ -426,7 +553,7 @@ fn run_step(
         let left = grace.saturating_duration_since(Instant::now());
         if finished.recv_timeout(left).is_err() {
             journal.push(EventKind::Output {
-                step: step.into(),
+                step: step.name.into(),
                 stream: "stderr".into(),
                 text: "a background process this step started is still running".into(),
             });
@@ -435,7 +562,7 @@ fn run_step(
         ended += 1;
     }
     journal.push(EventKind::StepEnd {
-        step: step.into(),
+        step: step.name.into(),
         exit_code: match outcome {
             StepOutcome::Exited(code) => Some(code),
             _ => None,
@@ -445,12 +572,49 @@ fn run_step(
     Ok(outcome)
 }
 
+/// A long-running process (the dev server) owned by a run until the run ends or stops.
+pub(super) struct Background {
+    child: std::process::Child,
+}
+
+impl Background {
+    pub(super) fn start(
+        journal: &Arc<Journal>,
+        control: &Control,
+        step: &Step,
+    ) -> Result<Self, String> {
+        let (child, _finished, _readers) = spawn_streamed(journal, control, step)?;
+        Ok(Self { child })
+    }
+
+    pub(super) fn is_running(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
+    }
+
+    pub(super) fn stop(mut self, control: &Control) {
+        kill_tree(self.child.id());
+        let _ = self.child.wait();
+        control.untrack(self.child.id());
+    }
+}
+
 pub struct StartRun {
     pub task_id: String,
     pub issue_key: String,
     pub binding: RepoBinding,
-    /// Agent step after install. Phase 1 only uses it in tests; Phase 2 adds real providers.
+    /// Task snapshot (markdown) for a coding agent; `None` only prepares the workspace.
+    pub context: Option<String>,
+    /// A raw command run after install instead of the agent (tests only).
     pub agent: Option<CommandSpec>,
+}
+
+/// What the owner decided at a gate of an agent run.
+pub enum Decision {
+    ApprovePlan,
+    RevisePlan(String),
+    /// From review, or to continue a failed/stopped run in the same session.
+    RequestChanges(String),
+    Accept,
 }
 
 struct Active {
@@ -463,6 +627,25 @@ pub struct RunManager {
     root: PathBuf,
     active: Arc<Mutex<Option<Active>>>,
     emit: Emit,
+    agent: Option<Arc<AgentEnv>>,
+}
+
+const MAX_FEEDBACK_CHARS: usize = 8000;
+
+/// Records how a run's background work ended and frees the one-run slot.
+fn finish(
+    journal: &Journal,
+    control: &Control,
+    slot: &Mutex<Option<Active>>,
+    result: Result<RunStatus, String>,
+) {
+    let (status, error) = match result {
+        Ok(status) => (status, None),
+        Err(_) if control.cancelled() => (RunStatus::Cancelled, None),
+        Err(error) => (RunStatus::Failed, Some(error)),
+    };
+    journal.set_status(status, error);
+    *slot.lock().unwrap() = None;
 }
 
 static RUN_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -485,9 +668,11 @@ impl RunManager {
             root,
             active: Arc::new(Mutex::new(None)),
             emit,
+            agent: None,
         };
+        // Runs waiting for the owner keep waiting; only busy ones were cut off.
         for record in manager.list(usize::MAX) {
-            if !record.status.is_terminal() {
+            if record.status.is_busy() {
                 if let Ok(journal) =
                     Journal::open(manager.run_dir(&record.run_id), manager.emit.clone())
                 {
@@ -501,8 +686,104 @@ impl RunManager {
         manager
     }
 
+    /// Enables coding-agent runs (Claude, or a fake agent in tests).
+    pub fn with_agent(mut self, env: AgentEnv) -> Self {
+        self.agent = Some(Arc::new(env));
+        self
+    }
+
     fn run_dir(&self, run_id: &str) -> PathBuf {
         self.root.join(run_id)
+    }
+
+    fn claim(&self, run_id: &str) -> Result<Arc<Control>, String> {
+        let mut active = self.active.lock().unwrap();
+        if let Some(current) = active.as_ref() {
+            return Err(format!(
+                "another run ({}) is active; stop it or wait for it to finish",
+                current.run_id
+            ));
+        }
+        let control = Arc::new(Control::default());
+        *active = Some(Active {
+            run_id: run_id.into(),
+            control: control.clone(),
+        });
+        Ok(control)
+    }
+
+    /// Continues an agent run after an owner decision, in the same session and worktree.
+    pub fn resume(&self, run_id: &str, decision: Decision) -> Result<RunRecord, String> {
+        let dir = self.checked_dir(run_id)?;
+        let env = self
+            .agent
+            .clone()
+            .ok_or("coding-agent runs are not available")?;
+        let journal = Arc::new(Journal::open(dir.clone(), self.emit.clone())?);
+        let record = journal.record();
+        if record.mode != "agent" {
+            return Err("this run only prepared a workspace".into());
+        }
+        let feedback = |text: &str| -> Result<String, String> {
+            let text = text.trim();
+            if text.is_empty() {
+                return Err("write what should change".into());
+            }
+            if text.chars().count() > MAX_FEEDBACK_CHARS {
+                return Err(format!("keep it under {MAX_FEEDBACK_CHARS} characters"));
+            }
+            Ok(text.to_string())
+        };
+        let status = record.status;
+        let can_continue = matches!(
+            status,
+            RunStatus::ReadyForReview
+                | RunStatus::Failed
+                | RunStatus::Cancelled
+                | RunStatus::Interrupted
+        ) && record.session_id.is_some()
+            && record.worktree.is_some()
+            && !record.worktree_removed;
+        enum Next {
+            Plan(Option<String>),
+            Implement(String),
+        }
+        let next = match decision {
+            Decision::Accept if status == RunStatus::ReadyForReview => {
+                journal.set_status(RunStatus::Completed, None);
+                return Ok(journal.record());
+            }
+            Decision::ApprovePlan if status == RunStatus::AwaitingPlan => {
+                Next::Implement(claude::IMPLEMENT_PROMPT.into())
+            }
+            Decision::RevisePlan(text) if status == RunStatus::AwaitingPlan => {
+                Next::Plan(Some(feedback(&text)?))
+            }
+            Decision::RequestChanges(text) if can_continue => {
+                Next::Implement(claude::changes_prompt(&feedback(&text)?))
+            }
+            _ => return Err(format!("that is not possible while the run is {status:?}")),
+        };
+        let control = self.claim(run_id)?;
+        journal.update(|record| {
+            record.error = None;
+            record.ended_at = None;
+        });
+        let slot = self.active.clone();
+        std::thread::spawn(move || {
+            let run = AgentRun {
+                journal: &journal,
+                control: &control,
+                env: &env,
+                run_dir: &dir,
+            };
+            let result = match next {
+                Next::Plan(feedback) => run.plan(feedback.as_deref()),
+                Next::Implement(prompt) => run.implement(prompt),
+            };
+            finish(&journal, &control, &slot, result);
+        });
+        Ok(record)
     }
 
     fn checked_dir(&self, run_id: &str) -> Result<PathBuf, String> {
@@ -528,14 +809,16 @@ impl RunManager {
         if !worktree::is_valid_issue_key(&request.issue_key) {
             return Err(format!("\"{}\" is not a Jira issue key", request.issue_key));
         }
-        let mut active = self.active.lock().unwrap();
-        if let Some(current) = active.as_ref() {
-            return Err(format!(
-                "another run ({}) is active; stop it or wait for it to finish",
-                current.run_id
-            ));
-        }
+        let env = match &request.context {
+            Some(_) => Some(
+                self.agent
+                    .clone()
+                    .ok_or("coding-agent runs are not available")?,
+            ),
+            None => None,
+        };
         let run_id = new_run_id();
+        let control = self.claim(&run_id)?;
         let record = RunRecord {
             run_id: run_id.clone(),
             task_id: request.task_id.clone(),
@@ -543,38 +826,42 @@ impl RunManager {
             issue_key: request.issue_key.clone(),
             repo_path: request.binding.repo_path.clone(),
             status: RunStatus::Preparing,
-            worktree: None,
-            worktree_removed: false,
             created_at: now_ms(),
-            ended_at: None,
-            error: None,
+            mode: if env.is_some() { "agent" } else { "prepare" }.into(),
+            commands: request.binding.commands.clone(),
+            ..RunRecord::default()
         };
-        let journal = Arc::new(Journal::create(
-            self.run_dir(&run_id),
-            record.clone(),
-            self.emit.clone(),
-        )?);
+        let dir = self.run_dir(&run_id);
+        let journal = match Journal::create(dir.clone(), record.clone(), self.emit.clone()) {
+            Ok(journal) => Arc::new(journal),
+            Err(error) => {
+                *self.active.lock().unwrap() = None;
+                return Err(error);
+            }
+        };
         journal.push(EventKind::Status {
             status: RunStatus::Preparing,
             message: None,
         });
-        let control = Arc::new(Control::default());
-        *active = Some(Active {
-            run_id: run_id.clone(),
-            control: control.clone(),
-        });
-        drop(active);
 
         let slot = self.active.clone();
         std::thread::spawn(move || {
-            let result = pipeline(&journal, &control, &request);
-            let (status, error) = match result {
-                Ok(status) => (status, None),
-                Err(_) if control.cancelled() => (RunStatus::Cancelled, None),
-                Err(error) => (RunStatus::Failed, Some(error)),
-            };
-            journal.set_status(status, error);
-            *slot.lock().unwrap() = None;
+            let result = pipeline(&journal, &control, &request).and_then(|status| {
+                match (&env, &request.context) {
+                    (Some(env), Some(context)) if status == RunStatus::Prepared => {
+                        let run = AgentRun {
+                            journal: &journal,
+                            control: &control,
+                            env,
+                            run_dir: &dir,
+                        };
+                        run.write_context(context)?;
+                        run.plan(None)
+                    }
+                    _ => Ok(status),
+                }
+            });
+            finish(&journal, &control, &slot, result);
         });
         Ok(record)
     }
@@ -698,22 +985,32 @@ fn pipeline(
     }
     if let Some(install) = &binding.commands.install {
         journal.set_status(RunStatus::Installing, None);
-        match run_step(journal, control, "install", install, &cwd, INSTALL_TIMEOUT)? {
+        match run_step(
+            journal,
+            control,
+            &Step::new("install", install, &cwd, INSTALL_TIMEOUT),
+        )? {
             StepOutcome::Exited(0) => {}
             StepOutcome::Exited(code) => return Err(format!("install failed (exit code {code})")),
             StepOutcome::Cancelled => return Ok(RunStatus::Cancelled),
-            StepOutcome::TimedOut => return Err("install timed out".into()),
+            StepOutcome::TimedOut | StepOutcome::OverBudget => {
+                return Err("install timed out".into())
+            }
         }
     }
     let Some(agent) = &request.agent else {
         return Ok(RunStatus::Prepared);
     };
     journal.set_status(RunStatus::Running, None);
-    match run_step(journal, control, "agent", agent, &cwd, AGENT_TIMEOUT)? {
+    match run_step(
+        journal,
+        control,
+        &Step::new("agent", agent, &cwd, AGENT_TIMEOUT),
+    )? {
         StepOutcome::Exited(0) => Ok(RunStatus::Finished),
         StepOutcome::Exited(code) => Err(format!("agent exited with code {code}")),
         StepOutcome::Cancelled => Ok(RunStatus::Cancelled),
-        StepOutcome::TimedOut => Err("agent timed out".into()),
+        StepOutcome::TimedOut | StepOutcome::OverBudget => Err("agent timed out".into()),
     }
 }
 
@@ -808,6 +1105,7 @@ mod tests {
                 issue_key: "PRJ-1".into(),
                 binding,
                 agent,
+                context: None,
             })
             .unwrap()
     }
@@ -927,6 +1225,7 @@ mod tests {
                 issue_key: "PRJ-2".into(),
                 binding: fx.binding(None),
                 agent: None,
+                context: None,
             })
             .unwrap_err();
         assert!(busy.contains("another run"), "{busy}");
@@ -985,6 +1284,7 @@ mod tests {
             created_at: 1,
             ended_at: None,
             error: None,
+            ..RunRecord::default()
         };
         Journal::create(dir, record, Arc::new(|_| {})).unwrap();
         let finished_dir = fx.runs.path().join("fff000fff000");
@@ -1038,6 +1338,7 @@ mod tests {
                 issue_key: "bad key".into(),
                 binding: fx.binding(None),
                 agent: None,
+                context: None,
             })
             .unwrap_err();
         assert!(error.contains("issue key"));

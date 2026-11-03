@@ -20,7 +20,10 @@
 - `src/components/JiraSettings.tsx`: Jira accounts + story point field mapping
 - `src/components/ExportDialog.tsx`: export CSV ผ่าน Tauri dialog/fs
 - `src-tauri/src/lib.rs`: สร้าง main window และลง plugins
-- `src-tauri/src/harness/`: native harness core สำหรับรัน coding agent (Doctor, ตรวจ repo, repo bindings, worktree); WebView เรียกได้แค่ typed commands `harness_*` ห้ามเพิ่ม command ที่รับ command line ไป execute
+- `src-tauri/src/harness/`: native harness core สำหรับรัน coding agent (Doctor, ตรวจ repo, repo bindings, worktree, run manager); WebView เรียกได้แค่ typed commands `harness_*` ห้ามเพิ่ม command ที่รับ command line ไป execute
+  - `mcp.rs` = MCP server ในแอป (HTTP 127.0.0.1, token ต่อ run, ปฏิเสธ request ที่มี `Origin`); `tools.rs` = tools ที่ agent ใช้ + permission handler `approve`; `claude.rs` = flags/prompt/stream-json ของ Claude CLI; `agent.rs` = plan → approve → implement → app checks → review
+  - Agent ไม่มี shell (`--restricted --tools` ไม่มี Bash): รอบวางแผนอ่านอย่างเดียวและส่งแผนด้วย `submit_plan`; ทุกคำสั่งที่ execute ผ่าน tool `run` ที่แอปรันเอง; ผลตรวจที่นับคือที่แอปรัน (`verify:*`) ไม่ใช่คำบอกของ agent
+  - test ของ pipeline ใช้ fake agent (`agent_tests.rs::fake_agent_entry` = test binary รันตัวเองเป็น agent คุยกับ MCP จริง); test ที่ใช้ Claude จริงเป็น `#[ignore]` (`cargo test --lib real_claude -- --ignored`)
 - `src/lib/harness.ts` + `src/components/HarnessSetupDialog.tsx`: client และหน้า Setup (ปุ่มขวาบน AI Board); skill ที่ส่งให้ agent อยู่ใน `src-tauri/resources/harness-skills/` (แผน: `docs/agent-execution-harness-plan.md`)
 
 ## Data / storage

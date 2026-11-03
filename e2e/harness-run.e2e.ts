@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { FakeJira } from "./fake-jira";
 import { openApp, readE2EState } from "./helpers";
-import { readyDoctorReport, type E2EHarnessState } from "./shims/state";
+import { emptyRunRecord, readyDoctorReport, type E2EHarnessState } from "./shims/state";
 import type { RepoBinding, RunEvent, RunRecord } from "@/lib/harness";
 
 const PROJECT_ID = "proj-acc1-PRJ";
@@ -19,17 +19,15 @@ const binding: RepoBinding = {
 
 function record(overrides: Partial<RunRecord> = {}): RunRecord {
   return {
+    ...emptyRunRecord(),
     runId: "seed01abc",
     taskId: TASK_ID,
     projectId: PROJECT_ID,
     issueKey: "PRJ-1",
     repoPath: "C:/src/service",
     status: "installing",
-    worktree: null,
-    worktreeRemoved: false,
     createdAt: 1,
-    endedAt: null,
-    error: null,
+    mode: "prepare",
     ...overrides,
   };
 }
@@ -97,7 +95,12 @@ test("preparing a workspace streams the app's output live and ends ready", async
   await panel.getByRole("button", { name: "Prepare workspace" }).click();
   await expect(panel.getByRole("status", { name: "Run status" })).toHaveText("Creating worktree");
   const [start] = await calls(page, "harness_start_run");
-  expect(start.args).toEqual({ taskId: TASK_ID, projectId: PROJECT_ID, issueKey: "PRJ-1" });
+  expect(start.args).toEqual({
+    taskId: TASK_ID,
+    projectId: PROJECT_ID,
+    issueKey: "PRJ-1",
+    context: null,
+  });
 
   const runId = "run001abc";
   await push(page, { runId, seq: 2, at: 2, type: "status", status: "installing", message: null });

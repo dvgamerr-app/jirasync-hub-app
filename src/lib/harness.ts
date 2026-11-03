@@ -76,7 +76,12 @@ export const deleteRepoBinding = (projectId: string) =>
 export type RunStatus =
   | "preparing"
   | "installing"
+  | "planning"
+  | "awaiting_plan"
   | "running"
+  | "verifying"
+  | "ready_for_review"
+  | "completed"
   | "prepared"
   | "finished"
   | "failed"
@@ -86,10 +91,32 @@ export type RunStatus =
 export const TERMINAL_RUN_STATUSES: ReadonlySet<RunStatus> = new Set([
   "prepared",
   "finished",
+  "completed",
   "failed",
   "cancelled",
   "interrupted",
 ]);
+
+/** Nothing runs; the run waits for an owner decision (it does not block other runs). */
+export const WAITING_RUN_STATUSES: ReadonlySet<RunStatus> = new Set([
+  "awaiting_plan",
+  "ready_for_review",
+]);
+
+/** A process of the run may be running right now (only one such run at a time). */
+export function isRunBusy(status: RunStatus): boolean {
+  return !TERMINAL_RUN_STATUSES.has(status) && !WAITING_RUN_STATUSES.has(status);
+}
+
+export type RunDecision = "approve_plan" | "revise_plan" | "request_changes" | "accept";
+
+export interface CheckResult {
+  name: string;
+  status: "passed" | "failed" | "timed_out";
+  exitCode: number | null;
+  logId: string;
+  durationMs: number;
+}
 
 export interface WorktreeInfo {
   path: string;
@@ -111,21 +138,40 @@ export interface RunRecord {
   createdAt: number;
   endedAt: number | null;
   error: string | null;
+  /** "agent" when a coding agent works on the task, "prepare" for a workspace only. */
+  mode: "agent" | "prepare" | "";
+  sessionId: string | null;
+  plan: string | null;
+  /** Agent working time in ms (time the app spent executing is not counted). */
+  aiMs: number;
+  attempts: number;
+  checks: CheckResult[];
+  changedFiles: string[];
+  progress: string | null;
 }
 
 export type RunEventKind =
   | { type: "status"; status: RunStatus; message: string | null }
   | { type: "step_start"; step: string; command: string }
   | { type: "output"; step: string; stream: "stdout" | "stderr"; text: string }
-  | { type: "step_end"; step: string; exitCode: number | null; durationMs: number };
+  | { type: "step_end"; step: string; exitCode: number | null; durationMs: number }
+  | { type: "permission"; tool: string; decision: "allow" | "deny" }
+  | { type: "agent"; kind: "init" | "text" | "tool" | "plan" | "result"; text: string };
 
 export type RunEvent = { runId: string; seq: number; at: number } & RunEventKind;
 
 /** Live run output from the native journal (it is written to disk before it is sent). */
 export const RUN_EVENT = "harness://run-event";
 
-export const startRun = (taskId: string, projectId: string, issueKey: string) =>
-  invoke<RunRecord>("harness_start_run", { taskId, projectId, issueKey });
+/** `context` (the task snapshot as markdown) starts a coding agent; without it, only prepare. */
+export const startRun = (
+  taskId: string,
+  projectId: string,
+  issueKey: string,
+  context: string | null,
+) => invoke<RunRecord>("harness_start_run", { taskId, projectId, issueKey, context });
+export const resumeRun = (runId: string, decision: RunDecision, feedback?: string) =>
+  invoke<RunRecord>("harness_resume_run", { runId, decision, feedback: feedback ?? null });
 export const stopRun = (runId: string) => invoke<void>("harness_stop_run", { runId });
 export const listRuns = () => invoke<RunRecord[]>("harness_list_runs");
 export const getRunEvents = (runId: string, afterSeq: number) =>
@@ -204,3 +250,19 @@ export function mergeRunEvents(
 
 /** Page size of `harness_run_events` when no limit is passed (matches the native default). */
 export const RUN_EVENT_PAGE = 2000;
+
+/**
+ * Where an agent run puts its task on the AI Board: working → Doing, waiting for review →
+ * Review, accepted → Done. Other statuses (stopped, failed) leave the board as it is.
+ */
+export function aiBoardStatusForRun(status: RunStatus): "doing" | "review" | "done" | null {
+  if (status === "ready_for_review") return "review";
+  if (status === "completed") return "done";
+  if (
+    ["preparing", "installing", "planning", "awaiting_plan", "running", "verifying"].includes(
+      status,
+    )
+  )
+    return "doing";
+  return null;
+}

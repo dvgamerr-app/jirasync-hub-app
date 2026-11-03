@@ -69,3 +69,28 @@ export function getHarnessState(): E2EHarnessState {
   state.harness ??= { doctor: readyDoctorReport(), detections: {}, bindings: [], calls: [] };
   return state.harness;
 }
+
+/** Every RunRecord field at its "nothing happened yet" value; tests override what matters. */
+export function emptyRunRecord(): RunRecord {
+  return {
+    runId: "",
+    taskId: "",
+    projectId: "",
+    issueKey: "",
+    repoPath: "",
+    status: "preparing",
+    worktree: null,
+    worktreeRemoved: false,
+    createdAt: 0,
+    endedAt: null,
+    error: null,
+    mode: "",
+    sessionId: null,
+    plan: null,
+    aiMs: 0,
+    attempts: 0,
+    checks: [],
+    changedFiles: [],
+    progress: null,
+  };
+}

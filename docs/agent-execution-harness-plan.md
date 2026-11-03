@@ -475,6 +475,18 @@ Transport เริ่มด้วย local stdio bridge ไปยัง app bro
 
 ระยะ 1–4 คือรุ่นใช้ส่วนตัวที่เสนอ; MCP board tools และ Git sync ไม่ใช่ prerequisite ของปุ่ม Run ไม่มีทีมกลาง/daemon/auto-deploy ในชุดนี้
 
+### ความคืบหน้า Phase 2
+
+| ส่วน                                       | สถานะ                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2.1 MCP ในแอป + tools + permission handler | เสร็จ: Claude CLI จริงเชื่อมผ่าน HTTP ได้ (test `#[ignore]`); tools แยกตาม phase: planning = อ่าน + `submit_plan`, implementing = + `run`                                                                                                                                                          |
+| 2.2 Claude adapter + pipeline              | เสร็จ: `.harness/task.md` (ไม่เข้า git), plan read-only → owner → `--resume` session เดิม → แอปรัน checks เอง (install ใหม่ถ้า manifest เปลี่ยน) → repair ≤ 2 → `ready_for_review`; budget 30 นาทีต่อ step ที่อนุมัติ ไม่นับเวลาที่แอป execute; Continue หลัง fail/stop/restart ใน session เดิมได้ |
+| ผลกับ Claude จริง (haiku, 2026-11-03)      | fixture `sum` ที่ test fail: วางแผนโดยไม่แก้ไฟล์ → อนุมัติ → แก้ `src/sum.ts`, เขียน progress, ขอ `run test` → แอปตรวจ `verify:test` ผ่าน → review; 25 วินาที, ~$0.009, ไม่มีการเรียก Bash                                                                                                         |
+| 2.3 Run panel + AI Board                   | เสร็จ: Plan with Claude (note เป็น opt-in), อนุมัติ/แก้แผน, review แสดง checks ของแอป/ไฟล์ที่เปลี่ยน/progress, Accept/Request changes, Continue; สถานะ run ย้ายการ์ดไป Doing/Review/Done (ไม่แตะ Jira)                                                                                             |
+| 2.4 Docker services + migration            | ถัดไป                                                                                                                                                                                                                                                                                              |
+| 2.5 Accept → commit, push, Draft PR        | ถัดไป (ตอนนี้ Accept = `completed` เท่านั้น ยังไม่ commit/push)                                                                                                                                                                                                                                    |
+| 2.6 Reviewer agent                         | ถัดไป                                                                                                                                                                                                                                                                                              |
+
 ### ความคืบหน้า Phase 1
 
 | ส่วน                                                                                                                                                                    | สถานะ                                                                                                                                                                                       |

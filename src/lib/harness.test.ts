@@ -1,5 +1,12 @@
 import { describe, expect, it } from "bun:test";
-import { formatCommand, mergeRunEvents, parseCommand, type RunEvent } from "./harness";
+import {
+  aiBoardStatusForRun,
+  formatCommand,
+  isRunBusy,
+  mergeRunEvents,
+  parseCommand,
+  type RunEvent,
+} from "./harness";
 
 describe("parseCommand / formatCommand", () => {
   it("splits an executable and its arguments", () => {
@@ -56,5 +63,25 @@ describe("mergeRunEvents", () => {
 
   it("does not drop anything under the cap", () => {
     expect(mergeRunEvents([output(1)], [output(2)], 3)).toHaveLength(2);
+  });
+});
+
+describe("agent run status", () => {
+  it("projects agent work onto the AI Board without guessing on failure", () => {
+    expect(aiBoardStatusForRun("planning")).toBe("doing");
+    expect(aiBoardStatusForRun("awaiting_plan")).toBe("doing");
+    expect(aiBoardStatusForRun("verifying")).toBe("doing");
+    expect(aiBoardStatusForRun("ready_for_review")).toBe("review");
+    expect(aiBoardStatusForRun("completed")).toBe("done");
+    expect(aiBoardStatusForRun("failed")).toBeNull();
+    expect(aiBoardStatusForRun("cancelled")).toBeNull();
+  });
+
+  it("only busy runs block another run; waiting ones do not", () => {
+    expect(isRunBusy("running")).toBe(true);
+    expect(isRunBusy("verifying")).toBe(true);
+    expect(isRunBusy("awaiting_plan")).toBe(false);
+    expect(isRunBusy("ready_for_review")).toBe(false);
+    expect(isRunBusy("completed")).toBe(false);
   });
 });
