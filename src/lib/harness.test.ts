@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { formatCommand, parseCommand } from "./harness";
+import { formatCommand, mergeRunEvents, parseCommand, type RunEvent } from "./harness";
 
 describe("parseCommand / formatCommand", () => {
   it("splits an executable and its arguments", () => {
@@ -26,5 +26,35 @@ describe("parseCommand / formatCommand", () => {
       executable: "bun",
       args: ["test", "&&", "rm", "-rf", "/"],
     });
+  });
+});
+
+describe("mergeRunEvents", () => {
+  const output = (seq: number, text = `line ${seq}`): RunEvent => ({
+    runId: "abc123",
+    seq,
+    at: seq,
+    type: "output",
+    step: "install",
+    stream: "stdout",
+    text,
+  });
+
+  it("drops replayed duplicates and restores sequence order", () => {
+    const merged = mergeRunEvents([output(1), output(3)], [output(2), output(3), output(1)]);
+    expect(merged.map((event) => event.seq)).toEqual([1, 2, 3]);
+  });
+
+  it("keeps only the newest events past the cap", () => {
+    const merged = mergeRunEvents(
+      [],
+      [1, 2, 3, 4, 5].map((seq) => output(seq)),
+      3,
+    );
+    expect(merged.map((event) => event.seq)).toEqual([3, 4, 5]);
+  });
+
+  it("does not drop anything under the cap", () => {
+    expect(mergeRunEvents([output(1)], [output(2)], 3)).toHaveLength(2);
   });
 });

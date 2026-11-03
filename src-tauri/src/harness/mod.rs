@@ -4,10 +4,9 @@ mod bindings;
 mod doctor;
 mod exec;
 mod repo;
+mod run;
 #[cfg(test)]
 mod testutil;
-// Used by the run manager in the next phase; exercised by its unit tests now.
-#[allow(dead_code)]
 mod worktree;
 
 use std::path::{Path, PathBuf};
@@ -68,4 +67,92 @@ pub async fn harness_delete_binding(
 ) -> Result<(), String> {
     let file = bindings_file(&app)?;
     blocking(move || bindings::delete(&file, &project_id)).await
+}
+
+pub use run::{RunEvent, RunManager, RunRecord};
+
+/// Event the WebView listens to for live run output; the journal on disk is the source of truth.
+pub const RUN_EVENT: &str = "harness://run-event";
+
+pub fn create_run_manager(app: &tauri::AppHandle) -> Result<RunManager, String> {
+    use tauri::Emitter;
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("harness")
+        .join("runs");
+    let handle = app.clone();
+    Ok(RunManager::new(
+        root,
+        std::sync::Arc::new(move |event: &RunEvent| {
+            let _ = handle.emit(RUN_EVENT, event);
+        }),
+    ))
+}
+
+/// Prepares a workspace for a task: worktree from the latest origin base, env files, install.
+/// The agent step is added by the provider adapter in the next phase.
+#[tauri::command]
+pub async fn harness_start_run(
+    app: tauri::AppHandle,
+    runs: tauri::State<'_, RunManager>,
+    task_id: String,
+    project_id: String,
+    issue_key: String,
+) -> Result<RunRecord, String> {
+    let file = bindings_file(&app)?;
+    let manager = runs.inner().clone();
+    blocking(move || {
+        let binding = bindings::load(&file)?
+            .into_iter()
+            .find(|binding| binding.project_id == project_id)
+            .ok_or("bind this project to a repository in Setup first")?;
+        manager.start(run::StartRun {
+            task_id,
+            issue_key,
+            binding,
+            agent: None,
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+pub fn harness_stop_run(runs: tauri::State<'_, RunManager>, run_id: String) -> Result<(), String> {
+    let manager = runs.inner().clone();
+    // Killing a process tree can take a moment; never block the UI thread on it.
+    std::thread::spawn(move || {
+        let _ = manager.stop(&run_id);
+    });
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn harness_list_runs(
+    runs: tauri::State<'_, RunManager>,
+) -> Result<Vec<RunRecord>, String> {
+    let manager = runs.inner().clone();
+    blocking(move || Ok(manager.list(100))).await
+}
+
+#[tauri::command]
+pub async fn harness_run_events(
+    runs: tauri::State<'_, RunManager>,
+    run_id: String,
+    after_seq: u64,
+    limit: Option<usize>,
+) -> Result<Vec<RunEvent>, String> {
+    let manager = runs.inner().clone();
+    blocking(move || manager.events(&run_id, after_seq, limit.unwrap_or(2000).min(5000))).await
+}
+
+#[tauri::command]
+pub async fn harness_remove_run_worktree(
+    runs: tauri::State<'_, RunManager>,
+    run_id: String,
+    discard_changes: bool,
+) -> Result<RunRecord, String> {
+    let manager = runs.inner().clone();
+    blocking(move || manager.remove_worktree(&run_id, discard_changes)).await
 }

@@ -32,6 +32,7 @@
   - `jira-story-point-fields` = `{ [projectId]: jiraCustomFieldId }`
   - `jirasync-ai-hidden-projects` = project IDs ที่ซ่อนจาก All projects ของ AI Board (แยกจาก `jirasync-hidden-projects` ของหน้า Jira)
   - `jirasync-harness-setup-seen` = เปิด AI Board ครั้งแรกแล้ว (Doctor + เปิด Setup อัตโนมัติถ้า tool ที่จำเป็นยังไม่พร้อม เกิดแค่ครั้งเดียว)
+- app data (native): `harness/runs/<run-id>/run.json` + `events.ndjson` = run journal (เขียนลงดิสก์ก่อนส่ง event `harness://run-event` ให้ UI; UI replay ต่อจาก `seq` ได้โดยไม่ซ้ำ); run ที่ค้างตอนแอปปิดจะเป็น `interrupted` ตอนเปิดใหม่ ไม่ resume เอง
 - app data (native): `harness/bindings.json` = repo binding ต่อ Jira project (path เครื่อง, base branch, worktree folder, commands, env files ที่ copy); ไม่เก็บใน repo หรือ IndexedDB
 - IndexedDB (`jira-task-manager`):
   - `organizations: "id, name"`

@@ -2,7 +2,7 @@
 // validated IDs only. The dev's own checkout is never touched (no stash, reset or checkout).
 use super::bindings::is_safe_relative_path;
 use super::exec::git;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -10,7 +10,7 @@ use std::time::Duration;
 const FETCH_TIMEOUT: Duration = Duration::from_secs(180);
 const GIT_TIMEOUT: Duration = Duration::from_secs(60);
 
-#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeInfo {
     pub path: String,

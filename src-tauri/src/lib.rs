@@ -170,9 +170,17 @@ pub fn run() {
             harness::harness_default_worktree_root,
             harness::harness_list_bindings,
             harness::harness_save_binding,
-            harness::harness_delete_binding
+            harness::harness_delete_binding,
+            harness::harness_start_run,
+            harness::harness_stop_run,
+            harness::harness_list_runs,
+            harness::harness_run_events,
+            harness::harness_remove_run_worktree
         ])
         .setup(|app| {
+            use tauri::Manager;
+            app.manage(harness::create_run_manager(app.handle())?);
+
             let window_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title(WINDOW_TITLE)
                 .inner_size(WINDOW_WIDTH, WINDOW_HEIGHT)

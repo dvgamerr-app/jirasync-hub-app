@@ -516,3 +516,18 @@
     box-shadow: -12px 0 40px hsl(var(--foreground) / 0.15);
   }
 }
+
+.board-run-log {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--board-border);
+  border-radius: 6px;
+  background: hsl(var(--muted) / 0.4);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

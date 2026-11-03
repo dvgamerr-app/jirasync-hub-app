@@ -1,8 +1,87 @@
 // Replaces @tauri-apps/api/core in e2e mode. Credentials are "encrypted" with a
 // reversible, non-secret encoding so the real encrypt/decrypt call sites still run.
 // Harness commands answer from window.__e2e.harness (see state.ts) and record every call.
-import type { RepoBinding } from "@/lib/harness";
+import type { RepoBinding, RunEvent, RunRecord } from "@/lib/harness";
 import { getHarnessState } from "./state";
+import { emit } from "./tauri-event";
+
+/** Appends to the fake journal and sends it live, like the native core does. */
+function pushRunEvent(event: RunEvent) {
+  const state = getHarnessState();
+  state.journal ??= {};
+  (state.journal[event.runId] ??= []).push(event);
+  if (event.type === "status") {
+    const { status, message } = event;
+    state.runs = (state.runs ?? []).map((run) =>
+      run.runId === event.runId ? { ...run, status, error: message ?? run.error } : run,
+    );
+  }
+  emit("harness://run-event", event);
+}
+
+declare global {
+  interface Window {
+    __e2ePushRunEvent?: (event: RunEvent) => void;
+  }
+}
+window.__e2ePushRunEvent = pushRunEvent;
+
+function runCommand(cmd: string, args?: Record<string, unknown>): unknown {
+  const state = getHarnessState();
+  const runs = (state.runs ??= []);
+  switch (cmd) {
+    case "harness_start_run": {
+      const active = runs.find((run) =>
+        ["preparing", "installing", "running"].includes(run.status),
+      );
+      if (active) throw `another run (${active.runId}) is active; stop it or wait for it to finish`;
+      if (!state.bindings.some((binding) => binding.projectId === args?.projectId))
+        throw "bind this project to a repository in Setup first";
+      const record: RunRecord = {
+        runId: `run${String(runs.length + 1).padStart(3, "0")}abc`,
+        taskId: String(args?.taskId),
+        projectId: String(args?.projectId),
+        issueKey: String(args?.issueKey),
+        repoPath: "C:/src/service",
+        status: "preparing",
+        worktree: null,
+        worktreeRemoved: false,
+        createdAt: Date.now(),
+        endedAt: null,
+        error: null,
+      };
+      state.runs = [record, ...runs];
+      pushRunEvent({
+        runId: record.runId,
+        seq: 1,
+        at: Date.now(),
+        type: "status",
+        status: "preparing",
+        message: null,
+      });
+      return record;
+    }
+    case "harness_stop_run":
+      return null;
+    case "harness_list_runs":
+      return runs;
+    case "harness_run_events":
+      return (state.journal?.[String(args?.runId)] ?? []).filter(
+        (event) => event.seq > Number(args?.afterSeq ?? 0),
+      );
+    case "harness_remove_run_worktree": {
+      const runId = String(args?.runId);
+      if (state.dirtyWorktrees?.includes(runId) && !args?.discardChanges)
+        throw "worktree has 1 uncommitted change(s); confirm to discard them";
+      state.runs = runs.map((run) =>
+        run.runId === runId ? { ...run, worktreeRemoved: true } : run,
+      );
+      return state.runs.find((run) => run.runId === runId);
+    }
+    default:
+      return undefined;
+  }
+}
 
 function harness(cmd: string, args?: Record<string, unknown>): unknown {
   const state = getHarnessState();
@@ -32,7 +111,7 @@ function harness(cmd: string, args?: Record<string, unknown>): unknown {
       state.bindings = state.bindings.filter((binding) => binding.projectId !== args?.projectId);
       return null;
     default:
-      return undefined;
+      return runCommand(cmd, args);
   }
 }
 

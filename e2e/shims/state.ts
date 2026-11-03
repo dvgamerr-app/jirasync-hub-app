@@ -1,11 +1,16 @@
 // Shared in-page state for the e2e shims. Tests read it back via page.evaluate.
-import type { DoctorReport, RepoBinding, RepoDetection } from "@/lib/harness";
+import type { DoctorReport, RepoBinding, RepoDetection, RunEvent, RunRecord } from "@/lib/harness";
 
 export interface E2EHarnessState {
   doctor: DoctorReport;
   /** Detection result per folder; a string is the error the native core would return. */
   detections: Record<string, RepoDetection | string>;
   bindings: RepoBinding[];
+  /** Fake native run journal: records (newest first) and their events. */
+  runs?: RunRecord[];
+  journal?: Record<string, RunEvent[]>;
+  /** Run IDs whose worktree has uncommitted changes (removal needs confirmation). */
+  dirtyWorktrees?: string[];
   /** Every harness command the app invoked, in order. */
   calls: { cmd: string; args?: Record<string, unknown> }[];
 }

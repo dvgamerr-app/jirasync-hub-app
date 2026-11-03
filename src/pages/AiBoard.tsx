@@ -30,6 +30,7 @@ import { AdfRenderer } from "@/components/AdfRenderer";
 import { CopyForAiDialog } from "@/components/CopyForAiDialog";
 import { SummarizeToJiraDialog } from "@/components/SummarizeToJiraDialog";
 import { HarnessSetupDialog } from "@/components/HarnessSetupDialog";
+import { TaskRunPanel } from "@/components/TaskRunPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -134,6 +135,7 @@ function BoardTaskDetails({ task, project }: { task: Task; project?: Project }) 
             </div>
           ))}
         </dl>
+        {!completedByJira && <TaskRunPanel task={task} />}
         <section className="board-detail-section">
           <h3>Description</h3>
           {task.description ? (

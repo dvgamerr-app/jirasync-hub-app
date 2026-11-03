@@ -47,11 +47,20 @@ import {
 } from "@/lib/ai-board";
 import {
   deleteRepoBinding,
+  getRunEvents,
   harnessDoctor,
   listRepoBindings,
+  listRuns,
+  mergeRunEvents,
+  RUN_EVENT_PAGE,
+  removeRunWorktree,
   saveRepoBinding,
+  startRun,
+  stopRun,
   type DoctorReport,
   type RepoBinding,
+  type RunEvent,
+  type RunRecord,
 } from "@/lib/harness";
 
 function getVisibleWorkLogsForTask(workLogs: WorkLog[], taskId: string): WorkLog[] {
@@ -132,6 +141,17 @@ export interface TaskStore {
   loadRepoBindings: () => Promise<void>;
   saveRepoBinding: (binding: RepoBinding) => Promise<RepoBinding>;
   removeRepoBinding: (projectId: string) => Promise<void>;
+  /** Runs (newest first) and their journal events, as far as this window has loaded them. */
+  runs: RunRecord[];
+  runEvents: Record<string, RunEvent[]>;
+  loadRuns: () => Promise<void>;
+  /** Replays journal events after the last one this window has (fills gaps, no duplicates). */
+  loadRunEvents: (runId: string) => Promise<void>;
+  applyRunEvent: (event: RunEvent) => void;
+  /** Prepares a workspace for the task in the repo bound to its project. One run at a time. */
+  startTaskRun: (taskId: string) => Promise<RunRecord>;
+  stopTaskRun: (runId: string) => Promise<void>;
+  removeTaskRunWorktree: (runId: string, discardChanges: boolean) => Promise<void>;
 
   setSelectedProject: (projectId: string | null) => void;
   setSelectedTask: (taskId: string | null) => void;
@@ -935,6 +955,64 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       await deleteRepoBinding(projectId);
       set((state) => ({
         repoBindings: state.repoBindings.filter((existing) => existing.projectId !== projectId),
+      }));
+    },
+    runs: [],
+    runEvents: {},
+    loadRuns: async () => {
+      set({ runs: await listRuns() });
+    },
+    loadRunEvents: async (runId) => {
+      // The journal answers in pages; keep reading so the newest events are never skipped.
+      for (;;) {
+        const after = get().runEvents[runId]?.at(-1)?.seq ?? 0;
+        const events = await getRunEvents(runId, after);
+        if (events.length === 0) return;
+        set((state) => ({
+          runEvents: {
+            ...state.runEvents,
+            [runId]: mergeRunEvents(state.runEvents[runId] ?? [], events),
+          },
+        }));
+        if (events.length < RUN_EVENT_PAGE) return;
+      }
+    },
+    applyRunEvent: (event) => {
+      const current = get().runEvents[event.runId] ?? [];
+      const last = current.at(-1)?.seq ?? 0;
+      if (event.seq <= last) return;
+      if (event.seq > last + 1) {
+        // Missed events (e.g. the window reloaded mid-run): replay them from the journal.
+        void get()
+          .loadRunEvents(event.runId)
+          .catch(() => {});
+        return;
+      }
+      set((state) => ({
+        runEvents: { ...state.runEvents, [event.runId]: mergeRunEvents(current, [event]) },
+      }));
+      // Status changes also update the record (worktree path, error, end time).
+      if (event.type === "status")
+        void get()
+          .loadRuns()
+          .catch(() => {});
+    },
+    startTaskRun: async (taskId) => {
+      const task = getLatestTask(taskId);
+      if (!task) throw new Error("This ticket is no longer available");
+      const record = await startRun(task.id, task.projectId, task.jiraTaskId);
+      set((state) => ({
+        runs: [record, ...state.runs.filter((run) => run.runId !== record.runId)],
+      }));
+      return record;
+    },
+    stopTaskRun: async (runId) => {
+      await stopRun(runId);
+    },
+    removeTaskRunWorktree: async (runId, discardChanges) => {
+      const record = await removeRunWorktree(runId, discardChanges);
+      set((state) => ({
+        runs: state.runs.map((run) => (run.runId === record.runId ? record : run)),
       }));
     },
     summaryTaskId: null,

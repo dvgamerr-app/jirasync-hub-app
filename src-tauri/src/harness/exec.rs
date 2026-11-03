@@ -78,7 +78,7 @@ pub fn resolve_executable(name: &str) -> Option<PathBuf> {
     })
 }
 
-fn hide_console(command: &mut Command) {
+pub fn hide_console(command: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

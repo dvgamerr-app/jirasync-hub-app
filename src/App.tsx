@@ -10,6 +10,7 @@ import {
 } from "@/lib/sync-service";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/utils";
+import { onRunEvent } from "@/lib/harness";
 import { HashRouter, Route, Routes } from "react-router-dom";
 import { AppErrorBoundary } from "@/components/AppErrorBoundary";
 import { TitleBar } from "@/components/TitleBar";
@@ -91,6 +92,16 @@ const App = () => {
       stopBackgroundSync();
     };
   }, [load, applySyncResult, setSyncing]);
+
+  // Agent runs live in the native core for the whole app lifetime, not per page: subscribe
+  // once, then load what the journal already has (runs survive page changes and reloads).
+  useEffect(() => {
+    const store = useTaskStore.getState();
+    const unsubscribe = onRunEvent(store.applyRunEvent);
+    void store.loadRuns().catch(() => {});
+    void store.loadRepoBindings().catch(() => {});
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     if (isLoaded && getJiraAccounts().length > 0) startBackgroundSync();
