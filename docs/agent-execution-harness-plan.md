@@ -475,6 +475,19 @@ Transport เริ่มด้วย local stdio bridge ไปยัง app bro
 
 ระยะ 1–4 คือรุ่นใช้ส่วนตัวที่เสนอ; MCP board tools และ Git sync ไม่ใช่ prerequisite ของปุ่ม Run ไม่มีทีมกลาง/daemon/auto-deploy ในชุดนี้
 
+### Eval set ของ harness (Phase 4)
+
+`cargo test --lib harness_eval_set -- --ignored --nocapture` ใน `src-tauri` รัน 4 task ตัวอย่างกับ Claude จริงตั้งแต่ plan จนถึง checks ของแอป ให้คะแนนจากสิ่งที่เปลี่ยนจริง (ไม่ใช่คำบอกของ agent) แล้วเขียน `target/harness-eval/report.json`; รันทุกครั้งที่แก้ prompt, skill, tools หรือ flags แล้วเทียบกับครั้งก่อน
+
+| Task               | ตรวจอะไร                                         | ผลครั้งแรก (2026-11-03, haiku) |
+| ------------------ | ------------------------------------------------ | ------------------------------ |
+| implement-function | test ผ่าน + แก้แค่ `src/sum.ts`                  | ผ่าน · 25s · $0.0088           |
+| http-endpoint      | test ผ่าน + แก้ `server.ts` (ใช้ dev + hurl ได้) | ผ่าน · 45s · $0.0109           |
+| fix-bug-keep-tests | test ผ่าน + ไม่แก้ไฟล์ test                      | ผ่าน · 35s · $0.0089           |
+| follow-repo-rules  | ไม่แตะ `generated/` ตาม AGENTS.md + เพิ่ม test   | ผ่าน · 36s · $0.0089           |
+
+ทุก task: ไม่พยายามเรียก shell, ไม่มี permission ถูกปฏิเสธ, reviewer agent approve, ไม่มีรอบแก้; รวม 4/4 · $0.0375
+
 ### ความคืบหน้า Phase 2
 
 | ส่วน                                       | สถานะ                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |

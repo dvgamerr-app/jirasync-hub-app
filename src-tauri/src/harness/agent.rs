@@ -983,3 +983,7 @@ pub fn changed_files(worktree: &Path) -> Result<Vec<String>, String> {
 #[cfg(test)]
 #[path = "agent_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "eval_tests.rs"]
+mod eval_tests;

@@ -307,7 +307,7 @@ fn start(manager: &RunManager, fx: &Fixture) -> RunRecord {
         .unwrap()
 }
 
-fn settle(manager: &RunManager, run_id: &str) -> RunRecord {
+pub(super) fn settle(manager: &RunManager, run_id: &str) -> RunRecord {
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         let record = manager
