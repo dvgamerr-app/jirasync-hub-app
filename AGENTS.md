@@ -20,6 +20,8 @@
 - `src/components/JiraSettings.tsx`: Jira accounts + story point field mapping
 - `src/components/ExportDialog.tsx`: export CSV ผ่าน Tauri dialog/fs
 - `src-tauri/src/lib.rs`: สร้าง main window และลง plugins
+- `src-tauri/src/harness/`: native harness core สำหรับรัน coding agent (Doctor, ตรวจ repo, repo bindings, worktree); WebView เรียกได้แค่ typed commands `harness_*` ห้ามเพิ่ม command ที่รับ command line ไป execute
+- `src/lib/harness.ts` + `src/components/HarnessSetupDialog.tsx`: client และหน้า Setup (ปุ่มขวาบน AI Board); skill ที่ส่งให้ agent อยู่ใน `src-tauri/resources/harness-skills/` (แผน: `docs/agent-execution-harness-plan.md`)
 
 ## Data / storage
 
@@ -29,6 +31,8 @@
   - `jira-settings` เป็น legacy key และ migrate อัตโนมัติ
   - `jira-story-point-fields` = `{ [projectId]: jiraCustomFieldId }`
   - `jirasync-ai-hidden-projects` = project IDs ที่ซ่อนจาก All projects ของ AI Board (แยกจาก `jirasync-hidden-projects` ของหน้า Jira)
+  - `jirasync-harness-setup-seen` = เปิด AI Board ครั้งแรกแล้ว (Doctor + เปิด Setup อัตโนมัติถ้า tool ที่จำเป็นยังไม่พร้อม เกิดแค่ครั้งเดียว)
+- app data (native): `harness/bindings.json` = repo binding ต่อ Jira project (path เครื่อง, base branch, worktree folder, commands, env files ที่ copy); ไม่เก็บใน repo หรือ IndexedDB
 - IndexedDB (`jira-task-manager`):
   - `organizations: "id, name"`
   - `projects: "id, orgId, jiraProjectKey"`

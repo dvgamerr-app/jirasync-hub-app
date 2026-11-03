@@ -2111,6 +2111,7 @@ dependencies = [
  "keyring",
  "machine-uid",
  "objc2-app-kit",
+ "serde",
  "serde_json",
  "sha2 0.11.1",
  "tauri",

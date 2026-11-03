@@ -14,6 +14,7 @@ import {
   EyeOff,
   Search,
   RefreshCw,
+  Settings2,
   X,
 } from "lucide-react";
 import { filterTasks, useTaskStore } from "@/store/task-store";
@@ -28,6 +29,7 @@ import { HANDOFF_TEMPLATE } from "@/lib/ai-context";
 import { AdfRenderer } from "@/components/AdfRenderer";
 import { CopyForAiDialog } from "@/components/CopyForAiDialog";
 import { SummarizeToJiraDialog } from "@/components/SummarizeToJiraDialog";
+import { HarnessSetupDialog } from "@/components/HarnessSetupDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -204,6 +206,8 @@ export default function AiBoard() {
     setSearch,
     setCopy,
     pull,
+    harnessReport,
+    openSetup,
   } = useTaskStore(
     useShallow((state) => ({
       tasks: state.tasks,
@@ -223,8 +227,13 @@ export default function AiBoard() {
       setSearch: state.setBoardSearch,
       setCopy: state.setBoardCopyTask,
       pull: state.pullBoard,
+      harnessReport: state.harnessDoctor,
+      openSetup: state.setHarnessSetupOpen,
     })),
   );
+  useEffect(() => {
+    void useTaskStore.getState().openHarnessSetupOnFirstVisit();
+  }, []);
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (document.querySelector('[role="dialog"]')) return;
@@ -403,6 +412,24 @@ export default function AiBoard() {
               variant="outline"
               size="sm"
               className="h-7 gap-1.5 text-[12px]"
+              aria-label="Agent setup"
+              title={
+                harnessReport && !harnessReport.ready
+                  ? "A required tool is not ready"
+                  : "Tools and repositories for agent runs"
+              }
+              onClick={() => openSetup(true)}
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+              Setup
+              {harnessReport && !harnessReport.ready && (
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 text-[12px]"
               aria-label="Sync board"
               disabled={syncing || getJiraAccounts().length === 0}
               onClick={() =>
@@ -539,6 +566,7 @@ export default function AiBoard() {
         />
       )}
       <SummarizeToJiraDialog />
+      <HarnessSetupDialog />
     </div>
   );
 }

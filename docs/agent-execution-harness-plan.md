@@ -152,7 +152,7 @@ SQLite ใหม่นี้เป็น run journal ไม่ใช่การ
 
 ```text
 <app-data>/harness/
-  config.toml
+  bindings.json        # repo bindings (Phase 1 เก็บเป็น JSON; ไม่ต้องเพิ่ม TOML parser)
   runs.sqlite
   runs/<run-id>/context.md
   runs/<run-id>/events.ndjson
@@ -455,6 +455,18 @@ Transport เริ่มด้วย local stdio bridge ไปยัง app bro
 | 6 — Portability                | versioned export/import, ต่อด้วย Git snapshot sync                                               | round-trip ข้อมูลที่เลือกได้; ไม่มี credentials และมี conflict handling                                                                  |
 
 ระยะ 1–4 คือรุ่นใช้ส่วนตัวที่เสนอ; MCP board tools และ Git sync ไม่ใช่ prerequisite ของปุ่ม Run ไม่มีทีมกลาง/daemon/auto-deploy ในชุดนี้
+
+### ความคืบหน้า Phase 1
+
+| ส่วน                                                                                                               | สถานะ                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| Doctor (`git`, `claude`, `gh` + `gh auth status`, `hurl`, Docker context/endpoint/engine)                          | เสร็จ: รัน process จริงพร้อม timeout ไม่ใช่แค่หาไฟล์; ผลแสดงในหน้า Setup และเปิดอัตโนมัติครั้งแรกถ้าไม่พร้อม |
+| ตรวจ repo (bun/npm/pnpm/yarn, Cargo, Go, uv; env files, key ที่ขาดจาก `.env.example`, service keys, compose files) | เสร็จ: deterministic ไม่ใช้ token; ส่งแค่ชื่อ key ไม่ส่งค่า                                                  |
+| Repo binding ต่อ project (validate git root, branch, worktree folder นอก repo, env path ใน repo)                   | เสร็จ: `harness/bindings.json` ใน app data, Setup → Repositories                                             |
+| Worktree จาก `origin/<base>` ล่าสุด + copy env + ลบแบบไม่ทิ้งงานที่ยังไม่ commit                                   | เสร็จใน Rust พร้อม unit tests; ยังไม่เปิดเป็น command จนกว่าจะมี run manager                                 |
+| Run journal, process supervisor, Stop, fake provider                                                               | ถัดไป                                                                                                        |
+
+ทดสอบ: Rust 19 tests (git จริงใน temp dir), e2e 5 tests ใหม่ (positive + negative) และ mutation 3 จุดที่ทำให้ test fail จริง
 
 ### ผล Phase 0 (2026-11-03, Windows, Claude Code 2.1.317, model `haiku`)
 

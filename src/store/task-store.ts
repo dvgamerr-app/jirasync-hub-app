@@ -45,6 +45,14 @@ import {
   isAiBoardStatus,
   type AiBoardTaskState,
 } from "@/lib/ai-board";
+import {
+  deleteRepoBinding,
+  harnessDoctor,
+  listRepoBindings,
+  saveRepoBinding,
+  type DoctorReport,
+  type RepoBinding,
+} from "@/lib/harness";
 
 function getVisibleWorkLogsForTask(workLogs: WorkLog[], taskId: string): WorkLog[] {
   return workLogs.filter((wl) => wl.taskId === taskId && isVisibleWorkLog(wl));
@@ -110,6 +118,20 @@ export interface TaskStore {
   updateSummaryDraft: (taskId: string, updates: Partial<SummaryInput>) => void;
   resetSummaryOperation: (taskId: string, operation: SummaryOperation) => void;
   submitSummaryOperation: (taskId: string, operation: SummaryOperation) => Promise<void>;
+
+  /** Agent harness (native core): tool readiness and per-project repo bindings. */
+  harnessSetupOpen: boolean;
+  harnessDoctor: DoctorReport | null;
+  harnessDoctorError: string | null;
+  harnessDoctorRunning: boolean;
+  repoBindings: RepoBinding[];
+  setHarnessSetupOpen: (open: boolean) => void;
+  runHarnessDoctor: () => Promise<DoctorReport | null>;
+  /** First AI Board visit only: check tools and open Setup when a required one is not ready. */
+  openHarnessSetupOnFirstVisit: () => Promise<void>;
+  loadRepoBindings: () => Promise<void>;
+  saveRepoBinding: (binding: RepoBinding) => Promise<RepoBinding>;
+  removeRepoBinding: (projectId: string) => Promise<void>;
 
   setSelectedProject: (projectId: string | null) => void;
   setSelectedTask: (taskId: string | null) => void;
@@ -733,6 +755,7 @@ async function discardDirtyTask(task: Task, accounts: JiraAccount[]): Promise<Ta
 
 const HIDDEN_PROJECTS_KEY = "jirasync-hidden-projects";
 const BOARD_HIDDEN_PROJECTS_KEY = "jirasync-ai-hidden-projects";
+const HARNESS_SETUP_SEEN_KEY = "jirasync-harness-setup-seen";
 
 function loadHiddenProjectIds(key = HIDDEN_PROJECTS_KEY): Set<string> {
   try {
@@ -868,6 +891,52 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         await db.aiBoardStates.put(next);
         set((state) => ({ aiBoardStates: upsertById(state.aiBoardStates, [next]) }));
       }),
+    harnessSetupOpen: false,
+    harnessDoctor: null,
+    harnessDoctorError: null,
+    harnessDoctorRunning: false,
+    repoBindings: [],
+    setHarnessSetupOpen: (open) => set({ harnessSetupOpen: open }),
+    runHarnessDoctor: async () => {
+      set({ harnessDoctorRunning: true, harnessDoctorError: null });
+      try {
+        const report = await harnessDoctor();
+        set({ harnessDoctor: report, harnessDoctorRunning: false });
+        return report;
+      } catch (error) {
+        set({ harnessDoctorError: getErrorMessage(error), harnessDoctorRunning: false });
+        return null;
+      }
+    },
+    openHarnessSetupOnFirstVisit: async () => {
+      try {
+        if (localStorage.getItem(HARNESS_SETUP_SEEN_KEY)) return;
+        localStorage.setItem(HARNESS_SETUP_SEEN_KEY, "1");
+      } catch {
+        return;
+      }
+      const report = await get().runHarnessDoctor();
+      if (report && !report.ready) set({ harnessSetupOpen: true });
+    },
+    loadRepoBindings: async () => {
+      set({ repoBindings: await listRepoBindings() });
+    },
+    saveRepoBinding: async (binding) => {
+      const saved = await saveRepoBinding(binding);
+      set((state) => ({
+        repoBindings: [
+          ...state.repoBindings.filter((existing) => existing.projectId !== saved.projectId),
+          saved,
+        ],
+      }));
+      return saved;
+    },
+    removeRepoBinding: async (projectId) => {
+      await deleteRepoBinding(projectId);
+      set((state) => ({
+        repoBindings: state.repoBindings.filter((existing) => existing.projectId !== projectId),
+      }));
+    },
     summaryTaskId: null,
     summaryDrafts: {},
     openSummary: (taskId) => {

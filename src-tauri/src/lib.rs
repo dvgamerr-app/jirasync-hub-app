@@ -1,3 +1,5 @@
+mod harness;
+
 use tauri::{webview::PageLoadEvent, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_window_state::{Builder as WindowStateBuilder, StateFlags, WindowExt};
 
@@ -162,7 +164,13 @@ pub fn run() {
             decrypt_data,
             store_secret,
             get_secret,
-            delete_secret
+            delete_secret,
+            harness::harness_doctor,
+            harness::harness_detect_repo,
+            harness::harness_default_worktree_root,
+            harness::harness_list_bindings,
+            harness::harness_save_binding,
+            harness::harness_delete_binding
         ])
         .setup(|app| {
             let window_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
