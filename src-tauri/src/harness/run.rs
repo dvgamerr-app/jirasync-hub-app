@@ -429,11 +429,94 @@ impl<'a> Step<'a> {
     }
 }
 
+/// Every process a step starts, including ones its children leave behind after it exits.
+/// Windows: a Job Object (closing it kills what is left). Unix: the step's process group.
+struct ProcessGroup {
+    #[cfg(windows)]
+    job: isize,
+    #[cfg(unix)]
+    pgid: u32,
+}
+
+impl ProcessGroup {
+    fn adopt(child: &std::process::Child) -> Self {
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            use windows_sys::Win32::System::JobObjects::{
+                AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+                SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+                JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            };
+            // SAFETY: plain Win32 calls on a handle we own; failures leave `job` at 0 and the
+            // step falls back to taskkill for its tree.
+            unsafe {
+                let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+                if !job.is_null() {
+                    let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+                    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                    SetInformationJobObject(
+                        job,
+                        JobObjectExtendedLimitInformation,
+                        &limits as *const _ as *const core::ffi::c_void,
+                        std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                    );
+                    AssignProcessToJobObject(job, child.as_raw_handle() as _);
+                }
+                Self { job: job as isize }
+            }
+        }
+        #[cfg(unix)]
+        {
+            Self { pgid: child.id() }
+        }
+    }
+
+    /// Kills everything still running in the group.
+    fn kill_all(&self) {
+        #[cfg(windows)]
+        if self.job != 0 {
+            // SAFETY: the handle is owned by this group and still open.
+            unsafe {
+                windows_sys::Win32::System::JobObjects::TerminateJobObject(self.job as _, 1);
+            }
+        }
+        #[cfg(unix)]
+        {
+            let _ = Command::new("kill")
+                .args(["-KILL", &format!("-{}", self.pgid)])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ProcessGroup {
+    fn drop(&mut self) {
+        if self.job != 0 {
+            // SAFETY: closing our own handle; KILL_ON_JOB_CLOSE ends anything left in the job.
+            unsafe {
+                windows_sys::Win32::Foundation::CloseHandle(self.job as _);
+            }
+        }
+    }
+}
+
 fn spawn_streamed(
     journal: &Arc<Journal>,
     control: &Control,
     step: &Step,
-) -> Result<(std::process::Child, std::sync::mpsc::Receiver<()>, usize), String> {
+) -> Result<
+    (
+        std::process::Child,
+        ProcessGroup,
+        std::sync::mpsc::Receiver<()>,
+        usize,
+    ),
+    String,
+> {
     let command = step.command;
     let name = step.name;
     let program = resolve_executable(&command.executable).ok_or_else(|| {
@@ -477,6 +560,7 @@ fn spawn_streamed(
     let mut child = process
         .spawn()
         .map_err(|e| format!("{name}: could not start {}: {e}", program.display()))?;
+    let group = ProcessGroup::adopt(&child);
     control.track(child.id());
 
     let pipes: Vec<(&str, Box<dyn std::io::Read + Send>)> = [
@@ -527,7 +611,7 @@ fn spawn_streamed(
             let _ = done.send(());
         });
     }
-    Ok((child, finished, reader_count))
+    Ok((child, group, finished, reader_count))
 }
 
 /// Runs one command to completion, streaming each output line into the journal.
@@ -540,7 +624,7 @@ pub(super) fn run_step(
         return Ok(StepOutcome::Cancelled);
     }
     let started = Instant::now();
-    let (mut child, finished, reader_count) = spawn_streamed(journal, control, step)?;
+    let (mut child, group, finished, reader_count) = spawn_streamed(journal, control, step)?;
     let deadline = started + step.timeout;
     let outcome = loop {
         match child.try_wait() {
@@ -564,27 +648,40 @@ pub(super) fn run_step(
                 StepOutcome::TimedOut
             };
             kill_tree(child.id());
+            group.kill_all();
             let _ = child.wait();
             break outcome;
         }
         std::thread::sleep(Duration::from_millis(50));
     };
     control.untrack(child.id());
-    // After a stop the tree is already killed; after a normal exit a background child
-    // (e.g. a server the step started) may keep the pipe open, so do not wait forever.
-    let grace = Instant::now() + Duration::from_secs(5);
+    // After a stop the tree is already killed. After a normal exit a background process the
+    // step started (e.g. a server) may keep the pipe open: give it a moment, then stop it.
     let mut ended = 0;
+    let mut grace = Instant::now() + Duration::from_secs(5);
+    let mut stopped_leftovers = false;
     while ended < reader_count {
         let left = grace.saturating_duration_since(Instant::now());
-        if finished.recv_timeout(left).is_err() {
+        if finished.recv_timeout(left).is_ok() {
+            ended += 1;
+            continue;
+        }
+        if stopped_leftovers {
             journal.push(EventKind::Output {
                 step: step.name.into(),
                 stream: "stderr".into(),
-                text: "a background process this step started is still running".into(),
+                text: "a background process this step started could not be stopped".into(),
             });
             break;
         }
-        ended += 1;
+        group.kill_all();
+        stopped_leftovers = true;
+        grace = Instant::now() + Duration::from_secs(5);
+        journal.push(EventKind::Output {
+            step: step.name.into(),
+            stream: "stderr".into(),
+            text: "stopped a background process this step left running".into(),
+        });
     }
     journal.push(EventKind::StepEnd {
         step: step.name.into(),
@@ -600,6 +697,7 @@ pub(super) fn run_step(
 /// A long-running process (the dev server) owned by a run until the run ends or stops.
 pub(super) struct Background {
     child: std::process::Child,
+    group: ProcessGroup,
 }
 
 impl Background {
@@ -608,8 +706,8 @@ impl Background {
         control: &Control,
         step: &Step,
     ) -> Result<Self, String> {
-        let (child, _finished, _readers) = spawn_streamed(journal, control, step)?;
-        Ok(Self { child })
+        let (child, group, _finished, _readers) = spawn_streamed(journal, control, step)?;
+        Ok(Self { child, group })
     }
 
     pub(super) fn is_running(&mut self) -> bool {
@@ -618,6 +716,7 @@ impl Background {
 
     pub(super) fn stop(mut self, control: &Control) {
         kill_tree(self.child.id());
+        self.group.kill_all();
         let _ = self.child.wait();
         control.untrack(self.child.id());
     }
@@ -1390,6 +1489,54 @@ mod tests {
             json,
             serde_json::json!({"runId": "abc123", "seq": 1, "at": 2, "type": "step_end",
                 "step": "install", "exitCode": 0, "durationMs": 5})
+        );
+    }
+
+    #[test]
+    fn a_process_left_behind_by_a_finished_step_is_stopped() {
+        let dir = TempDir::new("leftover");
+        let record = RunRecord {
+            run_id: "abc123".into(),
+            ..RunRecord::default()
+        };
+        let journal =
+            Arc::new(Journal::create(dir.path().join("abc123"), record, Arc::new(|_| {})).unwrap());
+        let control = Control::default();
+        // Exits at once but leaves a child holding the output pipe for 30 seconds.
+        let leaves_child = if cfg!(windows) {
+            cmd("cmd", &["/c", "start /b ping -n 30 127.0.0.1"])
+        } else {
+            cmd("sh", &["-c", "sleep 30 & exit 0"])
+        };
+        let started = Instant::now();
+        let outcome = run_step(
+            &journal,
+            &control,
+            &Step::new("leaky", &leaves_child, dir.path(), Duration::from_secs(60)),
+        )
+        .unwrap();
+        assert_eq!(outcome, StepOutcome::Exited(0));
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "did not wait for the leftover"
+        );
+        let events = read_events(&dir.path().join("abc123"), 0, usize::MAX).unwrap();
+        let texts: Vec<String> = events
+            .iter()
+            .filter_map(|e| match &e.kind {
+                EventKind::Output { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            texts
+                .iter()
+                .any(|t| t == "stopped a background process this step left running"),
+            "{texts:?}"
+        );
+        assert!(
+            !texts.iter().any(|t| t.contains("could not be stopped")),
+            "the leftover released its pipe, so it really ended"
         );
     }
 

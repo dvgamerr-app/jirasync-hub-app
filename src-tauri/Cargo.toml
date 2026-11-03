@@ -39,6 +39,7 @@ serde_yaml_ng = "0.10"
 # commands report "unsupported" there and the frontend keeps its encrypted-blob fallback.
 [target."cfg(windows)".dependencies]
 keyring = { version = "3", features = ["windows-native"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [target."cfg(target_os = \"macos\")".dependencies]
 keyring = { version = "3", features = ["apple-native"] }
