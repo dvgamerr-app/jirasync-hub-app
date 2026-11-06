@@ -129,6 +129,10 @@ pub struct RunRecord {
     /// Digest of the worktree changes the last checks ran on (stale checks are re-run).
     pub verified_digest: Option<String>,
     pub pr_url: Option<String>,
+    /// Every Draft PR of the run: one per repo it changed (root and/or submodules).
+    /// `pr_url` is the first of them; older runs only have `pr_url`.
+    #[serde(default)]
+    pub pr_urls: Vec<String>,
     /// The Draft PR was marked ready for review after CI passed.
     pub pr_ready: bool,
 }

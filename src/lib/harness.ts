@@ -195,6 +195,8 @@ export interface RunRecord {
   verifiedDigest: string | null;
   /** The Draft PR the app opened when the owner accepted. */
   prUrl: string | null;
+  /** One Draft PR per repo the run changed (root and/or submodules); `prUrl` is the first. */
+  prUrls?: string[];
   /** Marked ready for review after CI passed. */
   prReady: boolean;
   /** Verdict of the independent reviewer agent (it informs; the owner decides). */

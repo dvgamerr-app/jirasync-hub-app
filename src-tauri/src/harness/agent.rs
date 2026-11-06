@@ -859,13 +859,26 @@ impl AgentRun<'_> {
                 return Err(format!("checks fail on the current change: {names}"));
             }
         }
-        let changed = changed_files(&worktree)?;
+        // Every repo with something to publish: the root when it has commits or changes, and
+        // each submodule with changes or already on the run branch (an earlier, partial publish).
         let ahead = git(
             &["rev-list", "--count", &format!("{}..HEAD", info.base_sha)],
             &worktree,
             Duration::from_secs(20),
         )?;
-        if changed.is_empty() && ahead.trim() == "0" {
+        let mut targets = Vec::new();
+        for dir in repo_dirs(&worktree) {
+            let changes = repo_changes(&worktree, &dir)?;
+            let touched = if dir.is_empty() {
+                !changes.is_empty() || ahead.trim() != "0"
+            } else {
+                !changes.is_empty() || current_branch(&worktree, &dir) == info.branch
+            };
+            if touched {
+                targets.push((dir, changes));
+            }
+        }
+        if targets.is_empty() {
             return Err("nothing to publish: no files changed".into());
         }
 
@@ -889,42 +902,95 @@ impl AgentRun<'_> {
         fs::write(&message_file, format!("{}\n", draft.commit_message))
             .map_err(|e| e.to_string())?;
         let body_arg = body_file.display().to_string();
+        let message = message_file.display().to_string();
+        let submodules: Vec<String> = repo_dirs(&worktree).into_iter().skip(1).collect();
 
-        if !changed.is_empty() {
-            // Env files the app copied in are never committed, even if the repo does not ignore them.
-            let mut add = vec!["add".to_string(), "-A".into(), "--".into(), ".".into()];
-            add.extend(
-                record
-                    .copy_env
-                    .iter()
-                    .map(|file| format!(":(exclude){file}")),
-            );
-            self.app_step("publish:add", "git", add)?;
-            let message = message_file.display().to_string();
+        let mut urls = Vec::new();
+        for (dir, changes) in targets {
+            let step = |what: &str| {
+                if dir.is_empty() {
+                    format!("publish:{what}")
+                } else {
+                    format!("publish:{dir}:{what}")
+                }
+            };
+            // A submodule is checked out detached at its pinned commit: give the work a branch.
+            if !dir.is_empty() && current_branch(&worktree, &dir) != info.branch {
+                self.app_step(
+                    &dir,
+                    &step("branch"),
+                    "git",
+                    vec!["checkout".into(), "-B".into(), info.branch.clone()],
+                )?;
+            }
+            if !changes.is_empty() {
+                // Env files the app copied in are never committed, even if the repo does not
+                // ignore them; nor are submodules from the root (they publish on their own).
+                let prefix = if dir.is_empty() {
+                    String::new()
+                } else {
+                    format!("{dir}/")
+                };
+                let mut add = vec!["add".to_string(), "-A".into(), "--".into(), ".".into()];
+                add.extend(record.copy_env.iter().filter_map(|file| {
+                    let relative = file.strip_prefix(&prefix)?;
+                    let inside_submodule = dir.is_empty()
+                        && submodules
+                            .iter()
+                            .any(|sub| file.starts_with(&format!("{sub}/")));
+                    (!inside_submodule).then(|| format!(":(exclude){relative}"))
+                }));
+                if dir.is_empty() {
+                    add.extend(submodules.iter().map(|sub| format!(":(exclude){sub}")));
+                }
+                self.app_step(&dir, &step("add"), "git", add)?;
+                self.app_step(
+                    &dir,
+                    &step("commit"),
+                    "git",
+                    vec!["commit".into(), "-F".into(), message.clone()],
+                )?;
+            }
             self.app_step(
-                "publish:commit",
+                &dir,
+                &step("push"),
                 "git",
-                vec!["commit".into(), "-F".into(), message],
+                vec![
+                    "push".into(),
+                    "-u".into(),
+                    "origin".into(),
+                    info.branch.clone(),
+                ],
             )?;
+            let base = if dir.is_empty() {
+                record.base_branch.clone()
+            } else {
+                submodule_base(&worktree, &dir)
+            };
+            urls.push(self.open_pr(&dir, &step, &info.branch, &base, &draft.title, &body_arg)?);
         }
-        self.app_step(
-            "publish:push",
-            "git",
-            vec![
-                "push".into(),
-                "-u".into(),
-                "origin".into(),
-                info.branch.clone(),
-            ],
-        )?;
+        self.journal.update(|record| record.pr_urls = urls.clone());
+        Ok(urls.into_iter().next())
+    }
 
+    /// Opens the Draft PR of one repo, or updates the open one for this branch.
+    fn open_pr(
+        &self,
+        dir: &str,
+        step: &dyn Fn(&str) -> String,
+        branch: &str,
+        base: &str,
+        title: &str,
+        body_arg: &str,
+    ) -> Result<String, String> {
         let list = self.gh_step(
-            "publish:pr-list",
-            [
+            dir,
+            &step("pr-list"),
+            &[
                 "pr",
                 "list",
                 "--head",
-                &info.branch,
+                branch,
                 "--state",
                 "all",
                 "--json",
@@ -949,36 +1015,38 @@ impl AgentRun<'_> {
                 Some("OPEN") => {
                     let number = pr["number"].to_string();
                     self.gh_step(
-                        "publish:pr-edit",
-                        [
+                        dir,
+                        &step("pr-edit"),
+                        &[
                             "pr",
                             "edit",
                             &number,
                             "--title",
-                            &draft.title,
+                            title,
                             "--body-file",
-                            &body_arg,
+                            body_arg,
                         ],
                     )?;
-                    return Ok(Some(url));
+                    return Ok(url);
                 }
                 _ => {}
             }
         }
         let created = self.gh_step(
-            "publish:pr-create",
-            [
+            dir,
+            &step("pr-create"),
+            &[
                 "pr",
                 "create",
                 "--draft",
                 "--base",
-                &record.base_branch,
+                base,
                 "--head",
-                &info.branch,
+                branch,
                 "--title",
-                &draft.title,
+                title,
                 "--body-file",
-                &body_arg,
+                body_arg,
             ],
         )?;
         created
@@ -986,7 +1054,7 @@ impl AgentRun<'_> {
             .rev()
             .map(|line| line.trim())
             .find(|line| line.starts_with("https://"))
-            .map(|url| Some(url.to_string()))
+            .map(str::to_string)
             .ok_or_else(|| "gh did not report the pull request URL".into())
     }
 
@@ -1001,21 +1069,22 @@ impl AgentRun<'_> {
     /// A git command the app runs with the owner credentials, shown in the run log.
     fn app_step(
         &self,
+        dir: &str,
         name: &str,
         executable: &str,
         args: Vec<String>,
     ) -> Result<Vec<String>, String> {
-        let worktree = self.worktree()?;
+        let cwd = repo_path(&self.worktree()?, dir);
         let command = CommandSpec {
             executable: executable.into(),
             args,
             ..CommandSpec::default()
         };
-        self.checked(name, &command, &[], &worktree)
+        self.checked(name, &command, &[], &cwd)
     }
 
-    fn gh_step<const N: usize>(&self, name: &str, args: [&str; N]) -> Result<Vec<String>, String> {
-        let worktree = self.worktree()?;
+    fn gh_step(&self, dir: &str, name: &str, args: &[&str]) -> Result<Vec<String>, String> {
+        let cwd = repo_path(&self.worktree()?, dir);
         let gh = &self.env.gh;
         let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
         let mut env = gh.env.clone();
@@ -1029,7 +1098,7 @@ impl AgentRun<'_> {
             args: argv,
             ..CommandSpec::default()
         };
-        self.checked(name, &command, &env, &worktree)
+        self.checked(name, &command, &env, &cwd)
     }
 
     fn checked(
@@ -1090,33 +1159,58 @@ fn run_gh(gh: &AgentLauncher, args: &[&str], cwd: &Path) -> Result<std::process:
     command.output().map_err(|e| e.to_string())
 }
 
-/// CI state of the run's Draft PR, from `gh pr checks` (non-zero exits mean failing/pending,
-/// so the JSON on stdout is what counts).
+/// Every Draft PR of a run (older runs only recorded `pr_url`).
+fn run_prs(record: &super::run::RunRecord) -> Vec<String> {
+    if record.pr_urls.is_empty() {
+        record.pr_url.iter().cloned().collect()
+    } else {
+        record.pr_urls.clone()
+    }
+}
+
+/// CI state of the run's Draft PRs, from `gh pr checks` (non-zero exits mean failing/pending,
+/// so the JSON on stdout is what counts). With several PRs each check names its repo.
 pub fn pr_ci_status(env: &AgentEnv, record: &super::run::RunRecord) -> Result<CiStatus, String> {
-    let url = record
-        .pr_url
-        .as_deref()
-        .ok_or("this run has no pull request yet")?;
+    let urls = run_prs(record);
+    if urls.is_empty() {
+        return Err("this run has no pull request yet".into());
+    }
     let cwd = PathBuf::from(&record.repo_path);
-    let output = run_gh(
-        &env.gh,
-        &["pr", "checks", url, "--json", "name,bucket"],
-        &cwd,
-    )?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let checks: Vec<CiCheck> = stdout
-        .lines()
-        .rev()
-        .find_map(|line| serde_json::from_str(line.trim()).ok())
-        .unwrap_or_default();
-    let all_passed = !checks.is_empty()
+    let mut checks = Vec::new();
+    let mut every_pr_reported = true;
+    for url in &urls {
+        let output = run_gh(
+            &env.gh,
+            &["pr", "checks", url, "--json", "name,bucket"],
+            &cwd,
+        )?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let found: Vec<CiCheck> = stdout
+            .lines()
+            .rev()
+            .find_map(|line| serde_json::from_str(line.trim()).ok())
+            .unwrap_or_default();
+        every_pr_reported &= !found.is_empty();
+        let repo = url
+            .split("/pull/")
+            .next()
+            .and_then(|repo| repo.rsplit('/').next());
+        checks.extend(found.into_iter().map(|check| match repo {
+            Some(repo) if urls.len() > 1 => CiCheck {
+                name: format!("{repo}: {}", check.name),
+                ..check
+            },
+            _ => check,
+        }));
+    }
+    let all_passed = every_pr_reported
         && checks
             .iter()
             .all(|check| check.bucket == "pass" || check.bucket == "skipping");
     Ok(CiStatus { checks, all_passed })
 }
 
-/// Marks the Draft PR ready for review, only after the app itself sees every CI check pass.
+/// Marks the Draft PRs ready for review, only after the app itself sees every CI check pass.
 pub fn mark_pr_ready(env: &AgentEnv, record: &super::run::RunRecord) -> Result<CiStatus, String> {
     let status = pr_ci_status(env, record)?;
     if status.checks.is_empty() {
@@ -1129,19 +1223,24 @@ pub fn mark_pr_ready(env: &AgentEnv, record: &super::run::RunRecord) -> Result<C
             .filter(|check| check.bucket != "pass" && check.bucket != "skipping")
             .map(|check| check.name.as_str())
             .collect();
-        return Err(format!("CI has not passed yet: {}", open.join(", ")));
+        return Err(if open.is_empty() {
+            "CI has not reported checks for every pull request yet".into()
+        } else {
+            format!("CI has not passed yet: {}", open.join(", "))
+        });
     }
-    let url = record.pr_url.as_deref().unwrap_or_default();
-    let output = run_gh(
-        &env.gh,
-        &["pr", "ready", url],
-        &PathBuf::from(&record.repo_path),
-    )?;
-    if !output.status.success() {
-        return Err(format!(
-            "gh pr ready failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
+    for url in run_prs(record) {
+        let output = run_gh(
+            &env.gh,
+            &["pr", "ready", &url],
+            &PathBuf::from(&record.repo_path),
+        )?;
+        if !output.status.success() {
+            return Err(format!(
+                "gh pr ready failed for {url}: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
     }
     Ok(status)
 }
@@ -1201,23 +1300,105 @@ fn pr_body(record: &super::run::RunRecord, draft: &PrDraft) -> String {
     )
 }
 
-/// Identifies the exact change: tracked diff against HEAD plus every untracked file.
+/// The worktree's own repo (`""`) and each checked-out submodule (its path). A change inside a
+/// submodule belongs to that submodule's repo: the app commits it there and opens its PR there.
+pub fn repo_dirs(worktree: &Path) -> Vec<String> {
+    let mut dirs = vec![String::new()];
+    if !worktree.join(".gitmodules").is_file() {
+        return dirs;
+    }
+    let listed = git(
+        &[
+            "config",
+            "-f",
+            ".gitmodules",
+            "--get-regexp",
+            r"^submodule\..*\.path$",
+        ],
+        worktree,
+        Duration::from_secs(20),
+    )
+    .unwrap_or_default();
+    for line in listed.lines() {
+        if let Some((_, path)) = line.split_once(' ') {
+            let path = path.trim().replace('\\', "/");
+            if !path.is_empty() && worktree.join(&path).join(".git").exists() {
+                dirs.push(path);
+            }
+        }
+    }
+    dirs
+}
+
+/// The folder of one of `repo_dirs`.
+pub fn repo_path(worktree: &Path, dir: &str) -> PathBuf {
+    if dir.is_empty() {
+        worktree.to_path_buf()
+    } else {
+        worktree.join(dir)
+    }
+}
+
+/// The branch a repo of `repo_dirs` is on (`HEAD` when detached, as a fresh submodule is).
+fn current_branch(worktree: &Path, dir: &str) -> String {
+    git(
+        &["rev-parse", "--abbrev-ref", "HEAD"],
+        &repo_path(worktree, dir),
+        Duration::from_secs(20),
+    )
+    .unwrap_or_default()
+}
+
+/// The branch a submodule's PR targets: its `branch` in `.gitmodules`, else its remote's
+/// default branch, else `main`.
+fn submodule_base(worktree: &Path, dir: &str) -> String {
+    let configured = git(
+        &[
+            "config",
+            "-f",
+            ".gitmodules",
+            &format!("submodule.{dir}.branch"),
+        ],
+        worktree,
+        Duration::from_secs(20),
+    );
+    if let Ok(branch) = configured.map(|b| b.trim().to_string()) {
+        if !branch.is_empty() && branch != "." {
+            return branch;
+        }
+    }
+    git(
+        &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+        &repo_path(worktree, dir),
+        Duration::from_secs(20),
+    )
+    .ok()
+    .and_then(|head| head.strip_prefix("origin/").map(str::to_string))
+    .unwrap_or_else(|| "main".into())
+}
+
+/// Identifies the exact change: tracked diff against HEAD plus every untracked file, in the
+/// worktree and in each submodule (a submodule's own changes, not just its pointer).
 pub fn tree_digest(worktree: &Path) -> Result<String, String> {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
-    hasher.update(git(
-        &["diff", "HEAD", "--binary"],
-        worktree,
-        Duration::from_secs(60),
-    )?);
-    let untracked = git(
-        &["ls-files", "--others", "--exclude-standard"],
-        worktree,
-        Duration::from_secs(30),
-    )?;
-    for file in untracked.lines() {
-        hasher.update(file.as_bytes());
-        hasher.update(fs::read(worktree.join(file)).unwrap_or_default());
+    for dir in repo_dirs(worktree) {
+        let repo = repo_path(worktree, &dir);
+        hasher.update(dir.as_bytes());
+        hasher.update(git(
+            &["diff", "HEAD", "--binary", "--ignore-submodules=all"],
+            &repo,
+            Duration::from_secs(60),
+        )?);
+        let untracked = git(
+            &["ls-files", "--others", "--exclude-standard"],
+            &repo,
+            Duration::from_secs(30),
+        )?;
+        for file in untracked.lines() {
+            hasher.update(file.as_bytes());
+            hasher.update(fs::read(repo.join(file)).unwrap_or_default());
+        }
     }
     Ok(hasher
         .finalize()
@@ -1235,11 +1416,32 @@ fn unavailable(reason: &str) -> AgentReview {
     }
 }
 
-/// Changed and new files in the worktree, excluding the harness scratch folder.
+/// Changed and new files in the worktree and its submodules (as `sub/path`), excluding the
+/// harness scratch folder.
 pub fn changed_files(worktree: &Path) -> Result<Vec<String>, String> {
+    let mut files = Vec::new();
+    for dir in repo_dirs(worktree) {
+        files.extend(repo_changes(worktree, &dir)?.into_iter().map(|path| {
+            if dir.is_empty() {
+                path
+            } else {
+                format!("{dir}/{path}")
+            }
+        }));
+    }
+    Ok(files)
+}
+
+/// Changed and new files of one repo of `repo_dirs`, relative to that repo.
+pub fn repo_changes(worktree: &Path, dir: &str) -> Result<Vec<String>, String> {
     let status = git(
-        &["status", "--porcelain=v1", "-uall"],
-        worktree,
+        &[
+            "status",
+            "--porcelain=v1",
+            "-uall",
+            "--ignore-submodules=all",
+        ],
+        &repo_path(worktree, dir),
         Duration::from_secs(30),
     )?;
     Ok(status

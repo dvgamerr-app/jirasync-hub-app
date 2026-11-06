@@ -137,7 +137,11 @@ fn fake_agent_entry() {
         Ok("FAIL_FIRST") if first => "FAIL",
         _ => "PASS",
     };
-    fs::write("result.txt", content).unwrap();
+    // A sub-repo (submodule) is where the change goes when the test says so.
+    let target = std::env::var("JIRASYNC_FAKE_RESULT_DIR")
+        .map(|dir| format!("{dir}/result.txt"))
+        .unwrap_or_else(|_| "result.txt".into());
+    fs::write(target, content).unwrap();
     fs::write(
         ".harness/progress.md",
         format!("wrote {content} into result.txt\n"),
@@ -603,6 +607,95 @@ fn accept_commits_pushes_and_opens_a_draft_pr() {
         "testing comes from the app checks:\n{body}"
     );
     assert!(body.contains("[PRJ-9](https://acme.atlassian.net/browse/PRJ-9)"));
+}
+
+#[test]
+fn a_change_inside_a_submodule_is_committed_and_opened_as_a_pr_in_that_repo() {
+    // Local-path submodules are blocked by default in git; allow them for this test only.
+    std::env::set_var("GIT_CONFIG_COUNT", "1");
+    std::env::set_var("GIT_CONFIG_KEY_0", "protocol.file.allow");
+    std::env::set_var("GIT_CONFIG_VALUE_0", "always");
+    let web = TempDir::new("agent-sub-web");
+    web.init_repo("main");
+    web.write("index.ts", "export {};\n");
+    web.commit("chore: init web");
+    let fx = fixture();
+    run_git(
+        fx.upstream.path(),
+        &["submodule", "add", &web.path().display().to_string(), "web"],
+    );
+    fx.upstream.commit("chore: add web submodule");
+    run_git(fx.clone.path(), &["pull", "-q"]);
+    run_git(fx.clone.path(), &["submodule", "update", "--init", "-q"]);
+    // The env file lives in the submodule and is not ignored there: never committed.
+    fx.clone.write("web/.env", "SECRET=1\n");
+    let manager = manager(
+        &fx,
+        &[("JIRASYNC_FAKE_RESULT_DIR", "web")],
+        Duration::from_secs(600),
+    );
+    let mut binding = binding(&fx);
+    binding.copy_env = vec!["web/.env".into()];
+    binding.commands.test = Some(CommandSpec {
+        executable: "git".into(),
+        args: [
+            "-C",
+            "web",
+            "grep",
+            "--untracked",
+            "-q",
+            "PASS",
+            "--",
+            "result.txt",
+        ]
+        .map(String::from)
+        .to_vec(),
+        ..CommandSpec::default()
+    });
+    let run = start_with(&manager, binding);
+    settle(&manager, &run.run_id);
+    manager.resume(&run.run_id, Decision::ApprovePlan).unwrap();
+    let reviewed = settle(&manager, &run.run_id);
+    assert_eq!(
+        reviewed.status,
+        RunStatus::ReadyForReview,
+        "{:?}",
+        reviewed.error
+    );
+    assert!(
+        reviewed
+            .changed_files
+            .contains(&"web/result.txt".to_string()),
+        "a submodule change is a change: {:?}",
+        reviewed.changed_files
+    );
+
+    manager.resume(&run.run_id, Decision::Accept).unwrap();
+    let done = settle(&manager, &run.run_id);
+    assert_eq!(done.status, RunStatus::Completed, "{:?}", done.error);
+    let branch = done.worktree.clone().unwrap().branch;
+    let files = run_git(web.path(), &["show", "--name-only", "--format=", &branch]);
+    assert_eq!(
+        files.trim(),
+        "result.txt",
+        "committed in the submodule, without its .env"
+    );
+    let root_branches = run_git(fx.upstream.path(), &["branch", "--list", &branch]);
+    assert!(
+        root_branches.trim().is_empty(),
+        "the root had no change of its own, so nothing was pushed there"
+    );
+    let creates: Vec<_> = fx
+        .gh_calls()
+        .into_iter()
+        .filter(|call| call[1] == "create")
+        .collect();
+    assert_eq!(creates.len(), 1, "one PR, in the submodule");
+    assert_eq!(done.pr_urls.len(), 1);
+    assert_eq!(
+        done.pr_url.as_deref(),
+        done.pr_urls.first().map(String::as_str)
+    );
 }
 
 #[test]

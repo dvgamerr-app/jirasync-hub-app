@@ -115,6 +115,7 @@ export function emptyRunRecord(): RunRecord {
     jiraUrl: null,
     verifiedDigest: null,
     prUrl: null,
+    prUrls: [],
     prReady: false,
     review: null,
   };

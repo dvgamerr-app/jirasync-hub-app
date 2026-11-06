@@ -96,6 +96,23 @@ pub fn create(request: CreateWorktree) -> Result<WorktreeInfo, String> {
         GIT_TIMEOUT,
     )?;
 
+    // A worktree starts with empty submodule folders; the commands and .env files live in them.
+    if path.join(".gitmodules").is_file() {
+        git(
+            &[
+                "-c",
+                "core.longpaths=true",
+                "submodule",
+                "update",
+                "--init",
+                "--recursive",
+            ],
+            &path,
+            FETCH_TIMEOUT,
+        )
+        .map_err(|e| format!("could not check out the submodules: {e}"))?;
+    }
+
     let mut copied_env = Vec::new();
     let mut missing_env = Vec::new();
     for file in request.copy_env {
@@ -185,6 +202,66 @@ mod tests {
             ],
         );
         (upstream, clone)
+    }
+
+    #[test]
+    fn submodules_are_checked_out_and_their_env_files_can_be_copied() {
+        // Local-path submodules are blocked by default in git; allow them for this test only.
+        std::env::set_var("GIT_CONFIG_COUNT", "1");
+        std::env::set_var("GIT_CONFIG_KEY_0", "protocol.file.allow");
+        std::env::set_var("GIT_CONFIG_VALUE_0", "always");
+
+        let inner = TempDir::new("wt-inner");
+        inner.init_repo("main");
+        inner.write("app.txt", "backend\n");
+        inner.commit("chore: init");
+        let upstream = TempDir::new("wt-sub-upstream");
+        upstream.init_repo("main");
+        upstream.write("README.md", "docs only\n");
+        upstream.commit("chore: init");
+        run_git(
+            upstream.path(),
+            &[
+                "submodule",
+                "add",
+                &inner.path().display().to_string(),
+                "be",
+            ],
+        );
+        upstream.commit("chore: add submodule");
+        let clone = TempDir::new("wt-sub-clone");
+        run_git(
+            clone.path().parent().unwrap(),
+            &[
+                "clone",
+                "-q",
+                "--recurse-submodules",
+                &upstream.path().display().to_string(),
+                &clone.path().display().to_string(),
+            ],
+        );
+        clone.write("be/.env", "SECRET=1\n");
+
+        let root = TempDir::new("wt-sub-root");
+        let info = create(CreateWorktree {
+            repo: clone.path(),
+            base_branch: "main",
+            worktree_root: root.path(),
+            issue_key: "SP-1",
+            run_id: "aaaaaaaaaaaa",
+            copy_env: &["be/.env".to_string()],
+        })
+        .unwrap();
+        let wt = Path::new(&info.path);
+        assert_eq!(
+            fs::read_to_string(wt.join("be/app.txt")).unwrap().trim(),
+            "backend"
+        );
+        assert_eq!(info.copied_env, ["be/.env"]);
+        assert_eq!(
+            fs::read_to_string(wt.join("be/.env")).unwrap(),
+            "SECRET=1\n"
+        );
     }
 
     #[test]

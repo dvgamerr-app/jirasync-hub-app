@@ -434,7 +434,32 @@ impl RunTools {
                 ))
             }
         };
-        git(args, &self.worktree, Duration::from_secs(30))
+        let dirs = super::agent::repo_dirs(&self.worktree);
+        if dirs.len() == 1 || !matches!(args[0], "status" | "diff") {
+            return git(args, &self.worktree, Duration::from_secs(30));
+        }
+        // With submodules, their own changes count too: one section per repo that has any.
+        let mut sections = Vec::new();
+        for dir in dirs {
+            let mut repo_args = args.to_vec();
+            repo_args.push("--ignore-submodules=all");
+            let output = git(
+                &repo_args,
+                &super::agent::repo_path(&self.worktree, &dir),
+                Duration::from_secs(30),
+            )?;
+            let name = if dir.is_empty() {
+                "(root)"
+            } else {
+                dir.as_str()
+            };
+            let quiet =
+                output.lines().all(|line| line.starts_with("## ")) || output.trim().is_empty();
+            if !quiet || dir.is_empty() {
+                sections.push(format!("### repo: {name}\n{output}"));
+            }
+        }
+        Ok(sections.join("\n\n"))
     }
 
     fn get_log(&self, arguments: &Value) -> Result<String, String> {
