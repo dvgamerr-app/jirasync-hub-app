@@ -124,6 +124,23 @@ Then stop and wait for the owner."
     )
 }
 
+/// The owner picks the task up again in the same worktree (after a review, a PR, a stop…).
+pub fn continue_prompt(issue_key: &str, request: &str) -> String {
+    let asked = if request.is_empty() {
+        "Find what is still missing for the task.".to_string()
+    } else {
+        format!("The owner asks:\n\n{request}")
+    };
+    format!(
+        "The owner wants more work on Jira task {issue_key} in this same worktree; your earlier work \
+is still here, committed or not. {asked}\n\n\
+Read .harness/task.md again (the ticket may have changed) and .harness/progress.md, and check the \
+current state with mcp__harness__git (op \"status\" and \"diff\"). This is a planning step again: you \
+can only read. Follow the harness skill, then call mcp__harness__submit_plan with the plan for the \
+next change, in the language of the ticket. Then stop and wait for the owner."
+    )
+}
+
 pub fn revise_plan_prompt(feedback: &str) -> String {
     format!(
         "The owner asked for changes to your plan:\n\n{feedback}\n\n\

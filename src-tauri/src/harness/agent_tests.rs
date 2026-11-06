@@ -329,6 +329,7 @@ fn start(manager: &RunManager, fx: &Fixture) -> RunRecord {
             agent: None,
             jira_url: None,
             provider: "claude".into(),
+            owner_message: None,
         })
         .unwrap()
 }
@@ -499,6 +500,18 @@ fn owner_can_revise_the_plan_before_any_change() {
         revised.plan.unwrap().contains("also cover the error case"),
         "the feedback reached the agent"
     );
+    // The owner's words are in the journal so the run reads as a conversation; the refused
+    // empty revision left nothing behind.
+    let said: Vec<String> = manager
+        .events(&run.run_id, 0, usize::MAX)
+        .unwrap()
+        .into_iter()
+        .filter_map(|event| match event.kind {
+            EventKind::Agent { kind, text } if kind == "owner" => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(said, ["also cover the error case"]);
 }
 
 #[test]
@@ -527,6 +540,7 @@ fn prepare_only_runs_cannot_be_resumed_as_agent_runs() {
             agent: None,
             jira_url: None,
             provider: "claude".into(),
+            owner_message: None,
         })
         .unwrap();
     assert_eq!(settle(&manager, &run.run_id).status, RunStatus::Prepared);
@@ -553,6 +567,7 @@ fn accept_commits_pushes_and_opens_a_draft_pr() {
             agent: None,
             jira_url: Some("https://acme.atlassian.net/browse/PRJ-9".into()),
             provider: "claude".into(),
+            owner_message: None,
         })
         .unwrap();
     settle(&manager, &run.run_id);
@@ -871,6 +886,7 @@ fn start_with(manager: &RunManager, binding: RepoBinding) -> RunRecord {
             agent: None,
             jira_url: None,
             provider: "claude".into(),
+            owner_message: None,
         })
         .unwrap()
 }
@@ -1060,6 +1076,7 @@ fn a_failed_install_without_an_agent_still_fails_the_prepare_run() {
             agent: None,
             jira_url: None,
             provider: "claude".into(),
+            owner_message: None,
         })
         .unwrap();
     let failed = settle(&manager, &run.run_id);
@@ -1245,6 +1262,7 @@ fn real_claude_plans_then_implements() {
             agent: None,
             jira_url: None,
             provider: "claude".into(),
+            owner_message: None,
         })
         .unwrap();
     let planned = settle(&manager, &run.run_id);
@@ -1306,3 +1324,100 @@ fn real_claude_plans_then_implements() {
 
 #[path = "agent_codex_tests.rs"]
 mod codex;
+
+fn more(request: &str, context: Option<&str>) -> Decision {
+    Decision::Continue {
+        request: request.into(),
+        context: context.map(str::to_string),
+        provider: None,
+    }
+}
+
+#[test]
+fn after_a_pr_the_owner_continues_in_the_same_worktree() {
+    let fx = fixture();
+    let manager = manager(&fx, &[], Duration::from_secs(600));
+    let done = published(&manager, &fx);
+    let worktree = done.worktree.clone().unwrap().path;
+
+    manager
+        .resume(&done.run_id, more("also handle zero", Some("# PRJ-7 v2\n")))
+        .unwrap();
+    let planned = settle(&manager, &done.run_id);
+    assert_eq!(
+        planned.status,
+        RunStatus::AwaitingPlan,
+        "{:?}",
+        planned.error
+    );
+    assert_eq!(
+        planned.worktree.unwrap().path,
+        worktree,
+        "the same worktree, no new one"
+    );
+    assert!(
+        planned.plan.unwrap().contains("more work"),
+        "the agent was told to continue, not to start over"
+    );
+    let task = fs::read_to_string(PathBuf::from(&worktree).join(".harness/task.md")).unwrap();
+    assert!(
+        task.contains("PRJ-7 v2"),
+        "the ticket snapshot was refreshed"
+    );
+    let said: Vec<String> = manager
+        .events(&done.run_id, 0, usize::MAX)
+        .unwrap()
+        .into_iter()
+        .filter_map(|event| match event.kind {
+            EventKind::Agent { kind, text } if kind == "owner" => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(said.last().map(String::as_str), Some("also handle zero"));
+    assert_eq!(
+        manager.list(usize::MAX).len(),
+        1,
+        "no second run was created"
+    );
+}
+
+#[test]
+fn a_prepared_workspace_can_be_picked_up_by_an_agent() {
+    let fx = fixture();
+    let manager = manager(&fx, &[], Duration::from_secs(600));
+    let run = manager
+        .start(StartRun {
+            task_id: "task-acc1-PRJ-7".into(),
+            issue_key: "PRJ-7".into(),
+            binding: binding(&fx),
+            context: None,
+            agent: None,
+            jira_url: None,
+            provider: "claude".into(),
+            owner_message: None,
+        })
+        .unwrap();
+    assert_eq!(settle(&manager, &run.run_id).status, RunStatus::Prepared);
+    manager
+        .resume(&run.run_id, more("", Some("# PRJ-7\n")))
+        .unwrap();
+    let planned = settle(&manager, &run.run_id);
+    assert_eq!(
+        planned.status,
+        RunStatus::AwaitingPlan,
+        "{:?}",
+        planned.error
+    );
+    assert_eq!(planned.mode, "agent");
+}
+
+#[test]
+fn a_removed_worktree_cannot_be_continued() {
+    let fx = fixture();
+    let manager = manager(&fx, &[], Duration::from_secs(600));
+    let done = published(&manager, &fx);
+    manager.remove_worktree(&done.run_id, true).unwrap();
+    let refused = manager.resume(&done.run_id, more("again", None));
+    assert!(refused.is_err(), "nothing to continue in");
+    assert_eq!(settle(&manager, &done.run_id).status, RunStatus::Completed);
+}

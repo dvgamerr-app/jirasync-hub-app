@@ -62,9 +62,11 @@ test("turning on board access publishes only ready tasks and shows the client co
   await seed(page, { bindings: [binding] });
   await openBoard(page);
   await page.getByRole("button", { name: "PRJ-2: Other work" }).click();
+  await page.getByRole("tab", { name: "ticket" }).click();
   await page.getByLabel("AI task status").click();
   await page.getByRole("option", { name: "Doing" }).click();
   await page.getByRole("button", { name: "PRJ-1: Ready work" }).click();
+  await page.getByRole("tab", { name: "ticket" }).click();
   await page.getByLabel("Board handoff").fill("private reminder for me");
   await page.getByLabel("Board handoff").blur();
 
@@ -83,6 +85,7 @@ test("turning on board access publishes only ready tasks and shows the client co
   // Moving the task out of To Do withdraws it from external agents.
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "PRJ-1: Ready work" }).click();
+  await page.getByRole("tab", { name: "ticket" }).click();
   await page.getByLabel("AI task status").click();
   await page.getByRole("option", { name: "Doing" }).click();
   await expect.poll(async () => (await board(page))?.tasks.length).toBe(0);
@@ -103,6 +106,7 @@ test("nothing is published while board access is off, and turning it off stops p
   await expect(dialog.getByRole("button", { name: "Turn on" })).toBeVisible();
   const published = (await calls(page, "harness_board_publish")).length;
   await page.keyboard.press("Escape");
+  await page.getByRole("tab", { name: "ticket" }).click();
   await page.getByLabel("AI task status").click();
   await page.getByRole("option", { name: "Doing" }).click();
   await page.waitForTimeout(600);

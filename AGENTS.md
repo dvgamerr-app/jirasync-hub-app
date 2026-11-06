@@ -35,6 +35,7 @@
   - submodule: worktree checkout submodule ให้เอง (`git submodule update --init --recursive`); การแก้ใน submodule นับเป็นการเปลี่ยนแปลง (`repo_dirs`/`changed_files`/`tree_digest`, tool `git` status/diff แยก section ต่อ repo) และตอน publish แต่ละ repo ที่เปลี่ยนได้ branch + commit + push + Draft PR ของตัวเอง (base ของ submodule = `branch` ใน `.gitmodules` → `origin/HEAD` → `main`); root ไม่ commit pointer ของ submodule; `RunRecord.pr_urls` เก็บทุก PR (`pr_url` = อันแรก) และ CI/Ready ดูทุก PR
   - test ของ pipeline ใช้ fake agent (`agent_tests.rs::fake_agent_entry` = test binary รันตัวเองเป็น agent คุยกับ MCP จริง); test ที่ใช้ Claude จริงเป็น `#[ignore]` (`cargo test --lib real_claude -- --ignored`)
 - `src/lib/harness.ts` + `src/components/HarnessSetupDialog.tsx`: client และหน้า Setup (ปุ่มขวาบน AI Board); skill ที่ส่งให้ agent อยู่ใน `src-tauri/resources/harness-skills/` (แผน: `docs/agent-execution-harness-plan.md`)
+- `src/components/AgentRun.tsx` + `src/lib/run-conversation.ts`: UI ของ run บน AI Board — panel ขวามี tab Conversation (ข้อความเจ้าของ/agent — ข้อความเก่าพับเหลือ 4 บรรทัด, แต่ละ session ของ agent เป็น turn ที่รวม tool call/ข้อความ/command ของมันพร้อม orb หมุนตอนทำงาน, ขั้นตอน pipeline) / Ticket / Worktree log; chat box อยู่ล่างสุดของ tab Conversation (`AgentComposer`) เป็นทางเดียวที่ start/approve/revise/request changes/accept — Enter ไม่เคย Accept; draft อยู่ใน store (`boardAgentDraft`); ข้อความที่เจ้าของพิมพ์ถูก journal เป็น event `agent`/`owner` ฝั่ง native; agent ตอบเป็นภาษาเดียวกับ ticket (ยกเว้น commit/PR ที่มีกติกาของตัวเอง)
 
 ## Data / storage
 
@@ -82,6 +83,7 @@
 ## Current product behavior
 
 - AI Board ใช้ `todo | doing | review | done` ของตัวเองใน `aiBoardStates` การย้าย AI ไม่แก้ `Task.status`/dirty state และไม่ส่ง Jira transition; Jira Done บังคับ AI Done ทางเดียวและซ่อน task จาก board/counts/detail แต่ AI Done ที่ Jira ยังไม่จบยังแสดงได้ เก็บสถานะผ่าน reload/pull/discard และใช้สี theme tokens ของแอป ซ่อน space/project ผ่านปุ่มรูปตาโดยแยก preference จากหน้า Jira
+- worktree ต่อ task: กด Plan บน task ที่ run ล่าสุดยังมี worktree (และไม่ busy) จะทำงานต่อใน worktree/run เดิม (decision `continue`: วางแผนใหม่ใน session เดิม, refresh `.harness/task.md`, รับ run แบบ prepare ได้ด้วย) ไม่สร้างใหม่; Accept แล้ว (PR เปิด) card อยู่ Review ไม่ใช่ Done; เจ้าของย้าย card ไป AI Done เอง (`moveBoardTask(…, { byOwner: true })`) ถึงลบ worktree — ถ้ามี uncommitted changes จะไม่ลบและแจ้งเตือน; การย้ายจาก run event หรือ Jira Done ไม่ลบ
 
 - แก้จาก UI ได้: status, type, severity, story level, mandays, note, worklogs
 - `storyLevel` รับเฉพาะ `1 | 2 | 3 | 5`

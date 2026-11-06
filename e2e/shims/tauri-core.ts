@@ -69,12 +69,27 @@ function startRun(args: Args): RunRecord {
     status: "preparing",
     message: null,
   });
+  if (typeof args?.ownerMessage === "string" && args.ownerMessage.trim())
+    pushOwnerMessage(record.runId, args.ownerMessage.trim());
   return record;
 }
+
+/** The native core journals what the owner tells the agent; so does the shim. */
+function pushOwnerMessage(runId: string, text: string) {
+  const seq = (getHarnessState().journal?.[runId]?.length ?? 0) + 1;
+  pushRunEvent({ runId, seq, at: Date.now(), type: "agent", kind: "owner", text });
+}
+
+const SAID: Record<string, string> = {
+  approve_plan: "Approved the plan",
+  accept: "Accepted the change",
+  continue: "Continue in this worktree",
+};
 
 const STATUS_AFTER: Record<string, RunRecord["status"]> = {
   accept: "publishing",
   revise_plan: "planning",
+  continue: "planning",
 };
 
 function resumeRun(args: Args): RunRecord | undefined {
@@ -85,6 +100,13 @@ function resumeRun(args: Args): RunRecord | undefined {
   if (["revise_plan", "request_changes"].includes(decision) && !args?.feedback)
     throw new Error("write what should change");
   const status = STATUS_AFTER[decision] ?? "running";
+  const feedback = String(args?.feedback ?? "");
+  pushOwnerMessage(
+    run.runId,
+    decision === "continue" && feedback ? feedback : (SAID[decision] ?? feedback),
+  );
+  if (decision === "continue")
+    return updateRun(run.runId, (current) => ({ ...current, status, mode: "agent" }));
   return updateRun(run.runId, (current) => ({ ...current, status }));
 }
 

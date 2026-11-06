@@ -75,7 +75,8 @@ describe("agent run status", () => {
     expect(aiBoardStatusForRun("verifying")).toBe("doing");
     expect(aiBoardStatusForRun("reviewing")).toBe("doing");
     expect(aiBoardStatusForRun("ready_for_review")).toBe("review");
-    expect(aiBoardStatusForRun("completed")).toBe("done");
+    // Accepted = PR open: it waits in Review; only the owner moves it to Done.
+    expect(aiBoardStatusForRun("completed")).toBe("review");
     expect(aiBoardStatusForRun("failed")).toBeNull();
     expect(aiBoardStatusForRun("cancelled")).toBeNull();
   });

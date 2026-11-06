@@ -768,6 +768,8 @@ pub struct StartRun {
     pub jira_url: Option<String>,
     /// Coding agent CLI for an agent run: `claude` (default) or `codex`.
     pub provider: String,
+    /// What the owner wrote when starting the run; shown as the first message of the conversation.
+    pub owner_message: Option<String>,
 }
 
 /// What the owner decided at a gate of an agent run.
@@ -777,6 +779,14 @@ pub enum Decision {
     /// From review, or to continue a failed/stopped run in the same session.
     RequestChanges(String),
     Accept,
+    /// More work on the task in the run's existing worktree: plan again (any run that is not
+    /// busy and still has its worktree, including a prepare-only one). `context` refreshes
+    /// the ticket snapshot; `provider` may switch the coding agent (a new session).
+    Continue {
+        request: String,
+        context: Option<String>,
+        provider: Option<String>,
+    },
 }
 
 struct Active {
@@ -883,7 +893,7 @@ impl RunManager {
             .ok_or("coding-agent runs are not available")?;
         let journal = Arc::new(Journal::open(dir.clone(), self.emit.clone())?);
         let record = journal.record();
-        if record.mode != "agent" {
+        if record.mode != "agent" && !matches!(decision, Decision::Continue { .. }) {
             return Err("this run only prepared a workspace".into());
         }
         let feedback = |text: &str| -> Result<String, String> {
@@ -910,21 +920,59 @@ impl RunManager {
             Plan(Option<String>),
             Implement(String),
             Publish,
+            More(String, Option<String>),
         }
-        let next = match decision {
-            Decision::Accept if status == RunStatus::ReadyForReview => Next::Publish,
-            Decision::ApprovePlan if status == RunStatus::AwaitingPlan => {
-                Next::Implement(claude::IMPLEMENT_PROMPT.into())
+        // `said` is what the owner told the agent, kept in the journal so the run reads as a
+        // conversation.
+        let (next, said) = match decision {
+            Decision::Accept if status == RunStatus::ReadyForReview => {
+                (Next::Publish, "Accepted the change".to_string())
             }
+            Decision::ApprovePlan if status == RunStatus::AwaitingPlan => (
+                Next::Implement(claude::IMPLEMENT_PROMPT.into()),
+                "Approved the plan".to_string(),
+            ),
             Decision::RevisePlan(text) if status == RunStatus::AwaitingPlan => {
-                Next::Plan(Some(feedback(&text)?))
+                let text = feedback(&text)?;
+                (Next::Plan(Some(text.clone())), text)
             }
             Decision::RequestChanges(text) if can_continue => {
-                Next::Implement(claude::changes_prompt(&feedback(&text)?))
+                let text = feedback(&text)?;
+                (Next::Implement(claude::changes_prompt(&text)), text)
+            }
+            Decision::Continue {
+                request,
+                context,
+                provider,
+            } if !status.is_busy() && record.worktree.is_some() && !record.worktree_removed => {
+                let request = request.trim().to_string();
+                if request.chars().count() > MAX_FEEDBACK_CHARS {
+                    return Err(format!("keep it under {MAX_FEEDBACK_CHARS} characters"));
+                }
+                if let Some(provider) = provider.filter(|p| *p != record.provider) {
+                    if !["claude", "codex"].contains(&provider.as_str()) {
+                        return Err(format!("unknown coding agent \"{provider}\""));
+                    }
+                    // Sessions do not carry over between coding agents.
+                    journal.update(|record| {
+                        record.provider = provider.clone();
+                        record.session_id = None;
+                    });
+                }
+                let said = if request.is_empty() {
+                    "Continue in this worktree".to_string()
+                } else {
+                    request.clone()
+                };
+                (Next::More(request, context), said)
             }
             _ => return Err(format!("that is not possible while the run is {status:?}")),
         };
         let control = self.claim(run_id)?;
+        journal.push(EventKind::Agent {
+            kind: "owner".into(),
+            text: said,
+        });
         journal.update(|record| {
             record.error = None;
             record.ended_at = None;
@@ -941,6 +989,19 @@ impl RunManager {
                 Next::Plan(feedback) => run.plan(feedback.as_deref()),
                 Next::Implement(prompt) => run.implement(prompt),
                 Next::Publish => run.publish(),
+                Next::More(request, context) => (|| {
+                    journal.update(|record| {
+                        record.mode = "agent".into();
+                        record.plan = None;
+                        record.review = None;
+                        record.checks.clear();
+                        record.verified_digest = None;
+                    });
+                    if let Some(context) = &context {
+                        run.write_context(context)?;
+                    }
+                    run.plan_more(&request)
+                })(),
             };
             finish(&journal, &control, &slot, result);
         });
@@ -1026,6 +1087,17 @@ impl RunManager {
             status: RunStatus::Preparing,
             message: None,
         });
+        if let Some(text) = request
+            .owner_message
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        {
+            journal.push(EventKind::Agent {
+                kind: "owner".into(),
+                text: text.chars().take(MAX_FEEDBACK_CHARS).collect(),
+            });
+        }
 
         let slot = self.active.clone();
         std::thread::spawn(move || {
@@ -1335,6 +1407,7 @@ mod tests {
                 agent,
                 jira_url: None,
                 provider: "claude".into(),
+                owner_message: None,
                 context: None,
             })
             .unwrap()
@@ -1457,6 +1530,7 @@ mod tests {
                 agent: None,
                 jira_url: None,
                 provider: "claude".into(),
+                owner_message: None,
                 context: None,
             })
             .unwrap_err();
@@ -1620,6 +1694,7 @@ mod tests {
                 agent: None,
                 jira_url: None,
                 provider: "claude".into(),
+                owner_message: None,
                 context: None,
             })
             .unwrap_err();

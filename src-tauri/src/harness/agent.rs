@@ -459,12 +459,31 @@ impl AgentRun<'_> {
 
     /// Read-only planning. Ends waiting for the owner with the submitted plan.
     pub fn plan(&self, feedback: Option<&str>) -> Result<RunStatus, String> {
-        self.journal.set_status(RunStatus::Planning, None);
         let issue_key = self.journal.record().issue_key;
-        let prompt = match feedback {
+        self.plan_with(match feedback {
             Some(feedback) => claude::revise_plan_prompt(feedback),
             None => claude::planning_prompt(&issue_key),
-        };
+        })
+    }
+
+    /// More work on the task in the same worktree: a new read-only plan for the owner to
+    /// approve, in the earlier session when there is one.
+    pub fn plan_more(&self, request: &str) -> Result<RunStatus, String> {
+        let record = self.journal.record();
+        self.plan_with(if record.session_id.is_some() {
+            claude::continue_prompt(&record.issue_key, request)
+        } else if request.is_empty() {
+            claude::planning_prompt(&record.issue_key)
+        } else {
+            format!(
+                "{}\n\nThe owner asks: {request}",
+                claude::planning_prompt(&record.issue_key)
+            )
+        })
+    }
+
+    fn plan_with(&self, prompt: String) -> Result<RunStatus, String> {
+        self.journal.set_status(RunStatus::Planning, None);
         let (outcome, tools) = self.invoke(Phase::Planning, &prompt)?;
         if let Some(status) = self.agent_outcome(outcome)? {
             return Ok(status);

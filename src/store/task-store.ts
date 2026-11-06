@@ -80,6 +80,7 @@ import {
   resumeRun,
   markPrReady,
   aiBoardStatusForRun,
+  isRunBusy,
   saveRepoBinding,
   startRun,
   stopRun,
@@ -136,6 +137,9 @@ export interface TaskStore {
   boardProjectId: string | null;
   boardTaskId: string | null;
   boardSearch: string;
+  /** What the owner is typing to the selected task's agent (the floating chat box). */
+  boardAgentDraft: string;
+  setBoardAgentDraft: (text: string) => void;
   boardCopyTaskId: string | null;
   boardSyncing: boolean;
   boardHiddenProjectIds: Set<string>;
@@ -147,7 +151,12 @@ export interface TaskStore {
   setBoardCopyTask: (taskId: string | null) => void;
   setBoardSyncing: (syncing: boolean) => void;
   pullBoard: () => Promise<void>;
-  moveBoardTask: (taskId: string, status: string) => Promise<void>;
+  /**
+   * Moves a task between AI columns. `byOwner` (a drag or the status menu, never a run event)
+   * moving it to Done also removes its worktrees; one with uncommitted work is kept and the
+   * promise rejects saying so, after the move.
+   */
+  moveBoardTask: (taskId: string, status: string, options?: { byOwner?: boolean }) => Promise<void>;
   summaryTaskId: string | null;
   summaryDrafts: Record<string, SummaryDraft>;
   openSummary: (taskId: string) => void;
@@ -183,7 +192,15 @@ export interface TaskStore {
    */
   startTaskRun: (
     taskId: string,
-    options?: { agent?: boolean; includeNote?: boolean; provider?: AgentProvider },
+    options?: {
+      agent?: boolean;
+      includeNote?: boolean;
+      provider?: AgentProvider;
+      /** The owner's own words for the agent, sent with the ticket. */
+      message?: string;
+      /** A new worktree even when the task's last run still has one. */
+      fresh?: boolean;
+    },
   ) => Promise<RunRecord>;
   /** The owner decision at a gate of an agent run (plan approval, review). */
   resumeTaskRun: (runId: string, decision: RunDecision, feedback?: string) => Promise<void>;
@@ -929,6 +946,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     boardProjectId: null,
     boardTaskId: null,
     boardSearch: "",
+    boardAgentDraft: "",
+    setBoardAgentDraft: (text) => set({ boardAgentDraft: text }),
     boardCopyTaskId: null,
     boardSyncing: false,
     boardHiddenProjectIds: loadHiddenProjectIds(BOARD_HIDDEN_PROJECTS_KEY),
@@ -941,8 +960,12 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       set({ boardHiddenProjectIds: hidden });
     },
     aiBoardStates: [],
-    setBoardProject: (projectId) => set({ boardProjectId: projectId, boardTaskId: null }),
-    setBoardTask: (taskId) => set({ boardTaskId: taskId }),
+    setBoardProject: (projectId) =>
+      set({ boardProjectId: projectId, boardTaskId: null, boardAgentDraft: "" }),
+    setBoardTask: (taskId) =>
+      set((state) =>
+        state.boardTaskId === taskId ? {} : { boardTaskId: taskId, boardAgentDraft: "" },
+      ),
     setBoardSearch: (query) => set({ boardSearch: query }),
     setBoardCopyTask: (taskId) => set({ boardCopyTaskId: taskId }),
     setBoardSyncing: (syncing) => set({ boardSyncing: syncing }),
@@ -950,8 +973,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       if (get().boardSyncing) return;
       await syncNow({ full: true });
     },
-    moveBoardTask: (taskId, status) =>
-      runLocked(async () => {
+    moveBoardTask: async (taskId, status, options = {}) => {
+      await runLocked(async () => {
         const task = getLatestTask(taskId);
         if (!task) throw new Error("This ticket is no longer available");
         if (!isAiBoardStatus(status)) throw new Error("Unknown AI workflow status");
@@ -970,7 +993,26 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         };
         await db.aiBoardStates.put(next);
         set((state) => ({ aiBoardStates: upsertById(state.aiBoardStates, [next]) }));
-      }),
+      });
+      if (status !== "done" || !options.byOwner) return;
+      const kept: string[] = [];
+      for (const run of get().runs) {
+        if (run.taskId !== taskId || !run.worktree || run.worktreeRemoved) continue;
+        if (isRunBusy(run.status)) {
+          kept.push(`${run.issueKey} (still running)`);
+          continue;
+        }
+        try {
+          await get().removeTaskRunWorktree(run.runId, false);
+        } catch {
+          kept.push(`${run.issueKey} (uncommitted changes)`);
+        }
+      }
+      if (kept.length)
+        throw new Error(
+          `Moved to Done, but kept the worktree of ${kept.join(", ")}. Remove it in Worktree log.`,
+        );
+    },
     harnessSetupOpen: false,
     harnessDoctor: null,
     harnessDoctorError: null,
@@ -1077,9 +1119,30 @@ export const useTaskStore = create<TaskStore>((set, get) => {
           candidate.jiraTaskId === task.parentKey &&
           getAccountIdFromTask(candidate) === getAccountIdFromTask(task),
       );
-      const context = options.agent
+      const message = options.agent ? options.message?.trim() || null : null;
+      const ticket = options.agent
         ? buildAiContext(task, { parent, includeNote: options.includeNote })
         : null;
+      // A task whose latest run still has its worktree carries on there, unless asked fresh.
+      const previous = get().runs.find((run) => run.taskId === task.id);
+      if (
+        ticket &&
+        !options.fresh &&
+        previous?.worktree &&
+        !previous.worktreeRemoved &&
+        !isRunBusy(previous.status)
+      ) {
+        const record = await resumeRun(previous.runId, "continue", message ?? "", {
+          context: ticket,
+          provider: options.provider,
+        });
+        set((state) => ({
+          runs: state.runs.map((run) => (run.runId === record.runId ? record : run)),
+        }));
+        return record;
+      }
+      const context =
+        ticket && message ? `${ticket}\n\n## Instructions from the owner\n\n${message}\n` : ticket;
       const record = await startRun(
         task.id,
         task.projectId,
@@ -1087,6 +1150,7 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         context,
         getSafeExternalUrl(task.refUrl),
         options.provider,
+        message,
       );
       set((state) => ({
         runs: [record, ...state.runs.filter((run) => run.runId !== record.runId)],

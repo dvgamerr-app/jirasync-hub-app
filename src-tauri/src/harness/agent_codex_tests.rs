@@ -205,6 +205,7 @@ fn codex_runs_the_same_gates_without_a_shell() {
             agent: None,
             jira_url: None,
             provider: "codex".into(),
+            owner_message: None,
         })
         .unwrap();
 
@@ -305,6 +306,7 @@ fn stopping_a_codex_turn_ends_the_run_as_cancelled() {
             agent: None,
             jira_url: None,
             provider: "codex".into(),
+            owner_message: None,
         })
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(60);

@@ -72,8 +72,12 @@ async function openTaskOnBoard(page: Page) {
   await openApp(page, jira, { waitFor: "PRJ-1" });
   await page.getByRole("link", { name: "AI Board", exact: true }).click();
   await page.getByRole("button", { name: "PRJ-1: Board work" }).click();
-  return page.getByRole("region", { name: "Agent run" });
+  return page.getByRole("complementary", { name: "Board details PRJ-1" });
 }
+
+const openTab = (page: Page, name: "conversation" | "ticket" | "worktree log") =>
+  page.getByRole("tab", { name }).click();
+const chatBox = (page: Page) => page.getByRole("region", { name: "Agent chat" });
 
 const push = (page: Page, event: RunEvent) =>
   page.evaluate((runEvent) => window.__e2ePushRunEvent!(runEvent), event);
@@ -84,8 +88,14 @@ const calls = async (page: Page, cmd: string) =>
 test("a project without a repository explains what to do and starts nothing", async ({ page }) => {
   await seed(page, { bindings: [] });
   const panel = await openTaskOnBoard(page);
+  // Nothing can run here yet, so the ticket leads and there is no chat box.
+  await expect(page.getByRole("tab", { name: "ticket" })).toHaveAttribute("aria-selected", "true");
+  await expect(chatBox(page)).toHaveCount(0);
+  await openTab(page, "conversation");
   await expect(panel).toContainText("This project has no repository yet");
-  await expect(panel.getByRole("button", { name: "Prepare workspace" })).toHaveCount(0);
+  await openTab(page, "worktree log");
+  await expect(panel.getByRole("button", { name: "Prepare workspace" })).toBeDisabled();
+  await openTab(page, "conversation");
   await panel.getByRole("button", { name: "Open Setup" }).click();
   await expect(page.getByRole("dialog", { name: "Agent setup" })).toBeVisible();
   expect(await calls(page, "harness_start_run")).toEqual([]);
@@ -94,6 +104,11 @@ test("a project without a repository explains what to do and starts nothing", as
 test("preparing a workspace streams the app's output live and ends ready", async ({ page }) => {
   await seed(page, { bindings: [binding] });
   const panel = await openTaskOnBoard(page);
+  await expect(page.getByRole("tab", { name: "conversation" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await openTab(page, "worktree log");
   await panel.getByRole("button", { name: "Prepare workspace" }).click();
   await expect(panel.getByRole("status", { name: "Run status" })).toHaveText("Creating worktree");
   const [start] = await calls(page, "harness_start_run");
@@ -104,6 +119,7 @@ test("preparing a workspace streams the app's output live and ends ready", async
     context: null,
     jiraUrl: expect.stringMatching(/\/browse\/PRJ-1$/),
     provider: "claude",
+    ownerMessage: null,
   });
 
   const runId = "run001abc";
@@ -122,7 +138,11 @@ test("preparing a workspace streams the app's output live and ends ready", async
   await expect(panel.getByRole("status", { name: "Run status" })).toHaveText(
     "Installing dependencies",
   );
-  await expect(panel.getByRole("button", { name: "Stop" })).toBeVisible();
+  // The chat box lives at the bottom of the Conversation tab only.
+  await expect(chatBox(page)).toHaveCount(0);
+  await openTab(page, "conversation");
+  await expect(chatBox(page).getByRole("button", { name: "Stop" })).toBeVisible();
+  await openTab(page, "worktree log");
 
   await page.evaluate((info) => {
     const harness = window.__e2e!.harness!;
@@ -139,8 +159,15 @@ test("preparing a workspace streams the app's output live and ends ready", async
   await expect(log.getByText("installed 3 packages")).toHaveCount(1);
   await expect(log).toContainText("warn: peer dependency");
   await expect(panel).toContainText("ai/PRJ-1-run001abc · C:\\wt\\run001abc");
-  await expect(panel.getByRole("button", { name: "Stop" })).toHaveCount(0);
   await expect(panel.getByRole("button", { name: "Prepare again" })).toBeEnabled();
+
+  // The conversation folds the same command into one card; its output opens on demand.
+  await openTab(page, "conversation");
+  const card = panel.getByRole("group", { name: "Command install" });
+  await expect(card).toContainText("bun install --frozen-lockfile");
+  await expect(card.getByText("installed 3 packages")).toBeHidden();
+  await card.locator("summary").click();
+  await expect(card.getByText("installed 3 packages")).toBeVisible();
 });
 
 test("Stop asks the native core to stop the run and the panel shows it stopped", async ({
@@ -151,9 +178,11 @@ test("Stop asks the native core to stop the run and the panel shows it stopped",
   await expect(panel.getByRole("status", { name: "Run status" })).toHaveText(
     "Installing dependencies",
   );
-  await expect(panel.getByRole("button", { name: "Prepare again" })).toHaveCount(0);
-
-  await panel.getByRole("button", { name: "Stop" }).click();
+  await expect(panel.getByLabel("Agent activity")).toHaveText("Installing dependencies");
+  await openTab(page, "worktree log");
+  await expect(panel.getByRole("button", { name: /Prepare/ })).toHaveCount(0);
+  await openTab(page, "conversation");
+  await chatBox(page).getByRole("button", { name: "Stop" }).click();
   await expect.poll(() => calls(page, "harness_stop_run")).toHaveLength(1);
   expect((await calls(page, "harness_stop_run"))[0].args).toEqual({ runId: "seed01abc" });
   await push(page, {
@@ -165,6 +194,8 @@ test("Stop asks the native core to stop the run and the panel shows it stopped",
     message: null,
   });
   await expect(panel.getByRole("status", { name: "Run status" })).toHaveText("Stopped");
+  await expect(panel.getByLabel("Agent activity")).toHaveCount(0);
+  await openTab(page, "worktree log");
   await expect(panel.getByRole("button", { name: "Prepare again" })).toBeEnabled();
 });
 
@@ -174,6 +205,9 @@ test("only one run at a time: another active task blocks Prepare and says which"
   const other = record({ runId: "other1abc", taskId: "task-acc1-PRJ-2", issueKey: "PRJ-2" });
   await seed(page, { bindings: [binding], runs: [other] });
   const panel = await openTaskOnBoard(page);
+  await expect(chatBox(page).getByRole("button", { name: "Plan with Claude" })).toBeDisabled();
+  await expect(chatBox(page)).toContainText("Another run (PRJ-2) is active");
+  await openTab(page, "worktree log");
   const prepare = panel.getByRole("button", { name: "Prepare workspace" });
   await expect(prepare).toBeDisabled();
   await expect(panel).toContainText("Another run (PRJ-2) is active");
@@ -188,6 +222,7 @@ test("missed events are replayed from the journal once, in order", async ({ page
     journal: { [runId]: [output(runId, 1, "line 1"), output(runId, 2, "line 2")] },
   });
   const panel = await openTaskOnBoard(page);
+  await openTab(page, "worktree log");
   const log = panel.getByLabel("Run log");
   await expect(log).toHaveText(/line 1\s*line 2/);
 
@@ -216,7 +251,8 @@ test("a run interrupted by an app restart shows why and can be prepared again", 
   await expect(panel.getByRole("status", { name: "Run status" })).toHaveText(
     "Interrupted · the app closed while this run was active",
   );
-  await expect(panel.getByRole("button", { name: "Stop" })).toHaveCount(0);
+  await expect(chatBox(page).getByRole("button", { name: "Stop" })).toHaveCount(0);
+  await openTab(page, "worktree log");
   await expect(panel.getByRole("button", { name: "Prepare again" })).toBeEnabled();
 });
 
@@ -227,6 +263,7 @@ test("removing a worktree with uncommitted work needs an explicit discard", asyn
     dirtyWorktrees: ["seed01abc"],
   });
   const panel = await openTaskOnBoard(page);
+  await openTab(page, "worktree log");
   await expect(panel).toContainText(worktree.path);
 
   await panel.getByRole("button", { name: "Remove worktree" }).click();

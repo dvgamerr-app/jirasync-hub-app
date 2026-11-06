@@ -531,3 +531,432 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* ── Agent run: detail tabs, conversation, floating chat box ─────────────────────────────── */
+.board-content {
+  position: relative;
+}
+.board-detail-tabs {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--board-border);
+}
+.board-detail-tabs button {
+  margin-bottom: -1px;
+  padding: 8px 10px;
+  border-bottom: 2px solid transparent;
+  color: var(--board-muted);
+  font-size: 12px;
+  text-transform: capitalize;
+}
+.board-detail-tabs button.is-active {
+  border-color: hsl(var(--primary));
+  color: var(--board-text);
+  font-weight: 600;
+}
+.agent-conversation {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 12px;
+}
+.agent-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 32px 12px;
+  color: var(--board-muted);
+  text-align: center;
+}
+.agent-steps {
+  border: 1px solid var(--board-border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: hsl(var(--muted) / 0.3);
+}
+.agent-steps summary,
+.agent-fold summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+.agent-steps summary::-webkit-details-marker,
+.agent-fold summary::-webkit-details-marker {
+  display: none;
+}
+.agent-chevron {
+  flex-shrink: 0;
+  transition: transform 150ms ease;
+}
+.agent-steps[open] .agent-chevron {
+  transform: rotate(90deg);
+}
+.agent-steps ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 8px;
+  padding-left: 18px;
+}
+.agent-steps li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--board-muted);
+}
+.agent-steps li[data-state="active"],
+.agent-steps li[data-state="waiting"],
+.agent-steps li[data-state="failed"] {
+  color: var(--board-text);
+  font-weight: 600;
+}
+.agent-bubble {
+  align-self: flex-start;
+  max-width: 88%;
+  padding: 8px 12px;
+  border-radius: 12px 12px 12px 4px;
+  background: hsl(var(--muted) / 0.6);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  animation: agent-rise 180ms ease-out;
+}
+.agent-bubble.is-owner {
+  align-self: flex-end;
+  border-radius: 12px 12px 4px 12px;
+  background: hsl(var(--primary) / 0.14);
+}
+.agent-fold {
+  align-self: stretch;
+  padding: 6px 10px;
+  border: 1px solid var(--board-border);
+  border-radius: 8px;
+  color: var(--board-muted);
+  font-size: 11px;
+}
+.agent-fold summary > span:not(.ml-auto) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-fold[open] summary {
+  margin-bottom: 6px;
+}
+.agent-fold ul {
+  padding-left: 18px;
+  list-style: disc;
+  font-family: ui-monospace, monospace;
+}
+.agent-notice {
+  align-self: center;
+  color: var(--board-muted);
+  font-size: 11px;
+}
+.agent-notice.is-error {
+  align-self: stretch;
+  color: hsl(var(--destructive));
+}
+.agent-card {
+  padding: 12px;
+  border: 1px solid var(--board-border);
+  border-radius: 10px;
+  background: var(--board-panel);
+}
+.agent-card h4 {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.agent-plan {
+  max-height: 360px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-log {
+  max-height: 60vh;
+}
+.agent-live {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.agent-activity {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* What the agent is doing: a light sweeping over the text. */
+.agent-shimmer {
+  background: linear-gradient(
+      90deg,
+      var(--board-muted) 0%,
+      var(--board-muted) 40%,
+      var(--board-text) 50%,
+      var(--board-muted) 60%,
+      var(--board-muted) 100%
+    )
+    0 0 / 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: agent-shimmer 1.8s linear infinite;
+}
+.agent-typing {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 3px;
+}
+.agent-typing span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--board-muted);
+  animation: agent-typing 1.2s ease-in-out infinite;
+}
+.agent-typing span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.agent-typing span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+.agent-composer {
+  flex-shrink: 0;
+  margin: 0 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--board-border);
+  border-radius: 16px;
+  background: var(--board-panel);
+  box-shadow: 0 6px 24px hsl(var(--foreground) / 0.1);
+}
+.agent-composer:focus-within {
+  border-color: hsl(var(--ring) / 0.6);
+}
+.agent-composer textarea {
+  width: 100%;
+  min-height: 40px;
+  max-height: 160px;
+  resize: none;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
+  line-height: 1.5;
+  outline: none;
+}
+.agent-composer textarea:focus-visible {
+  outline: none;
+}
+.agent-composer-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.agent-composer-key {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: hsl(var(--muted));
+  color: var(--board-muted);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+@keyframes agent-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -150% 0;
+  }
+}
+@keyframes agent-typing {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+@keyframes agent-rise {
+  from {
+    transform: translateY(4px);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-shimmer,
+  .agent-typing span,
+  .agent-bubble {
+    animation: none;
+  }
+  .agent-shimmer {
+    color: var(--board-muted);
+  }
+}
+
+/* ── Agent sessions: what the AI is doing ─────────────────────────────────────────────────── */
+.agent-turn {
+  --turn-accent: hsl(var(--primary));
+  align-self: stretch;
+  animation: agent-rise 180ms ease-out;
+}
+.agent-turn[data-failed] {
+  --turn-accent: hsl(var(--destructive));
+}
+.agent-turn > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.agent-turn-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-turn-time {
+  margin-left: auto;
+  color: var(--board-muted);
+  font-size: 11px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+/* The orb: a quiet mark when done, a turning gradient ring while the agent works. */
+.agent-orb {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: hsl(var(--primary) / 0.12);
+  color: var(--turn-accent);
+}
+.agent-turn[data-active] .agent-orb::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    hsl(var(--primary)) 120deg,
+    transparent 240deg
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 0);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 0);
+  animation: agent-spin 1.4s linear infinite;
+}
+.agent-turn[data-active] .agent-orb svg {
+  animation: agent-breathe 2s ease-in-out infinite;
+}
+.agent-turn-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-left: 10px;
+  padding-left: 18px;
+  border-left: 1px solid var(--board-border);
+}
+.agent-turn[data-active] .agent-turn-body {
+  border-image: linear-gradient(to bottom, var(--turn-accent), var(--board-border) 70%) 1;
+}
+.agent-turn-body .agent-bubble {
+  max-width: 100%;
+}
+.agent-tools {
+  color: var(--board-muted);
+  font-size: 11px;
+}
+.agent-tools summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+.agent-tools summary::-webkit-details-marker {
+  display: none;
+}
+.agent-tools[open] .agent-chevron {
+  transform: rotate(90deg);
+}
+.agent-tools ul {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 6px 0 0 4px;
+}
+.agent-tools li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  animation: agent-rise 200ms ease-out;
+}
+.agent-tools li[data-latest] {
+  color: var(--board-text);
+}
+.agent-tool-verb {
+  flex-shrink: 0;
+}
+.agent-tool-detail {
+  min-width: 0;
+  overflow: hidden;
+  font-family: ui-monospace, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+.agent-clamp {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+.agent-more {
+  margin-top: 4px;
+  color: hsl(var(--primary));
+  font-size: 11px;
+}
+@keyframes agent-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes agent-breathe {
+  50% {
+    transform: scale(0.82);
+    opacity: 0.7;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-turn,
+  .agent-tools li,
+  .agent-turn[data-active] .agent-orb::before,
+  .agent-turn[data-active] .agent-orb svg {
+    animation: none;
+  }
+}

@@ -141,6 +141,7 @@ pub async fn harness_start_run(
     context: Option<String>,
     jira_url: Option<String>,
     provider: Option<String>,
+    owner_message: Option<String>,
 ) -> Result<RunRecord, String> {
     let provider = provider.unwrap_or_else(|| "claude".into());
     if !["claude", "codex"].contains(&provider.as_str()) {
@@ -161,6 +162,7 @@ pub async fn harness_start_run(
             jira_url,
             provider,
             context,
+            owner_message,
         })
     })
     .await
@@ -193,6 +195,8 @@ pub async fn harness_resume_run(
     run_id: String,
     decision: String,
     feedback: Option<String>,
+    context: Option<String>,
+    provider: Option<String>,
 ) -> Result<RunRecord, String> {
     let manager = runs.inner().clone();
     let feedback = feedback.unwrap_or_default();
@@ -201,6 +205,11 @@ pub async fn harness_resume_run(
         "revise_plan" => run::Decision::RevisePlan(feedback),
         "request_changes" => run::Decision::RequestChanges(feedback),
         "accept" => run::Decision::Accept,
+        "continue" => run::Decision::Continue {
+            request: feedback,
+            context,
+            provider,
+        },
         other => return Err(format!("unknown decision {other}")),
     };
     blocking(move || manager.resume(&run_id, decision)).await

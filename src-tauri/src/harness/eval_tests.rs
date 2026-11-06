@@ -173,6 +173,7 @@ fn harness_eval_set() {
                 agent: None,
                 jira_url: None,
                 provider: "claude".into(),
+                owner_message: None,
             })
             .unwrap();
         let planned = settle(&manager, &run.run_id);

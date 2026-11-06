@@ -147,7 +147,8 @@ export function isRunBusy(status: RunStatus): boolean {
   return !TERMINAL_RUN_STATUSES.has(status) && !WAITING_RUN_STATUSES.has(status);
 }
 
-export type RunDecision = "approve_plan" | "revise_plan" | "request_changes" | "accept";
+export type RunDecision =
+  "approve_plan" | "revise_plan" | "request_changes" | "accept" | "continue";
 
 export interface CheckResult {
   name: string;
@@ -215,7 +216,18 @@ export type RunEventKind =
   | { type: "permission"; tool: string; decision: "allow" | "deny" }
   | {
       type: "agent";
-      kind: "init" | "text" | "tool" | "plan" | "review" | "pr_draft" | "result";
+      kind:
+        | "init"
+        | "text"
+        | "tool"
+        | "plan"
+        | "review"
+        | "pr_draft"
+        | "result"
+        | "owner"
+        | "external_report"
+        | "notice"
+        | "command_set";
       text: string;
     };
 
@@ -235,6 +247,7 @@ export const startRun = (
   context: string | null,
   jiraUrl: string | null = null,
   provider: AgentProvider = "claude",
+  ownerMessage: string | null = null,
 ) =>
   invoke<RunRecord>("harness_start_run", {
     taskId,
@@ -243,9 +256,22 @@ export const startRun = (
     context,
     jiraUrl,
     provider,
+    ownerMessage,
   });
-export const resumeRun = (runId: string, decision: RunDecision, feedback?: string) =>
-  invoke<RunRecord>("harness_resume_run", { runId, decision, feedback: feedback ?? null });
+/** `continue` takes the refreshed ticket snapshot (`context`) and may switch `provider`. */
+export const resumeRun = (
+  runId: string,
+  decision: RunDecision,
+  feedback?: string,
+  more: { context?: string; provider?: AgentProvider } = {},
+) =>
+  invoke<RunRecord>("harness_resume_run", {
+    runId,
+    decision,
+    feedback: feedback ?? null,
+    context: more.context ?? null,
+    provider: more.provider ?? null,
+  });
 export const stopRun = (runId: string) => invoke<void>("harness_stop_run", { runId });
 export const listRuns = () => invoke<RunRecord[]>("harness_list_runs");
 export const getRunEvents = (runId: string, afterSeq: number) =>
@@ -338,7 +364,9 @@ export const RUN_EVENT_PAGE = 2000;
  */
 export function aiBoardStatusForRun(status: RunStatus): "doing" | "review" | "done" | null {
   if (status === "ready_for_review" || status === "publishing") return "review";
-  if (status === "completed") return "done";
+  // An accepted run waits in Review with its PR; the owner moves it to Done (which removes
+  // its worktree), so the same worktree can still take more work after the PR.
+  if (status === "completed") return "review";
   if (
     [
       "preparing",
