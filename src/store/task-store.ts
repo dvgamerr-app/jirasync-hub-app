@@ -11,7 +11,29 @@ import {
 } from "@/types/jira";
 import { isSyncLockHeld, runExclusiveSync } from "@/lib/sync-lock";
 import { syncNow, type SyncResult } from "@/lib/sync-service";
-import { getDescriptionSearchText } from "@/lib/adf-content";
+import { getDescriptionSearchText, getSafeExternalUrl } from "@/lib/adf-content";
+import { buildAiContext } from "@/lib/ai-context";
+import {
+  boardAccessExpiry,
+  disableBoardAccess,
+  enableBoardAccess,
+  listBoardRequests,
+  publishBoardTasks,
+  readyBoardTasks,
+  resolveBoardRequest,
+  type BoardAccess,
+  type BoardRunRequest,
+} from "@/lib/board-access";
+import {
+  buildSnapshot,
+  parseSnapshot,
+  planImport,
+  pullSnapshotFolder,
+  pushSnapshotFolder,
+  type ImportReport,
+  type Snapshot,
+  type SnapshotPushResult,
+} from "@/lib/snapshot";
 import { db, getJiraAccounts, getStoryPointFieldMap, type JiraAccount } from "@/lib/jira-db";
 import {
   getAccountIdFromTask,
@@ -43,8 +65,32 @@ import {
   isJiraDone,
   isAiBoardCompletedByJira,
   isAiBoardStatus,
+  getAiBoardStatus,
   type AiBoardTaskState,
 } from "@/lib/ai-board";
+import {
+  deleteRepoBinding,
+  getRunEvents,
+  harnessDoctor,
+  listRepoBindings,
+  listRuns,
+  mergeRunEvents,
+  RUN_EVENT_PAGE,
+  removeRunWorktree,
+  resumeRun,
+  markPrReady,
+  aiBoardStatusForRun,
+  isRunBusy,
+  saveRepoBinding,
+  startRun,
+  stopRun,
+  type DoctorReport,
+  type RepoBinding,
+  type RunEvent,
+  type RunRecord,
+  type RunDecision,
+  type AgentProvider,
+} from "@/lib/harness";
 
 function getVisibleWorkLogsForTask(workLogs: WorkLog[], taskId: string): WorkLog[] {
   return workLogs.filter((wl) => wl.taskId === taskId && isVisibleWorkLog(wl));
@@ -91,6 +137,9 @@ export interface TaskStore {
   boardProjectId: string | null;
   boardTaskId: string | null;
   boardSearch: string;
+  /** What the owner is typing to the selected task's agent (the floating chat box). */
+  boardAgentDraft: string;
+  setBoardAgentDraft: (text: string) => void;
   boardCopyTaskId: string | null;
   boardSyncing: boolean;
   boardHiddenProjectIds: Set<string>;
@@ -102,7 +151,12 @@ export interface TaskStore {
   setBoardCopyTask: (taskId: string | null) => void;
   setBoardSyncing: (syncing: boolean) => void;
   pullBoard: () => Promise<void>;
-  moveBoardTask: (taskId: string, status: string) => Promise<void>;
+  /**
+   * Moves a task between AI columns. `byOwner` (a drag or the status menu, never a run event)
+   * moving it to Done also removes its worktrees; one with uncommitted work is kept and the
+   * promise rejects saying so, after the move.
+   */
+  moveBoardTask: (taskId: string, status: string, options?: { byOwner?: boolean }) => Promise<void>;
   summaryTaskId: string | null;
   summaryDrafts: Record<string, SummaryDraft>;
   openSummary: (taskId: string) => void;
@@ -110,6 +164,71 @@ export interface TaskStore {
   updateSummaryDraft: (taskId: string, updates: Partial<SummaryInput>) => void;
   resetSummaryOperation: (taskId: string, operation: SummaryOperation) => void;
   submitSummaryOperation: (taskId: string, operation: SummaryOperation) => Promise<void>;
+
+  /** Agent harness (native core): tool readiness and per-project repo bindings. */
+  harnessSetupOpen: boolean;
+  harnessDoctor: DoctorReport | null;
+  harnessDoctorError: string | null;
+  harnessDoctorRunning: boolean;
+  repoBindings: RepoBinding[];
+  setHarnessSetupOpen: (open: boolean) => void;
+  runHarnessDoctor: () => Promise<DoctorReport | null>;
+  /** First AI Board visit only: check tools and open Setup when a required one is not ready. */
+  openHarnessSetupOnFirstVisit: () => Promise<void>;
+  loadRepoBindings: () => Promise<void>;
+  saveRepoBinding: (binding: RepoBinding) => Promise<RepoBinding>;
+  removeRepoBinding: (projectId: string) => Promise<void>;
+  /** Runs (newest first) and their journal events, as far as this window has loaded them. */
+  runs: RunRecord[];
+  runEvents: Record<string, RunEvent[]>;
+  loadRuns: () => Promise<void>;
+  /** Replays journal events after the last one this window has (fills gaps, no duplicates). */
+  loadRunEvents: (runId: string) => Promise<void>;
+  applyRunEvent: (event: RunEvent) => void;
+  /**
+   * Starts a run for the task in the repo bound to its project (one busy run at a time).
+   * `agent` sends the task snapshot to the coding agent (`provider`, Claude by default), which
+   * plans first and waits for approval.
+   */
+  startTaskRun: (
+    taskId: string,
+    options?: {
+      agent?: boolean;
+      includeNote?: boolean;
+      provider?: AgentProvider;
+      /** The owner's own words for the agent, sent with the ticket. */
+      message?: string;
+      /** A new worktree even when the task's last run still has one. */
+      fresh?: boolean;
+    },
+  ) => Promise<RunRecord>;
+  /** The owner decision at a gate of an agent run (plan approval, review). */
+  resumeTaskRun: (runId: string, decision: RunDecision, feedback?: string) => Promise<void>;
+  /** Draft PR → ready for review (refused natively unless CI passed). */
+  markTaskPrReady: (runId: string) => Promise<void>;
+  stopTaskRun: (runId: string) => Promise<void>;
+  removeTaskRunWorktree: (runId: string, discardChanges: boolean) => Promise<void>;
+  /** AI progress (and notes if asked) as a portable snapshot; never credentials. */
+  exportSnapshot: (includeNotes: boolean) => Snapshot;
+  /** Merges a snapshot: newer AI states win, a different local note is never overwritten. */
+  importSnapshot: (snapshot: Snapshot) => Promise<ImportReport>;
+  /** Pull → merge → write → commit → push through a git folder (refused while a run works). */
+  syncSnapshotFolder: (
+    folder: string,
+    includeNotes: boolean,
+  ) => Promise<SnapshotPushResult & { report: ImportReport | null }>;
+  /** External MCP clients' view of the board; `null` while the owner has it off. */
+  boardAccess: BoardAccess | null;
+  /** Run requests from external clients (pending ones wait for the owner). */
+  boardRequests: BoardRunRequest[];
+  loadBoardAccess: () => Promise<void>;
+  enableBoard: (hours: number) => Promise<void>;
+  disableBoard: () => Promise<void>;
+  /** Sends the ready tasks to the native board (no-op while access is off). */
+  publishBoard: () => Promise<void>;
+  applyBoardRequest: (request: BoardRunRequest) => void;
+  /** Approve starts the run (through `startTaskRun`); decline only answers the client. */
+  resolveBoardRequest: (requestId: string, approve: boolean) => Promise<void>;
 
   setSelectedProject: (projectId: string | null) => void;
   setSelectedTask: (taskId: string | null) => void;
@@ -733,6 +852,7 @@ async function discardDirtyTask(task: Task, accounts: JiraAccount[]): Promise<Ta
 
 const HIDDEN_PROJECTS_KEY = "jirasync-hidden-projects";
 const BOARD_HIDDEN_PROJECTS_KEY = "jirasync-ai-hidden-projects";
+const HARNESS_SETUP_SEEN_KEY = "jirasync-harness-setup-seen";
 
 function loadHiddenProjectIds(key = HIDDEN_PROJECTS_KEY): Set<string> {
   try {
@@ -826,6 +946,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
     boardProjectId: null,
     boardTaskId: null,
     boardSearch: "",
+    boardAgentDraft: "",
+    setBoardAgentDraft: (text) => set({ boardAgentDraft: text }),
     boardCopyTaskId: null,
     boardSyncing: false,
     boardHiddenProjectIds: loadHiddenProjectIds(BOARD_HIDDEN_PROJECTS_KEY),
@@ -838,8 +960,12 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       set({ boardHiddenProjectIds: hidden });
     },
     aiBoardStates: [],
-    setBoardProject: (projectId) => set({ boardProjectId: projectId, boardTaskId: null }),
-    setBoardTask: (taskId) => set({ boardTaskId: taskId }),
+    setBoardProject: (projectId) =>
+      set({ boardProjectId: projectId, boardTaskId: null, boardAgentDraft: "" }),
+    setBoardTask: (taskId) =>
+      set((state) =>
+        state.boardTaskId === taskId ? {} : { boardTaskId: taskId, boardAgentDraft: "" },
+      ),
     setBoardSearch: (query) => set({ boardSearch: query }),
     setBoardCopyTask: (taskId) => set({ boardCopyTaskId: taskId }),
     setBoardSyncing: (syncing) => set({ boardSyncing: syncing }),
@@ -847,8 +973,8 @@ export const useTaskStore = create<TaskStore>((set, get) => {
       if (get().boardSyncing) return;
       await syncNow({ full: true });
     },
-    moveBoardTask: (taskId, status) =>
-      runLocked(async () => {
+    moveBoardTask: async (taskId, status, options = {}) => {
+      await runLocked(async () => {
         const task = getLatestTask(taskId);
         if (!task) throw new Error("This ticket is no longer available");
         if (!isAiBoardStatus(status)) throw new Error("Unknown AI workflow status");
@@ -867,7 +993,259 @@ export const useTaskStore = create<TaskStore>((set, get) => {
         };
         await db.aiBoardStates.put(next);
         set((state) => ({ aiBoardStates: upsertById(state.aiBoardStates, [next]) }));
+      });
+      if (status !== "done" || !options.byOwner) return;
+      const kept: string[] = [];
+      for (const run of get().runs) {
+        if (run.taskId !== taskId || !run.worktree || run.worktreeRemoved) continue;
+        if (isRunBusy(run.status)) {
+          kept.push(`${run.issueKey} (still running)`);
+          continue;
+        }
+        try {
+          await get().removeTaskRunWorktree(run.runId, false);
+        } catch {
+          kept.push(`${run.issueKey} (uncommitted changes)`);
+        }
+      }
+      if (kept.length)
+        throw new Error(
+          `Moved to Done, but kept the worktree of ${kept.join(", ")}. Remove it in Worktree log.`,
+        );
+    },
+    harnessSetupOpen: false,
+    harnessDoctor: null,
+    harnessDoctorError: null,
+    harnessDoctorRunning: false,
+    repoBindings: [],
+    setHarnessSetupOpen: (open) => set({ harnessSetupOpen: open }),
+    runHarnessDoctor: async () => {
+      set({ harnessDoctorRunning: true, harnessDoctorError: null });
+      try {
+        const report = await harnessDoctor();
+        set({ harnessDoctor: report, harnessDoctorRunning: false });
+        return report;
+      } catch (error) {
+        set({ harnessDoctorError: getErrorMessage(error), harnessDoctorRunning: false });
+        return null;
+      }
+    },
+    openHarnessSetupOnFirstVisit: async () => {
+      try {
+        if (localStorage.getItem(HARNESS_SETUP_SEEN_KEY)) return;
+        localStorage.setItem(HARNESS_SETUP_SEEN_KEY, "1");
+      } catch {
+        return;
+      }
+      const report = await get().runHarnessDoctor();
+      if (report && !report.ready) set({ harnessSetupOpen: true });
+    },
+    loadRepoBindings: async () => {
+      set({ repoBindings: await listRepoBindings() });
+    },
+    saveRepoBinding: async (binding) => {
+      const saved = await saveRepoBinding(binding);
+      set((state) => ({
+        repoBindings: [
+          ...state.repoBindings.filter((existing) => existing.projectId !== saved.projectId),
+          saved,
+        ],
+      }));
+      return saved;
+    },
+    removeRepoBinding: async (projectId) => {
+      await deleteRepoBinding(projectId);
+      set((state) => ({
+        repoBindings: state.repoBindings.filter((existing) => existing.projectId !== projectId),
+      }));
+    },
+    runs: [],
+    runEvents: {},
+    loadRuns: async () => {
+      set({ runs: await listRuns() });
+    },
+    loadRunEvents: async (runId) => {
+      // The journal answers in pages; keep reading so the newest events are never skipped.
+      for (;;) {
+        const after = get().runEvents[runId]?.at(-1)?.seq ?? 0;
+        const events = await getRunEvents(runId, after);
+        if (events.length === 0) return;
+        set((state) => ({
+          runEvents: {
+            ...state.runEvents,
+            [runId]: mergeRunEvents(state.runEvents[runId] ?? [], events),
+          },
+        }));
+        if (events.length < RUN_EVENT_PAGE) return;
+      }
+    },
+    applyRunEvent: (event) => {
+      const current = get().runEvents[event.runId] ?? [];
+      const last = current.at(-1)?.seq ?? 0;
+      if (event.seq <= last) return;
+      if (event.seq > last + 1) {
+        // Missed events (e.g. the window reloaded mid-run): replay them from the journal.
+        void get()
+          .loadRunEvents(event.runId)
+          .catch(() => {});
+        return;
+      }
+      set((state) => ({
+        runEvents: { ...state.runEvents, [event.runId]: mergeRunEvents(current, [event]) },
+      }));
+      // Status changes also update the record (worktree path, plan, checks, error).
+      if (event.type !== "status") return;
+      const status = event.status;
+      void get()
+        .loadRuns()
+        .then(() => {
+          // Agent progress shows on the AI Board; the board never changes Jira.
+          const run = get().runs.find((candidate) => candidate.runId === event.runId);
+          const target = aiBoardStatusForRun(status);
+          const task = run ? getLatestTask(run.taskId) : undefined;
+          if (!run || run.mode !== "agent" || !target || !task) return;
+          const state = get().aiBoardStates.find((candidate) => candidate.id === task.id);
+          if (isAiBoardCompletedByJira(task, state) || getAiBoardStatus(task, state) === target)
+            return;
+          return get().moveBoardTask(task.id, target);
+        })
+        .catch(() => {});
+    },
+    startTaskRun: async (taskId, options = {}) => {
+      const task = getLatestTask(taskId);
+      if (!task) throw new Error("This ticket is no longer available");
+      const parent = get().tasks.find(
+        (candidate) =>
+          candidate.jiraTaskId === task.parentKey &&
+          getAccountIdFromTask(candidate) === getAccountIdFromTask(task),
+      );
+      const message = options.agent ? options.message?.trim() || null : null;
+      const ticket = options.agent
+        ? buildAiContext(task, { parent, includeNote: options.includeNote })
+        : null;
+      // A task whose latest run still has its worktree carries on there, unless asked fresh.
+      const previous = get().runs.find((run) => run.taskId === task.id);
+      if (
+        ticket &&
+        !options.fresh &&
+        previous?.worktree &&
+        !previous.worktreeRemoved &&
+        !isRunBusy(previous.status)
+      ) {
+        const record = await resumeRun(previous.runId, "continue", message ?? "", {
+          context: ticket,
+          provider: options.provider,
+        });
+        set((state) => ({
+          runs: state.runs.map((run) => (run.runId === record.runId ? record : run)),
+        }));
+        return record;
+      }
+      const context =
+        ticket && message ? `${ticket}\n\n## Instructions from the owner\n\n${message}\n` : ticket;
+      const record = await startRun(
+        task.id,
+        task.projectId,
+        task.jiraTaskId,
+        context,
+        getSafeExternalUrl(task.refUrl),
+        options.provider,
+        message,
+      );
+      set((state) => ({
+        runs: [record, ...state.runs.filter((run) => run.runId !== record.runId)],
+      }));
+      return record;
+    },
+    markTaskPrReady: async (runId) => {
+      const record = await markPrReady(runId);
+      set((state) => ({
+        runs: state.runs.map((run) => (run.runId === record.runId ? record : run)),
+      }));
+    },
+    resumeTaskRun: async (runId, decision, feedback) => {
+      const record = await resumeRun(runId, decision, feedback);
+      set((state) => ({
+        runs: state.runs.map((run) => (run.runId === record.runId ? record : run)),
+      }));
+    },
+    stopTaskRun: async (runId) => {
+      await stopRun(runId);
+    },
+    removeTaskRunWorktree: async (runId, discardChanges) => {
+      const record = await removeRunWorktree(runId, discardChanges);
+      set((state) => ({
+        runs: state.runs.map((run) => (run.runId === record.runId ? record : run)),
+      }));
+    },
+    exportSnapshot: (includeNotes) => {
+      const state = get();
+      return buildSnapshot(getJiraAccounts(), state.aiBoardStates, state.tasks, {
+        includeNotes,
+      });
+    },
+    importSnapshot: (snapshot) =>
+      runLocked(async () => {
+        const state = get();
+        const plan = planImport(snapshot, {
+          accounts: getJiraAccounts(),
+          aiStates: state.aiBoardStates,
+          tasks: state.tasks,
+        });
+        if (plan.aiStates.length > 0) {
+          await db.aiBoardStates.bulkPut(plan.aiStates);
+          set((current) => ({
+            aiBoardStates: upsertById(current.aiBoardStates, plan.aiStates),
+          }));
+        }
+        for (const { taskId, note } of plan.notes) get().updateTaskNote(taskId, note);
+        return plan.report;
       }),
+    syncSnapshotFolder: async (folder, includeNotes) => {
+      const remote = await pullSnapshotFolder(folder);
+      const report = remote ? await get().importSnapshot(parseSnapshot(remote)) : null;
+      const content = JSON.stringify(get().exportSnapshot(includeNotes), null, 2);
+      const result = await pushSnapshotFolder(folder, content);
+      return { report, ...result };
+    },
+    boardAccess: null,
+    boardRequests: [],
+    loadBoardAccess: async () => {
+      const expiresAt = await boardAccessExpiry();
+      set({ boardAccess: expiresAt ? { expiresAt } : null });
+      if (expiresAt) set({ boardRequests: await listBoardRequests() });
+    },
+    enableBoard: async (hours) => {
+      const access = await enableBoardAccess(hours);
+      set({ boardAccess: access, boardRequests: [] });
+      await get().publishBoard();
+    },
+    disableBoard: async () => {
+      await disableBoardAccess();
+      set({ boardAccess: null, boardRequests: [] });
+    },
+    publishBoard: async () => {
+      const state = get();
+      if (!state.boardAccess) return;
+      await publishBoardTasks(
+        readyBoardTasks(state.tasks, state.aiBoardStates, state.repoBindings),
+      );
+    },
+    applyBoardRequest: (request) =>
+      set((state) => ({
+        boardRequests: [
+          ...state.boardRequests.filter((existing) => existing.requestId !== request.requestId),
+          request,
+        ],
+      })),
+    resolveBoardRequest: async (requestId, approve) => {
+      // Approval is the start grant: the run starts through the same path as the app's
+      // buttons, first, so a request whose run could not start stays pending.
+      const pending = get().boardRequests.find((request) => request.requestId === requestId);
+      if (approve && pending)
+        await get().startTaskRun(pending.taskId, { agent: true, provider: pending.provider });
+      get().applyBoardRequest(await resolveBoardRequest(requestId, approve));
+    },
     summaryTaskId: null,
     summaryDrafts: {},
     openSummary: (taskId) => {

@@ -12,6 +12,7 @@ const rootDir = path.dirname(fileURLToPath(import.meta.url));
 const e2eShim = (name: string) => path.resolve(rootDir, "e2e/shims", name);
 const e2eAliases = {
   "@tauri-apps/api/core": e2eShim("tauri-core.ts"),
+  "@tauri-apps/api/event": e2eShim("tauri-event.ts"),
   "@tauri-apps/plugin-http": e2eShim("plugin-http.ts"),
   "@tauri-apps/plugin-dialog": e2eShim("plugin-dialog.ts"),
   "@tauri-apps/plugin-fs": e2eShim("plugin-fs.ts"),

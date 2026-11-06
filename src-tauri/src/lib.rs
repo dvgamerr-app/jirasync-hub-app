@@ -1,3 +1,5 @@
+mod harness;
+
 use tauri::{webview::PageLoadEvent, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_window_state::{Builder as WindowStateBuilder, StateFlags, WindowExt};
 
@@ -162,9 +164,36 @@ pub fn run() {
             decrypt_data,
             store_secret,
             get_secret,
-            delete_secret
+            delete_secret,
+            harness::harness_doctor,
+            harness::harness_detect_repo,
+            harness::harness_analyze_repo,
+            harness::harness_default_worktree_root,
+            harness::harness_list_bindings,
+            harness::harness_save_binding,
+            harness::harness_delete_binding,
+            harness::harness_start_run,
+            harness::harness_resume_run,
+            harness::harness_pr_checks,
+            harness::harness_mark_pr_ready,
+            harness::harness_stop_run,
+            harness::harness_list_runs,
+            harness::harness_run_events,
+            harness::harness_remove_run_worktree,
+            harness::harness_board_enable,
+            harness::harness_board_disable,
+            harness::harness_board_status,
+            harness::harness_board_publish,
+            harness::harness_board_requests,
+            harness::harness_board_resolve,
+            harness::harness_snapshot_pull,
+            harness::harness_snapshot_push
         ])
         .setup(|app| {
+            use tauri::Manager;
+            app.manage(harness::create_run_manager(app.handle())?);
+            app.manage(harness::BoardState::default());
+
             let window_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title(WINDOW_TITLE)
                 .inner_size(WINDOW_WIDTH, WINDOW_HEIGHT)

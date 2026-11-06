@@ -10,6 +10,8 @@ import {
 } from "@/lib/sync-service";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/utils";
+import { onRunEvent } from "@/lib/harness";
+import { onBoardRequest } from "@/lib/board-access";
 import { HashRouter, Route, Routes } from "react-router-dom";
 import { AppErrorBoundary } from "@/components/AppErrorBoundary";
 import { TitleBar } from "@/components/TitleBar";
@@ -91,6 +93,54 @@ const App = () => {
       stopBackgroundSync();
     };
   }, [load, applySyncResult, setSyncing]);
+
+  // Agent runs live in the native core for the whole app lifetime, not per page: subscribe
+  // once, then load what the journal already has (runs survive page changes and reloads).
+  useEffect(() => {
+    const store = useTaskStore.getState();
+    const unsubscribe = onRunEvent(store.applyRunEvent);
+    void store.loadRuns().catch(() => {});
+    void store.loadRepoBindings().catch(() => {});
+    return unsubscribe;
+  }, []);
+
+  // Board access for external MCP clients: requests arrive as events, and the ready tasks are
+  // re-published (debounced) whenever the board, the bindings or the grant change.
+  useEffect(() => {
+    const store = useTaskStore.getState();
+    const unsubscribeRequests = onBoardRequest((request) => {
+      useTaskStore.getState().applyBoardRequest(request);
+      toast({
+        title: "An agent asked to run a task",
+        description: `${request.issueKey} with ${request.provider === "codex" ? "Codex" : "Claude"} — approve it in the AI Board`,
+      });
+    });
+    void store.loadBoardAccess().catch(() => {});
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribeStore = useTaskStore.subscribe((state, previous) => {
+      if (
+        state.tasks === previous.tasks &&
+        state.aiBoardStates === previous.aiBoardStates &&
+        state.repoBindings === previous.repoBindings &&
+        state.boardAccess === previous.boardAccess
+      )
+        return;
+      clearTimeout(timer);
+      timer = setTimeout(
+        () =>
+          void useTaskStore
+            .getState()
+            .publishBoard()
+            .catch(() => {}),
+        300,
+      );
+    });
+    return () => {
+      clearTimeout(timer);
+      unsubscribeRequests();
+      unsubscribeStore();
+    };
+  }, []);
 
   useEffect(() => {
     if (isLoaded && getJiraAccounts().length > 0) startBackgroundSync();

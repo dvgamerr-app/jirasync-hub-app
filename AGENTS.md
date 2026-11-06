@@ -20,6 +20,22 @@
 - `src/components/JiraSettings.tsx`: Jira accounts + story point field mapping
 - `src/components/ExportDialog.tsx`: export CSV ผ่าน Tauri dialog/fs
 - `src-tauri/src/lib.rs`: สร้าง main window และลง plugins
+- `src-tauri/src/harness/`: native harness core สำหรับรัน coding agent (Doctor, ตรวจ repo, repo bindings, worktree, run manager); WebView เรียกได้แค่ typed commands `harness_*` ห้ามเพิ่ม command ที่รับ command line ไป execute
+  - `mcp.rs` = MCP server ในแอป (HTTP 127.0.0.1, token ต่อ run, ปฏิเสธ request ที่มี `Origin`); `tools.rs` = tools ที่ agent ใช้ + permission handler `approve`; `claude.rs` = flags/prompt/stream-json ของ Claude CLI; `agent.rs` = plan → approve → implement → app checks → review
+  - Agent ไม่มี shell (`--restricted --tools` ไม่มี Bash): รอบวางแผนอ่านอย่างเดียวและส่งแผนด้วย `submit_plan`; ทุกคำสั่งที่ execute ผ่าน tool `run` ที่แอปรันเอง; ผลตรวจที่นับคือที่แอปรัน (`verify:*`) ไม่ใช่คำบอกของ agent
+  - `CommandSpec` มี `env` (ตัวแปรเฉพาะคำสั่ง) และ `then` (คำสั่งต่อกันชั้นเดียว รันต่อเมื่อตัวก่อนผ่าน) แทน `KEY=v cmd` / `&&` ของ shell; executable ที่เป็น shell (powershell, cmd, bash, sh …) ถูกปฏิเสธทุกที่ (`bindings::check_command`)
+  - command fail = agent แก้เองไม่ถามเจ้าของ: install/migrate ที่ fail ส่งให้ agent แก้ (`repair_setup`, ไม่เกิน `MAX_REPAIRS` รอบ แล้วแอปรันซ้ำเอง) ก่อนวางแผน/ก่อน implement; agent แก้ command ได้ด้วย tool `set_command` (เฉพาะ implement, executable ต้องเป็นชื่อ tool ไม่ใช่ path) ซึ่งแก้ทั้ง run นั้นและไฟล์ `<worktree folder>/<project>.config.json`; run แบบ prepare อย่างเดียว (ไม่มี agent) install fail ก็ยัง fail เหมือนเดิม
+  - ค่า env ต่อ run (`envOverrides`) เขียนลงไฟล์ env ที่ run copy มา (`copyEnv`, เช่น `be/.env` ใน submodule) ถ้าไม่ได้ copy อะไรค่อยเขียน `.env` ที่ root
+  - `codex.rs` = Codex ผ่าน `codex app-server` (เลือกต่อ run ด้วย `provider`); Codex ตัด shell ออกด้วย flag ไม่ได้ จึงบังคับผ่าน approval: ปฏิเสธ shell ทุกครั้ง, รับ file change เฉพาะ implement ใน worktree และไม่ใช่ไฟล์ protected, รับ MCP เฉพาะ `harness`; test ใช้ fake app-server (`agent_codex_tests.rs`)
+  - `board.rs` = board tools สำหรับ MCP client ภายนอก (เปิดใน Setup → External agents, มีวันหมดอายุ); เห็นเฉพาะ task ที่ WebView publish ว่า ready (`src/lib/board-access.ts`: AI To Do + project ผูก repo + ไม่ Done ใน Jira, ไม่มี note); `runs_request` แค่เข้าคิว เจ้าของต้อง Approve ใน Run panel ซึ่งเริ่มผ่าน `startTaskRun` ทางเดียวกับปุ่มในแอป
+  - `snapshot.rs` + `src/lib/snapshot.ts` = ย้ายสถานะ AI Board (และ note ถ้าเลือก) ข้ามเครื่องผ่านไฟล์หรือ git folder (Setup → Sync); ห้ามใส่ token/ข้อมูล Jira/bindings; จับคู่ด้วย Jira site + email + issue key ไม่ใช่ issue key อย่างเดียว
+  - `analyze.rs` = AI อ่าน repo (claude อ่านอย่างเดียว) แล้วเสนอ commands/services/env ต่อ binding รวม monorepo/submodule (ใช้ flag ของ tool เช่น `--cwd`/`-C`/`--manifest-path` เพราะหนึ่ง slot มีคำสั่งเดียว); base branch มาจาก `gh repo view` (fallback git); Setup → Repositories ไม่มีช่องกรอกเอง
+  - `docker.rs` = Docker Engine API (tcp/npipe/unix, ไม่ใช้ docker CLI ตอนรัน) สำหรับ services ต่อ run; container มีอายุเฉพาะช่วง implement/verify; test กับ Docker จริงเป็น `#[ignore]`
+  - Accept = publish: แอป commit (ไม่รวม `copy_env`), push, `gh pr create --draft` ด้วยข้อความที่ agent ร่างและผ่านกติกา PR ของทีม; `## การทดสอบ` มาจาก checks ของแอปเท่านั้น; Draft → Ready ได้เฉพาะเมื่อ CI ผ่าน
+  - submodule: worktree checkout submodule ให้เอง (`git submodule update --init --recursive`); การแก้ใน submodule นับเป็นการเปลี่ยนแปลง (`repo_dirs`/`changed_files`/`tree_digest`, tool `git` status/diff แยก section ต่อ repo) และตอน publish แต่ละ repo ที่เปลี่ยนได้ branch + commit + push + Draft PR ของตัวเอง (base ของ submodule = `branch` ใน `.gitmodules` → `origin/HEAD` → `main`); root ไม่ commit pointer ของ submodule; `RunRecord.pr_urls` เก็บทุก PR (`pr_url` = อันแรก) และ CI/Ready ดูทุก PR
+  - test ของ pipeline ใช้ fake agent (`agent_tests.rs::fake_agent_entry` = test binary รันตัวเองเป็น agent คุยกับ MCP จริง); test ที่ใช้ Claude จริงเป็น `#[ignore]` (`cargo test --lib real_claude -- --ignored`)
+- `src/lib/harness.ts` + `src/components/HarnessSetupDialog.tsx`: client และหน้า Setup (ปุ่มขวาบน AI Board); skill ที่ส่งให้ agent อยู่ใน `src-tauri/resources/harness-skills/` (แผน: `docs/agent-execution-harness-plan.md`)
+- `src/components/AgentRun.tsx` + `src/lib/run-conversation.ts`: UI ของ run บน AI Board — panel ขวามี tab Conversation (ข้อความเจ้าของ/agent — ข้อความเก่าพับเหลือ 4 บรรทัด, แต่ละ session ของ agent เป็น turn ที่รวม tool call/ข้อความ/command ของมันพร้อม orb หมุนตอนทำงาน, ขั้นตอน pipeline) / Ticket / Worktree log; chat box อยู่ล่างสุดของ tab Conversation (`AgentComposer`) เป็นทางเดียวที่ start/approve/revise/request changes/accept — Enter ไม่เคย Accept; draft อยู่ใน store (`boardAgentDraft`); ข้อความที่เจ้าของพิมพ์ถูก journal เป็น event `agent`/`owner` ฝั่ง native; agent ตอบเป็นภาษาเดียวกับ ticket (ยกเว้น commit/PR ที่มีกติกาของตัวเอง)
 
 ## Data / storage
 
@@ -29,6 +45,9 @@
   - `jira-settings` เป็น legacy key และ migrate อัตโนมัติ
   - `jira-story-point-fields` = `{ [projectId]: jiraCustomFieldId }`
   - `jirasync-ai-hidden-projects` = project IDs ที่ซ่อนจาก All projects ของ AI Board (แยกจาก `jirasync-hidden-projects` ของหน้า Jira)
+  - `jirasync-harness-setup-seen` = เปิด AI Board ครั้งแรกแล้ว (Doctor + เปิด Setup อัตโนมัติถ้า tool ที่จำเป็นยังไม่พร้อม เกิดแค่ครั้งเดียว)
+- app data (native): `harness/runs/<run-id>/run.json` + `events.ndjson` = run journal (เขียนลงดิสก์ก่อนส่ง event `harness://run-event` ให้ UI; UI replay ต่อจาก `seq` ได้โดยไม่ซ้ำ); run ที่ค้างตอนแอปปิดจะเป็น `interrupted` ตอนเปิดใหม่ ไม่ resume เอง
+- app data (native): `harness/bindings.json` = repo binding ต่อ Jira project (path เครื่อง, base branch, worktree folder, commands, env files ที่ copy); ไม่เก็บใน repo หรือ IndexedDB
 - IndexedDB (`jira-task-manager`):
   - `organizations: "id, name"`
   - `projects: "id, orgId, jiraProjectKey"`
@@ -64,6 +83,7 @@
 ## Current product behavior
 
 - AI Board ใช้ `todo | doing | review | done` ของตัวเองใน `aiBoardStates` การย้าย AI ไม่แก้ `Task.status`/dirty state และไม่ส่ง Jira transition; Jira Done บังคับ AI Done ทางเดียวและซ่อน task จาก board/counts/detail แต่ AI Done ที่ Jira ยังไม่จบยังแสดงได้ เก็บสถานะผ่าน reload/pull/discard และใช้สี theme tokens ของแอป ซ่อน space/project ผ่านปุ่มรูปตาโดยแยก preference จากหน้า Jira
+- worktree ต่อ task: กด Plan บน task ที่ run ล่าสุดยังมี worktree (และไม่ busy) จะทำงานต่อใน worktree/run เดิม (decision `continue`: วางแผนใหม่ใน session เดิม, refresh `.harness/task.md`, รับ run แบบ prepare ได้ด้วย) ไม่สร้างใหม่; Accept แล้ว (PR เปิด) card อยู่ Review ไม่ใช่ Done; เจ้าของย้าย card ไป AI Done เอง (`moveBoardTask(…, { byOwner: true })`) ถึงลบ worktree — ถ้ามี uncommitted changes จะไม่ลบและแจ้งเตือน; การย้ายจาก run event หรือ Jira Done ไม่ลบ
 
 - แก้จาก UI ได้: status, type, severity, story level, mandays, note, worklogs
 - `storyLevel` รับเฉพาะ `1 | 2 | 3 | 5`

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   ArrowLeft,
@@ -14,6 +14,7 @@ import {
   EyeOff,
   Search,
   RefreshCw,
+  Settings2,
   X,
 } from "lucide-react";
 import { filterTasks, useTaskStore } from "@/store/task-store";
@@ -28,6 +29,8 @@ import { HANDOFF_TEMPLATE } from "@/lib/ai-context";
 import { AdfRenderer } from "@/components/AdfRenderer";
 import { CopyForAiDialog } from "@/components/CopyForAiDialog";
 import { SummarizeToJiraDialog } from "@/components/SummarizeToJiraDialog";
+import { HarnessSetupDialog } from "@/components/HarnessSetupDialog";
+import { AgentComposer, AgentConversation, AgentWorkspace } from "@/components/AgentRun";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -53,9 +56,11 @@ function reportError(error: unknown) {
   });
 }
 
+type DetailTab = "conversation" | "ticket" | "worktree log";
+
 function BoardTaskDetails({ task, project }: { task: Task; project?: Project }) {
   const noteRef = useRef<HTMLTextAreaElement>(null);
-  const { aiStates, move, close, updateNote, copy, summarize } = useTaskStore(
+  const { aiStates, move, close, updateNote, copy, summarize, hasBinding, hasRun } = useTaskStore(
     useShallow((state) => ({
       aiStates: state.aiBoardStates,
       move: state.moveBoardTask,
@@ -63,11 +68,20 @@ function BoardTaskDetails({ task, project }: { task: Task; project?: Project }) 
       updateNote: state.updateTaskNote,
       copy: state.setBoardCopyTask,
       summarize: state.openSummary,
+      hasBinding: state.repoBindings.some((binding) => binding.projectId === task.projectId),
+      hasRun: state.runs.some((run) => run.taskId === task.id),
     })),
   );
   const aiState = aiStates.find((state) => state.id === task.id);
   const completedByJira = isAiBoardCompletedByJira(task, aiState);
   const url = getSafeExternalUrl(task.refUrl);
+  // The conversation leads once an agent can work here; otherwise the ticket does.
+  const agentTabs = !completedByJira;
+  const [tab, setTab] = useState<DetailTab>(
+    agentTabs && (hasBinding || hasRun) ? "conversation" : "ticket",
+  );
+  const tabs: DetailTab[] = agentTabs ? ["conversation", "ticket", "worktree log"] : ["ticket"];
+  const shown = tabs.includes(tab) ? tab : "ticket";
   return (
     <aside className="board-details" aria-label={`Board details ${task.jiraTaskId}`}>
       <header className="board-detail-meta">
@@ -95,91 +109,118 @@ function BoardTaskDetails({ task, project }: { task: Task; project?: Project }) 
       <div className="board-detail-title">
         <h2>{task.title}</h2>
       </div>
-      <div className="board-detail-body">
-        <dl className="board-properties">
-          <div className="board-property">
-            <dt>AI status</dt>
-            <dd>
-              <Select
-                value={getAiBoardStatus(task, aiState)}
-                disabled={completedByJira}
-                onValueChange={(value) => void move(task.id, value).catch(reportError)}
-              >
-                <SelectTrigger aria-label="AI task status" className="h-8 text-[13px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {AI_BOARD_COLUMNS.map((column) => (
-                    <SelectItem key={column.id} value={column.id} className="text-[13px]">
-                      <StatusBadge status={column.label} />
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </dd>
-          </div>
-          {[
-            ["Jira status", <StatusBadge key="jira" status={task.status} />],
-            ["Type", task.type ?? "—"],
-            ["Priority", task.severity ?? "—"],
-            ["Assignee", task.assignee ?? "Unassigned"],
-            ...(task.parentKey ? [["Parent", task.parentKey]] : []),
-            ["AI progress", completedByJira ? "Completed by Jira" : "Saved on this board"],
-          ].map(([label, value]) => (
-            <div key={String(label)} className="board-property">
-              <dt>{label}</dt>
-              <dd className="board-readonly-field">{value}</dd>
-            </div>
+      {tabs.length > 1 && (
+        <div role="tablist" aria-label="Task panels" className="board-detail-tabs">
+          {tabs.map((id) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={shown === id}
+              className={shown === id ? "is-active" : ""}
+              onClick={() => setTab(id)}
+            >
+              {id}
+            </button>
           ))}
-        </dl>
-        <section className="board-detail-section">
-          <h3>Description</h3>
-          {task.description ? (
-            <AdfRenderer content={task.description} />
-          ) : (
-            <p className="board-muted">No description available.</p>
-          )}
-        </section>
-        <section className="board-detail-section">
-          <div className="board-section-heading">
-            <h3>Handoff</h3>
-            <span className="board-muted">Local only</span>
-          </div>
-          <textarea
-            key={task.id}
-            ref={noteRef}
-            aria-label="Board handoff"
-            placeholder="Done, next steps, blockers…"
-            defaultValue={task.note ?? ""}
-            onBlur={(event) => updateNote(task.id, event.target.value.trim() || null)}
-            rows={5}
-          />
-          <button
-            type="button"
-            className="board-text-button"
-            onClick={() => {
-              const field = noteRef.current;
-              if (!field) return;
-              field.value = `${field.value}${field.value ? "\n\n" : ""}${HANDOFF_TEMPLATE}`;
-              updateNote(task.id, field.value);
-            }}
-          >
-            Insert handoff template
-          </button>
-          <p className="board-hint">
-            Keep long-term handoffs in your repo. Local notes are removed with the ticket or
-            account.
-          </p>
-        </section>
+        </div>
+      )}
+      <div className="board-detail-body">
+        {shown === "conversation" && <AgentConversation task={task} />}
+        {shown === "worktree log" && <AgentWorkspace task={task} />}
+        {shown === "ticket" && (
+          <>
+            <dl className="board-properties">
+              <div className="board-property">
+                <dt>AI status</dt>
+                <dd>
+                  <Select
+                    value={getAiBoardStatus(task, aiState)}
+                    disabled={completedByJira}
+                    onValueChange={(value) =>
+                      void move(task.id, value, { byOwner: true }).catch(reportError)
+                    }
+                  >
+                    <SelectTrigger aria-label="AI task status" className="h-8 text-[13px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {AI_BOARD_COLUMNS.map((column) => (
+                        <SelectItem key={column.id} value={column.id} className="text-[13px]">
+                          <StatusBadge status={column.label} />
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </dd>
+              </div>
+              {[
+                ["Jira status", <StatusBadge key="jira" status={task.status} />],
+                ["Type", task.type ?? "—"],
+                ["Priority", task.severity ?? "—"],
+                ["Assignee", task.assignee ?? "Unassigned"],
+                ...(task.parentKey ? [["Parent", task.parentKey]] : []),
+                ["AI progress", completedByJira ? "Completed by Jira" : "Saved on this board"],
+              ].map(([label, value]) => (
+                <div key={String(label)} className="board-property">
+                  <dt>{label}</dt>
+                  <dd className="board-readonly-field">{value}</dd>
+                </div>
+              ))}
+            </dl>
+            <section className="board-detail-section">
+              <h3>Description</h3>
+              {task.description ? (
+                <AdfRenderer content={task.description} />
+              ) : (
+                <p className="board-muted">No description available.</p>
+              )}
+            </section>
+            <section className="board-detail-section">
+              <div className="board-section-heading">
+                <h3>Handoff</h3>
+                <span className="board-muted">Local only</span>
+              </div>
+              <textarea
+                key={task.id}
+                ref={noteRef}
+                aria-label="Board handoff"
+                placeholder="Done, next steps, blockers…"
+                defaultValue={task.note ?? ""}
+                onBlur={(event) => updateNote(task.id, event.target.value.trim() || null)}
+                rows={5}
+              />
+              <button
+                type="button"
+                className="board-text-button"
+                onClick={() => {
+                  const field = noteRef.current;
+                  if (!field) return;
+                  field.value = `${field.value}${field.value ? "\n\n" : ""}${HANDOFF_TEMPLATE}`;
+                  updateNote(task.id, field.value);
+                }}
+              >
+                Insert handoff template
+              </button>
+              <p className="board-hint">
+                Keep long-term handoffs in your repo. Local notes are removed with the ticket or
+                account.
+              </p>
+            </section>
+          </>
+        )}
       </div>
-      <div className="board-detail-actions">
-        <Button variant="outline" onClick={() => copy(task.id)}>
-          Copy for AI
-        </Button>
-        <Button variant="outline" onClick={() => summarize(task.id)}>
-          Summarize to Jira
-        </Button>
-      </div>
+      {shown === "conversation" && <AgentComposer task={task} />}
+      {shown === "ticket" && (
+        <div className="board-detail-actions">
+          <Button variant="outline" onClick={() => copy(task.id)}>
+            Copy for AI
+          </Button>
+          <Button variant="outline" onClick={() => summarize(task.id)}>
+            Summarize to Jira
+          </Button>
+        </div>
+      )}
     </aside>
   );
 }
@@ -204,6 +245,8 @@ export default function AiBoard() {
     setSearch,
     setCopy,
     pull,
+    harnessReport,
+    openSetup,
   } = useTaskStore(
     useShallow((state) => ({
       tasks: state.tasks,
@@ -223,8 +266,13 @@ export default function AiBoard() {
       setSearch: state.setBoardSearch,
       setCopy: state.setBoardCopyTask,
       pull: state.pullBoard,
+      harnessReport: state.harnessDoctor,
+      openSetup: state.setHarnessSetupOpen,
     })),
   );
+  useEffect(() => {
+    void useTaskStore.getState().openHarnessSetupOnFirstVisit();
+  }, []);
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (document.querySelector('[role="dialog"]')) return;
@@ -403,6 +451,24 @@ export default function AiBoard() {
               variant="outline"
               size="sm"
               className="h-7 gap-1.5 text-[12px]"
+              aria-label="Agent setup"
+              title={
+                harnessReport && !harnessReport.ready
+                  ? "A required tool is not ready"
+                  : "Tools and repositories for agent runs"
+              }
+              onClick={() => openSetup(true)}
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+              Setup
+              {harnessReport && !harnessReport.ready && (
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 text-[12px]"
               aria-label="Sync board"
               disabled={syncing || getJiraAccounts().length === 0}
               onClick={() =>
@@ -452,7 +518,10 @@ export default function AiBoard() {
                         event.preventDefault();
                         const id = event.dataTransfer.getData("application/x-jirasync-task");
                         if (id)
-                          void useTaskStore.getState().moveBoardTask(id, status).catch(reportError);
+                          void useTaskStore
+                            .getState()
+                            .moveBoardTask(id, status, { byOwner: true })
+                            .catch(reportError);
                       }}
                     >
                       <h2>
@@ -539,6 +608,7 @@ export default function AiBoard() {
         />
       )}
       <SummarizeToJiraDialog />
+      <HarnessSetupDialog />
     </div>
   );
 }
