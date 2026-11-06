@@ -129,6 +129,12 @@ function harness(cmd: string, args?: Record<string, unknown>): unknown {
       if (typeof result === "string") throw new Error(result);
       return result;
     }
+    case "harness_analyze_repo": {
+      const result = state.analyses?.[String(args?.path)];
+      if (result === undefined) throw new Error("claude is not installed or not on PATH");
+      if (typeof result === "string") throw new Error(result);
+      return result;
+    }
     case "harness_default_worktree_root":
       return "C:\\wt";
     case "harness_list_bindings":

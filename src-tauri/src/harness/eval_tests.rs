@@ -27,6 +27,7 @@ fn bun(args: &[&str]) -> Option<CommandSpec> {
     Some(CommandSpec {
         executable: "bun".into(),
         args: args.iter().map(|a| a.to_string()).collect(),
+        ..CommandSpec::default()
     })
 }
 

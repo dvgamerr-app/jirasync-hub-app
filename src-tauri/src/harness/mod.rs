@@ -1,6 +1,7 @@
 // Harness core: the native side of "run a coding agent on a Jira task". The WebView only gets
 // typed commands with validated inputs; it can never ask for an arbitrary command line.
 mod agent;
+mod analyze;
 mod bindings;
 mod board;
 mod claude;
@@ -47,10 +48,20 @@ pub async fn harness_detect_repo(path: String) -> Result<RepoDetection, String> 
     blocking(move || repo::detect_repo(Path::new(path.trim()))).await
 }
 
+/// AI pass over the repo (read-only Claude) that proposes commands, services and env values.
 #[tauri::command]
-pub fn harness_default_worktree_root(app: tauri::AppHandle, repo_path: String) -> String {
-    let home = app.path().home_dir().ok();
-    bindings::default_worktree_root(Path::new(&repo_path), home.as_deref())
+pub async fn harness_analyze_repo(path: String) -> Result<analyze::Analysis, String> {
+    blocking(move || {
+        let root = repo::git_root(Path::new(path.trim()))?;
+        analyze::analyze_repo(&root, &repo::detect_files(&root))
+    })
+    .await
+}
+
+#[tauri::command]
+pub fn harness_default_worktree_root(app: tauri::AppHandle) -> Result<String, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(bindings::default_worktree_root(&dir))
 }
 
 #[tauri::command]

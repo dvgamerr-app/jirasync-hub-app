@@ -112,9 +112,15 @@ pub fn planning_prompt(issue_key: &str) -> String {
 1. Call mcp__harness__skill_list, then load the `harness` skill with mcp__harness__skill_get and follow it.\n\
 2. Read .harness/task.md (the task). If .harness/progress.md exists, read it: it is where earlier sessions left off.\n\
 3. Read the repository's AGENTS.md or CLAUDE.md if present and follow its rules.\n\
-This is the planning step: you can only read. Explore the code, then call mcp__harness__submit_plan \
-with a concise markdown plan: goal, files to change, steps, and which harness commands will verify it \
-(test, build, lint, dev + hurl). Then stop and wait for the owner."
+4. Write the plan in the language of the ticket title and description in .harness/task.md.\n\
+This is the planning step: you can only read. Explore the code and follow the \"Solve it with the \
+least new code\" rules of the harness skill: before planning any new function, search for an existing \
+helper, a platform or library option, or a setting that already does it, and prefer the smallest change \
+that fully solves the task (root cause once, in shared code, with every caller). Then call \
+mcp__harness__submit_plan with a concise markdown plan: goal, what you reuse or change instead of \
+writing new code (and why no new helper is needed, or why one is), files to change, steps, what you \
+skipped or did not check, and which harness commands will verify it (test, build, lint, dev + hurl). \
+Then stop and wait for the owner."
     )
 }
 
@@ -127,14 +133,29 @@ Revise the plan, call mcp__harness__submit_plan again, then stop."
 
 pub const IMPLEMENT_PROMPT: &str = "The owner approved your plan. Implement it now in this worktree. \
 Verify with mcp__harness__run (test, build, lint; dev + hurl for HTTP behaviour) and fix until it passes. \
+If a command fails because the command itself is wrong, fix it with mcp__harness__set_command; do not ask. \
+Keep it as small as the plan: reuse what exists, add no helper, wrapper or option the plan did not name. \
 Keep .harness/progress.md updated: what is done, what is next, open questions. Do not commit. \
-Finish with a short report of what changed and which harness commands passed.";
+Finish with a short report of what changed and which harness commands passed, in the language of the ticket.";
 
 pub fn repair_prompt(failures: &str) -> String {
     format!(
         "The app ran its final checks on your change and they failed:\n\n{failures}\n\n\
-Fix the cause, re-run the failing command with mcp__harness__run until it passes, \
-update .harness/progress.md, then finish with a short report."
+Fix the cause without asking the owner: your code, or the command itself with mcp__harness__set_command \
+when the command is what is wrong. Re-run the failing command with mcp__harness__run until it passes, \
+update .harness/progress.md, then finish with a short report in the language of the ticket."
+    )
+}
+
+/// A setup command failed before the task starts; the agent fixes it without asking.
+pub fn setup_repair_prompt(command: &str, failure: &str) -> String {
+    format!(
+        "The app ran this project's `{command}` command for the run and it failed:\n\n```\n{failure}\n```\n\n\
+Fix it now; do not ask the owner. Load the `harness` skill first if you have not. If the command itself \
+is wrong (flags, folder, script name), correct it with mcp__harness__set_command. If the repository needs a \
+fix (manifest, lockfile, config, migration), edit it. Then run mcp__harness__run with command \"{command}\" \
+until it passes. Do not start on the task itself yet. Finish with one short line on what you fixed, in the \
+language of the ticket."
     )
 }
 
@@ -142,7 +163,7 @@ pub fn changes_prompt(feedback: &str) -> String {
     format!(
         "The owner reviewed your change and asks for this:\n\n{feedback}\n\n\
 Read .harness/progress.md, make the changes, verify with mcp__harness__run, \
-update .harness/progress.md, then finish with a short report."
+update .harness/progress.md, then finish with a short report in the language of the ticket."
     )
 }
 
@@ -154,9 +175,11 @@ you did not, so judge it critically. You can only read.\n\
 2. Read the real change with mcp__harness__git (op \"status\" and \"diff\").\n\
 3. The app ran these checks itself on this change: {checks}.\n\
 Look for: requirements in the task that the diff does not meet, changes the task did not ask for, \
+new helpers, wrappers or options where an existing function, a platform or library feature, or a \
+one-line change would do, \
 risky or broken logic, missing tests for the new behaviour, and secrets or debug leftovers.\n\
 Then call mcp__harness__submit_review with verdict \"approve\" (nothing important found) or \
-\"concerns\" with findings (file + issue). Be concrete and brief. Then stop."
+\"concerns\" with findings (file + issue), written in the language of the ticket. Be concrete and brief. Then stop."
     )
 }
 

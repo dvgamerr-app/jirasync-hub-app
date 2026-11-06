@@ -3,7 +3,7 @@ import { test } from "@playwright/test";
 import { FakeJira } from "./fake-jira";
 import { readE2EState, openApp } from "./helpers";
 import type { E2EHarnessState } from "./shims/state";
-import type { DoctorReport, RepoBinding, RepoDetection } from "@/lib/harness";
+import type { DoctorReport, RepoAnalysis, RepoBinding, RepoDetection } from "@/lib/harness";
 
 const PROJECT_ID = "proj-acc1-PRJ";
 const REPO = "C:\\src\\service";
@@ -70,6 +70,7 @@ async function seedHarness(page: Page, harness: Partial<E2EHarnessState>, openPa
         harness: {
           doctor: seed.doctor!,
           detections: seed.detections ?? {},
+          analyses: seed.analyses ?? {},
           bindings: seed.bindings ?? [],
           calls: [],
         },
@@ -136,113 +137,21 @@ test("first AI Board visit stays quiet when every required tool works", async ({
   );
 });
 
-test("binding a repo saves the reviewed commands and env files", async ({ page }) => {
-  await seedHarness(page, { doctor: report(), detections: { [REPO]: detection } }, REPO);
-  await openBoard(page);
-  await page.getByRole("button", { name: "Agent setup" }).click();
-  const dialog = page.getByRole("dialog", { name: "Agent setup" });
-  await dialog.getByRole("tab", { name: "repositories" }).click();
-  await dialog.getByRole("button", { name: "Acme: Project PRJ" }).click();
-  await expect(dialog.getByRole("button", { name: "Acme: Project PRJ" })).toContainText(
-    "Not bound",
-  );
+const analysis: RepoAnalysis = {
+  summary: "bun monorepo: api + web",
+  commands: {
+    install: { executable: "bun", args: ["install", "--frozen-lockfile"] },
+    test: { executable: "bun", args: ["--cwd", "api", "run", "test"] },
+  },
+  services: [],
+  copyEnv: ["api/.env"],
+  envOverrides: [],
+  notes: [],
+};
 
-  await dialog.getByRole("button", { name: "Browse" }).click();
-  await expect(dialog.getByText("Detected bun")).toBeVisible();
-  await expect(dialog.getByText("Missing from .env (in .env.example): REDIS_URL")).toBeVisible();
-  await expect(dialog.getByLabel("Repository folder")).toHaveValue("C:/src/service");
-  await expect(dialog.getByLabel("Base branch")).toHaveValue("main");
-  await expect(dialog.getByLabel("Worktree folder")).toHaveValue("C:\\wt");
-  await expect(dialog.getByLabel("install command")).toHaveValue("bun install --frozen-lockfile");
-  await expect(dialog.getByLabel("lint command")).toHaveValue("");
-  await expect(dialog.getByLabel(".env", { exact: true })).toBeChecked();
-  await expect(dialog.getByLabel(".env.test")).not.toBeChecked();
-
-  await dialog.getByLabel("test command").fill('bun run "test unit"');
-  await dialog.getByRole("button", { name: "Save repository" }).click();
-  await expect(dialog.getByRole("button", { name: "Acme: Project PRJ" })).toContainText(
-    "C:/src/service",
-  );
-
-  const saved = (await readE2EState(page)).harness?.bindings ?? [];
-  expect(saved).toHaveLength(1);
-  const binding: RepoBinding = saved[0];
-  expect(binding).toMatchObject({
-    projectId: PROJECT_ID,
-    repoPath: "C:/src/service",
-    baseBranch: "main",
-    worktreeRoot: "C:\\wt",
-    copyEnv: [".env"],
-  });
-  expect(binding.commands.test).toEqual({ executable: "bun", args: ["run", "test unit"] });
-  expect(binding.commands.lint).toBeNull();
-});
-
-test("a folder that is not a git repo shows why and saves nothing", async ({ page }) => {
-  await seedHarness(page, {
-    doctor: report(),
-    detections: {
-      "C:\\Users\\me\\Downloads": "C:\\Users\\me\\Downloads is not inside a git repository",
-    },
-  });
-  await openBoard(page);
-  await page.getByRole("button", { name: "Agent setup" }).click();
-  const dialog = page.getByRole("dialog", { name: "Agent setup" });
-  await dialog.getByRole("tab", { name: "repositories" }).click();
-  await dialog.getByRole("button", { name: "Acme: Project PRJ" }).click();
-
-  await dialog.getByLabel("Repository folder").fill("C:\\Users\\me\\Downloads");
-  await dialog.getByRole("button", { name: "Detect" }).click();
-  await expect(dialog.getByRole("alert")).toHaveText(
-    "C:\\Users\\me\\Downloads is not inside a git repository",
-  );
-  await expect(dialog.getByRole("button", { name: "Save repository" })).toBeDisabled();
-
-  // Every field filled by hand still cannot save a folder that failed detection.
-  await dialog.getByLabel("Base branch").fill("main");
-  await dialog.getByLabel("Worktree folder").fill("C:\\wt");
-  await dialog.getByLabel("test command").fill("bun test");
-  await expect(dialog.getByRole("button", { name: "Save repository" })).toBeDisabled();
-  expect(await harnessCalls(page)).not.toContain("harness_save_binding");
-  expect((await readE2EState(page)).harness?.bindings).toEqual([]);
-});
-
-test("removing a binding asks first and keeps it when the owner backs out", async ({ page }) => {
-  const existing: RepoBinding = {
-    projectId: PROJECT_ID,
-    repoPath: "C:/src/service",
-    baseBranch: "develop",
-    worktreeRoot: "D:\\wt",
-    commands: { test: { executable: "npm", args: ["test"] } },
-    copyEnv: [".env"],
-    services: [],
-    envOverrides: [],
-    updatedAt: 1,
-  };
-  await seedHarness(page, { doctor: report(), bindings: [existing] });
-  await openBoard(page);
-  await page.getByRole("button", { name: "Agent setup" }).click();
-  const dialog = page.getByRole("dialog", { name: "Agent setup" });
-  await dialog.getByRole("tab", { name: "repositories" }).click();
-  const project = dialog.getByRole("button", { name: "Acme: Project PRJ" });
-  await expect(project).toContainText("C:/src/service");
-  await project.click();
-  await expect(dialog.getByLabel("Base branch")).toHaveValue("develop");
-  await expect(dialog.getByLabel("test command")).toHaveValue("npm test");
-
-  await dialog.getByRole("button", { name: "Remove binding" }).click();
-  await dialog.getByRole("button", { name: "Keep" }).click();
-  expect((await readE2EState(page)).harness?.bindings).toHaveLength(1);
-
-  await dialog.getByRole("button", { name: "Remove binding" }).click();
-  await dialog.getByRole("button", { name: "Confirm remove" }).click();
-  await expect(project).toContainText("Not bound");
-  expect((await readE2EState(page)).harness?.bindings).toEqual([]);
-});
-
-const withServices: RepoDetection = {
-  ...detection,
-  commands: { ...detection.commands, migrate: { executable: "bun", args: ["run", "db:migrate"] } },
+const withServices: RepoAnalysis = {
+  ...analysis,
+  commands: { ...analysis.commands, migrate: { executable: "bun", args: ["run", "db:migrate"] } },
   services: [
     { name: "db", image: "postgres:16", port: 5432, env: [], healthcheck: ["CMD", "pg_isready"] },
     { name: "cache", image: "redis:7", port: 6379, env: [], healthcheck: [] },
@@ -260,45 +169,156 @@ async function openRepoEditor(page: Page) {
   return dialog;
 }
 
-test("services, per-run env values and migrations are reviewed and saved", async ({ page }) => {
-  await seedHarness(page, { doctor: report(), detections: { [REPO]: withServices } }, REPO);
+test("binding a repo saves what the AI worked out, with the base branch from GitHub", async ({
+  page,
+}) => {
+  await seedHarness(
+    page,
+    {
+      doctor: report(),
+      detections: { [REPO]: detection },
+      analyses: { "C:/src/service": analysis },
+    },
+    REPO,
+  );
+  await openBoard(page);
+  await page.getByRole("button", { name: "Agent setup" }).click();
+  const dialog = page.getByRole("dialog", { name: "Agent setup" });
+  await dialog.getByRole("tab", { name: "repositories" }).click();
+  const project = dialog.getByRole("button", { name: "Acme: Project PRJ" });
+  await expect(project).toContainText("Not bound");
+  await project.click();
+
+  await dialog.getByRole("button", { name: "Browse" }).click();
+  await expect(dialog.getByText("bun monorepo: api + web")).toBeVisible();
+  await expect(dialog.getByText("Missing from .env (in .env.example): REDIS_URL")).toBeVisible();
+  await expect(dialog.getByLabel("Repository folder")).toHaveValue("C:/src/service");
+  await expect(dialog.getByLabel("Base branch")).toContainText("main");
+  await expect(dialog.getByLabel("Worktree folder")).toHaveText("C:\\wt");
+  // Commands are not shown: they are saved to a config file next to the worktrees instead.
+  await expect(dialog.getByText("bun --cwd api run test")).toHaveCount(0);
+  await expect(dialog.getByText(/.config.json/)).toBeVisible();
+  // Nothing about the setup is typed by hand any more.
+  await expect(dialog.getByRole("textbox")).toHaveCount(1);
+
+  await dialog.getByRole("button", { name: "Save repository" }).click();
+  await expect(project).toContainText("Bound");
+  await expect(project).not.toContainText("Not bound");
+
+  const saved = (await readE2EState(page)).harness?.bindings ?? [];
+  expect(saved).toHaveLength(1);
+  const binding: RepoBinding = saved[0];
+  expect(binding).toMatchObject({
+    projectId: PROJECT_ID,
+    repoPath: "C:/src/service",
+    baseBranch: "main",
+    worktreeRoot: "C:\\wt",
+    copyEnv: ["api/.env"],
+  });
+  expect(binding.commands.test).toEqual({
+    executable: "bun",
+    args: ["--cwd", "api", "run", "test"],
+  });
+  expect(binding.commands.lint ?? null).toBeNull();
+  expect(await harnessCalls(page)).toContain("harness_analyze_repo");
+});
+
+test("when the AI pass fails the guess from the repo files is kept and the reason shown", async ({
+  page,
+}) => {
+  await seedHarness(
+    page,
+    {
+      doctor: report(),
+      detections: { [REPO]: detection },
+      analyses: { "C:/src/service": "claude failed (exit code 1: Not logged in)" },
+    },
+    REPO,
+  );
   await openBoard(page);
   const dialog = await openRepoEditor(page);
   await dialog.getByRole("button", { name: "Browse" }).click();
 
-  await expect(dialog.getByLabel("db image")).toHaveValue("postgres:16");
-  await expect(dialog.getByLabel("migrate command")).toHaveValue("bun run db:migrate");
-  await dialog.getByLabel("Start cache").uncheck();
-  await dialog.getByLabel("db image").fill("postgres:16-alpine");
-  await dialog
-    .getByLabel(/Per-run \.env values/)
-    .fill(
-      "DATABASE_URL=postgres://app:app@{services.db.host}:{services.db.port}/app\nPORT={run.port}",
-    );
-  await dialog.getByRole("button", { name: "Save repository" }).click();
-  await expect(dialog.getByRole("button", { name: "Acme: Project PRJ" })).toContainText(
-    "C:/src/service",
+  await expect(dialog.getByText(/AI analysis failed \(claude failed/)).toBeVisible();
+  await expect(dialog.getByText("Detected bun")).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Save repository" })).toBeEnabled();
+});
+
+test("a folder that is not a git repo shows why and saves nothing", async ({ page }) => {
+  await seedHarness(page, {
+    doctor: report(),
+    detections: {
+      "C:\Users\me\Downloads": "C:\Users\me\Downloads is not inside a git repository",
+    },
+  });
+  await openBoard(page);
+  const dialog = await openRepoEditor(page);
+
+  await dialog.getByLabel("Repository folder").fill("C:\Users\me\Downloads");
+  await dialog.getByRole("button", { name: "Analyze" }).click();
+  await expect(dialog.getByRole("alert")).toHaveText(
+    "C:\Users\me\Downloads is not inside a git repository",
   );
+  await expect(dialog.getByRole("button", { name: "Save repository" })).toBeDisabled();
+  expect(await harnessCalls(page)).not.toContain("harness_analyze_repo");
+  expect(await harnessCalls(page)).not.toContain("harness_save_binding");
+  expect((await readE2EState(page)).harness?.bindings).toEqual([]);
+});
+
+test("removing a binding asks first and keeps it when the owner backs out", async ({ page }) => {
+  const existing: RepoBinding = {
+    projectId: PROJECT_ID,
+    repoPath: "C:/src/service",
+    baseBranch: "develop",
+    worktreeRoot: "D:\wt",
+    commands: { test: { executable: "npm", args: ["test"] } },
+    copyEnv: [".env"],
+    services: [],
+    envOverrides: [],
+    updatedAt: 1,
+  };
+  await seedHarness(page, { doctor: report(), bindings: [existing] });
+  await openBoard(page);
+  const dialog = await openRepoEditor(page);
+  const project = dialog.getByRole("button", { name: "Acme: Project PRJ" });
+  await expect(project).toContainText("Bound");
+  await expect(project).not.toContainText("Not bound");
+  await expect(dialog.getByLabel("Base branch")).toContainText("develop");
+
+  await dialog.getByRole("button", { name: "Remove binding" }).click();
+  await dialog.getByRole("button", { name: "Keep" }).click();
+  expect((await readE2EState(page)).harness?.bindings).toHaveLength(1);
+
+  await dialog.getByRole("button", { name: "Remove binding" }).click();
+  await dialog.getByRole("button", { name: "Confirm remove" }).click();
+  await expect(project).toContainText("Not bound");
+  expect((await readE2EState(page)).harness?.bindings).toEqual([]);
+});
+
+test("AI-proposed services, per-run env values and migrations are saved with the binding", async ({
+  page,
+}) => {
+  await seedHarness(
+    page,
+    {
+      doctor: report(),
+      detections: { [REPO]: detection },
+      analyses: { "C:/src/service": withServices },
+    },
+    REPO,
+  );
+  await openBoard(page);
+  const dialog = await openRepoEditor(page);
+  await dialog.getByRole("button", { name: "Browse" }).click();
+
+  await dialog.getByRole("button", { name: "Save repository" }).click();
+  await expect(dialog.getByRole("button", { name: "Acme: Project PRJ" })).toContainText("Bound");
 
   const [saved] = (await readE2EState(page)).harness?.bindings ?? [];
   expect(saved.services.map((service) => [service.name, service.image])).toEqual([
-    ["db", "postgres:16-alpine"],
+    ["db", "postgres:16"],
+    ["cache", "redis:7"],
   ]);
-  expect(saved.services[0]).not.toHaveProperty("include");
-  expect(saved.envOverrides).toEqual([
-    { key: "DATABASE_URL", value: "postgres://app:app@{services.db.host}:{services.db.port}/app" },
-    { key: "PORT", value: "{run.port}" },
-  ]);
+  expect(saved.envOverrides).toEqual(withServices.envOverrides);
   expect(saved.commands.migrate).toEqual({ executable: "bun", args: ["run", "db:migrate"] });
-});
-
-test("a malformed per-run env line is rejected before anything is saved", async ({ page }) => {
-  await seedHarness(page, { doctor: report(), detections: { [REPO]: withServices } }, REPO);
-  await openBoard(page);
-  const dialog = await openRepoEditor(page);
-  await dialog.getByRole("button", { name: "Browse" }).click();
-  await dialog.getByLabel(/Per-run \.env values/).fill("JUSTTEXT");
-  await dialog.getByRole("button", { name: "Save repository" }).click();
-  await expect(dialog.getByRole("alert")).toContainText('"JUSTTEXT" is not KEY=value');
-  expect((await readE2EState(page)).harness?.bindings).toEqual([]);
 });

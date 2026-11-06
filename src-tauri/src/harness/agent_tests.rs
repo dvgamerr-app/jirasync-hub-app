@@ -108,6 +108,26 @@ fn fake_agent_entry() {
         );
         return;
     }
+    // A setup command failed: fix the command (unless told not to) and run it again.
+    if prompt.contains("do not ask the owner") {
+        let name = if prompt.contains("`migrate`") {
+            "migrate"
+        } else {
+            "install"
+        };
+        if std::env::var("JIRASYNC_FAKE_SETUP_FIX").as_deref() != Ok("none") {
+            call(
+                "set_command",
+                json!({ "name": name, "executable": "git", "args": ["--version"] }),
+            );
+        }
+        call("run", json!({ "command": name }));
+        println!(
+            "{}",
+            json!({"type": "result", "subtype": "success", "num_turns": 2, "total_cost_usd": 0.0})
+        );
+        return;
+    }
     if std::env::var("JIRASYNC_FAKE_SLOW").is_ok() {
         std::thread::sleep(Duration::from_secs(4));
     }
@@ -284,6 +304,7 @@ fn binding(fx: &Fixture) -> RepoBinding {
                 args: ["grep", "--untracked", "-q", "PASS", "--", "result.txt"]
                     .map(String::from)
                     .to_vec(),
+                ..CommandSpec::default()
             }),
             ..RepoCommands::default()
         },
@@ -762,6 +783,40 @@ fn start_with(manager: &RunManager, binding: RepoBinding) -> RunRecord {
 }
 
 #[test]
+fn run_env_values_go_into_the_sub_repo_env_file_the_run_copied() {
+    let fx = fixture();
+    fx.clone.write(
+        "api/.env",
+        "DATABASE_URL=postgres://localhost:5432/app\nKEEP=1\n",
+    );
+    let manager = manager(&fx, &[], Duration::from_secs(600));
+    let mut binding = binding(&fx);
+    binding.copy_env = vec!["api/.env".into()];
+    binding.env_overrides = vec![crate::harness::docker::EnvVar {
+        key: "DATABASE_URL".into(),
+        value: "postgres://127.0.0.1:{run.port}/app".into(),
+    }];
+    let run = start_with(&manager, binding);
+    settle(&manager, &run.run_id);
+    manager.resume(&run.run_id, Decision::ApprovePlan).unwrap();
+    let done = settle(&manager, &run.run_id);
+    assert_eq!(done.status, RunStatus::ReadyForReview, "{:?}", done.error);
+
+    let worktree = PathBuf::from(done.worktree.unwrap().path);
+    let env = fs::read_to_string(worktree.join("api/.env")).unwrap();
+    assert!(env.contains("KEEP=1"), "{env}");
+    assert!(
+        !env.contains("localhost:5432"),
+        "the app must not keep the owner's database: {env}"
+    );
+    assert!(env.contains("DATABASE_URL=postgres://127.0.0.1:"), "{env}");
+    assert!(
+        !worktree.join(".env").exists(),
+        "no root .env is invented when the run copied a sub-repo env file"
+    );
+}
+
+#[test]
 fn migrations_and_run_env_values_are_applied_before_the_agent_works() {
     let fx = fixture();
     fx.clone.write(".env", "# mine\nPORT=3000\nAPI_KEY=keep\n");
@@ -771,6 +826,7 @@ fn migrations_and_run_env_values_are_applied_before_the_agent_works() {
     binding.commands.migrate = Some(CommandSpec {
         executable: "git".into(),
         args: vec!["--version".into()],
+        ..CommandSpec::default()
     });
     binding.env_overrides = vec![crate::harness::docker::EnvVar {
         key: "PORT".into(),
@@ -812,23 +868,110 @@ fn migrations_and_run_env_values_are_applied_before_the_agent_works() {
     assert_eq!(order.iter().filter(|step| **step == "migrate").count(), 1);
 }
 
+fn broken(executable: &str) -> Option<CommandSpec> {
+    Some(CommandSpec {
+        executable: executable.into(),
+        args: vec!["not-a-command".into()],
+        ..CommandSpec::default()
+    })
+}
+
 #[test]
-fn a_failed_migration_stops_before_the_agent_changes_anything() {
+fn a_failed_migration_is_fixed_by_the_agent_without_asking() {
     let fx = fixture();
     let manager = manager(&fx, &[], Duration::from_secs(600));
     let mut binding = binding(&fx);
-    binding.commands.migrate = Some(CommandSpec {
-        executable: "git".into(),
-        args: vec!["not-a-command".into()],
-    });
+    binding.commands.migrate = broken("git");
+    let run = start_with(&manager, binding);
+    settle(&manager, &run.run_id);
+    manager.resume(&run.run_id, Decision::ApprovePlan).unwrap();
+    let done = settle(&manager, &run.run_id);
+    assert_eq!(done.status, RunStatus::ReadyForReview, "{:?}", done.error);
+    assert_eq!(done.attempts, 1, "one repair round");
+    assert_eq!(
+        done.commands.migrate.unwrap().args,
+        ["--version"],
+        "the fixed command is what the run uses now"
+    );
+    let worktree = PathBuf::from(done.worktree.unwrap().path);
+    assert!(
+        worktree.join("result.txt").exists(),
+        "the task went on after the fix"
+    );
+}
+
+#[test]
+fn a_migration_the_agent_cannot_fix_fails_after_the_repair_rounds() {
+    let fx = fixture();
+    let manager = manager(
+        &fx,
+        &[("JIRASYNC_FAKE_SETUP_FIX", "none")],
+        Duration::from_secs(600),
+    );
+    let mut binding = binding(&fx);
+    binding.commands.migrate = broken("git");
     let run = start_with(&manager, binding);
     settle(&manager, &run.run_id);
     manager.resume(&run.run_id, Decision::ApprovePlan).unwrap();
     let failed = settle(&manager, &run.run_id);
     assert_eq!(failed.status, RunStatus::Failed);
-    assert!(failed.error.unwrap().contains("migrate failed"));
+    assert!(
+        failed
+            .error
+            .unwrap()
+            .contains("migrate still fails after 2 repair rounds"),
+        "it gives up instead of looping"
+    );
     let worktree = PathBuf::from(failed.worktree.unwrap().path);
-    assert!(!worktree.join("result.txt").exists(), "the agent never ran");
+    assert!(
+        !worktree.join("result.txt").exists(),
+        "the task never started"
+    );
+}
+
+#[test]
+fn a_failed_install_is_fixed_by_the_agent_before_it_plans() {
+    let fx = fixture();
+    let manager = manager(&fx, &[], Duration::from_secs(600));
+    let mut binding = binding(&fx);
+    binding.commands.install = broken("git");
+    let run = start_with(&manager, binding);
+    let planned = settle(&manager, &run.run_id);
+    assert_eq!(
+        planned.status,
+        RunStatus::AwaitingPlan,
+        "{:?}",
+        planned.error
+    );
+    assert_eq!(planned.commands.install.unwrap().args, ["--version"]);
+    let events = manager.events(&run.run_id, 0, usize::MAX).unwrap();
+    let installs = events
+        .iter()
+        .filter(|e| matches!(&e.kind, EventKind::StepStart { step, .. } if step == "install"))
+        .count();
+    assert_eq!(installs, 2, "the app ran install again after the fix");
+}
+
+#[test]
+fn a_failed_install_without_an_agent_still_fails_the_prepare_run() {
+    let fx = fixture();
+    let manager = manager(&fx, &[], Duration::from_secs(600));
+    let mut binding = binding(&fx);
+    binding.commands.install = broken("git");
+    let run = manager
+        .start(StartRun {
+            task_id: "task-acc1-PRJ-1".into(),
+            issue_key: "PRJ-1".into(),
+            binding,
+            context: None,
+            agent: None,
+            jira_url: None,
+            provider: "claude".into(),
+        })
+        .unwrap();
+    let failed = settle(&manager, &run.run_id);
+    assert_eq!(failed.status, RunStatus::Failed);
+    assert!(failed.error.unwrap().contains("install failed"));
 }
 
 /// Needs a local Docker engine: `cargo test --lib real_docker_services_live_only_while_implementing -- --ignored`.
@@ -991,6 +1134,7 @@ fn real_claude_plans_then_implements() {
             test: Some(CommandSpec {
                 executable: "bun".into(),
                 args: vec!["test".into()],
+                ..CommandSpec::default()
             }),
             ..RepoCommands::default()
         },

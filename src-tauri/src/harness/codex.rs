@@ -490,6 +490,7 @@ mod tests {
                 test: Some(CommandSpec {
                     executable: "bun".into(),
                     args: vec!["test".into()],
+                    ..CommandSpec::default()
                 }),
                 ..RepoCommands::default()
             },

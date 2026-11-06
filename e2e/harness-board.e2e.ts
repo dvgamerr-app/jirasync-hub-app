@@ -45,7 +45,8 @@ async function turnOn(page: Page) {
   await page.getByRole("button", { name: "Agent setup" }).click();
   const dialog = page.getByRole("dialog", { name: "Agent setup" });
   await dialog.getByRole("tab", { name: "external agents" }).click();
-  await dialog.getByLabel("Allow for").selectOption("8");
+  await dialog.getByRole("combobox", { name: "Allow for" }).click();
+  await page.getByRole("option", { name: "8 hours" }).click();
   await dialog.getByRole("button", { name: "Turn on" }).click();
   await expect(dialog.getByRole("status")).toContainText("On until");
   return dialog;

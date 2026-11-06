@@ -2,6 +2,7 @@
 import type {
   CiStatus,
   DoctorReport,
+  RepoAnalysis,
   RepoBinding,
   RepoDetection,
   RunEvent,
@@ -13,6 +14,8 @@ export interface E2EHarnessState {
   doctor: DoctorReport;
   /** Detection result per folder; a string is the error the native core would return. */
   detections: Record<string, RepoDetection | string>;
+  /** AI analysis per folder; a string is the error the native core would return. */
+  analyses?: Record<string, RepoAnalysis | string>;
   bindings: RepoBinding[];
   /** Fake native run journal: records (newest first) and their events. */
   runs?: RunRecord[];

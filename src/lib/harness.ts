@@ -9,6 +9,10 @@ export type CommandName = (typeof COMMAND_NAMES)[number];
 export interface CommandSpec {
   executable: string;
   args: string[];
+  /** Variables for this command only. */
+  env?: EnvVar[];
+  /** Commands run after this one while each passes. */
+  then?: CommandSpec[];
 }
 
 export type RepoCommands = Partial<Record<CommandName, CommandSpec | null>>;
@@ -87,8 +91,19 @@ export interface RepoBinding {
 
 export const harnessDoctor = () => invoke<DoctorReport>("harness_doctor");
 export const detectRepo = (path: string) => invoke<RepoDetection>("harness_detect_repo", { path });
-export const defaultWorktreeRoot = (repoPath: string) =>
-  invoke<string>("harness_default_worktree_root", { repoPath });
+/** What a read-only AI pass over the repo proposes (monorepos and submodules included). */
+export interface RepoAnalysis {
+  summary: string;
+  commands: RepoCommands;
+  services: ServiceSpec[];
+  /** Env files (relative to the repo root, sub-repos included) copied into each worktree. */
+  copyEnv: string[];
+  envOverrides: EnvVar[];
+  notes: string[];
+}
+
+export const analyzeRepo = (path: string) => invoke<RepoAnalysis>("harness_analyze_repo", { path });
+export const defaultWorktreeRoot = () => invoke<string>("harness_default_worktree_root");
 export const listRepoBindings = () => invoke<RepoBinding[]>("harness_list_bindings");
 export const saveRepoBinding = (binding: RepoBinding) =>
   invoke<RepoBinding>("harness_save_binding", { binding });

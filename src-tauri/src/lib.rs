@@ -167,6 +167,7 @@ pub fn run() {
             delete_secret,
             harness::harness_doctor,
             harness::harness_detect_repo,
+            harness::harness_analyze_repo,
             harness::harness_default_worktree_root,
             harness::harness_list_bindings,
             harness::harness_save_binding,

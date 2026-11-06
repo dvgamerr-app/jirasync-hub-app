@@ -5,14 +5,11 @@ import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { CheckCircle2, CircleAlert, FolderOpen, Loader2, RefreshCw, XCircle } from "lucide-react";
 import { useTaskStore } from "@/store/task-store";
 import {
-  COMMAND_NAMES,
+  analyzeRepo,
   defaultWorktreeRoot,
   detectRepo,
-  formatCommand,
-  parseCommand,
-  parseEnvLines,
-  formatEnvLines,
-  type CommandName,
+  type EnvVar,
+  type RepoAnalysis,
   type RepoBinding,
   type RepoCommands,
   type RepoDetection,
@@ -27,6 +24,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type SetupTab = "tools" | "repositories" | "external agents" | "sync";
 
@@ -121,53 +125,57 @@ function ToolsSection() {
 
 const DEFAULT_COPY_ENV = new Set([".env", ".env.local"]);
 
-type EditableService = ServiceSpec & { include: boolean };
-
-function commandTexts(commands: RepoCommands): Record<CommandName, string> {
-  return Object.fromEntries(
-    COMMAND_NAMES.map((name) => [name, formatCommand(commands[name])]),
-  ) as Record<CommandName, string>;
-}
-
 function BindingEditor({ project, binding }: { project: Project; binding?: RepoBinding }) {
   const { save, remove } = useTaskStore(
     useShallow((state) => ({ save: state.saveRepoBinding, remove: state.removeRepoBinding })),
   );
   const [repoPath, setRepoPath] = useState(binding?.repoPath ?? "");
   const [detection, setDetection] = useState<RepoDetection | null>(null);
+  const [analysis, setAnalysis] = useState<RepoAnalysis | null>(null);
+  const [analysisError, setAnalysisError] = useState("");
   const [baseBranch, setBaseBranch] = useState(binding?.baseBranch ?? "");
   const [worktreeRoot, setWorktreeRoot] = useState(binding?.worktreeRoot ?? "");
-  const [commands, setCommands] = useState(commandTexts(binding?.commands ?? {}));
+  const [commands, setCommands] = useState<RepoCommands>(binding?.commands ?? {});
   const [copyEnv, setCopyEnv] = useState<string[]>(binding?.copyEnv ?? []);
-  const [services, setServices] = useState<EditableService[]>(
-    (binding?.services ?? []).map((service) => ({ ...service, include: true })),
-  );
-  const [overrides, setOverrides] = useState(formatEnvLines(binding?.envOverrides ?? []));
-  const [busy, setBusy] = useState<"detect" | "save" | "remove" | null>(null);
+  const [services, setServices] = useState<ServiceSpec[]>(binding?.services ?? []);
+  const [overrides, setOverrides] = useState<EnvVar[]>(binding?.envOverrides ?? []);
+  const [busy, setBusy] = useState<"detect" | "analyze" | "save" | "remove" | null>(null);
   const [error, setError] = useState("");
   const [confirmRemove, setConfirmRemove] = useState(false);
 
-  const envChoices = useMemo(
-    () => [...new Set([...(detection?.envFiles ?? []), ...copyEnv])].sort(),
-    [detection, copyEnv],
-  );
-
+  // Base branch comes from GitHub; everything else is worked out from the repo by the AI.
   async function detect(path = repoPath) {
     setBusy("detect");
     setError("");
     setDetection(null);
+    setAnalysis(null);
+    setAnalysisError("");
+    let found: RepoDetection;
     try {
-      const result = await detectRepo(path);
-      setDetection(result);
-      setRepoPath(result.root);
-      setBaseBranch(result.defaultBranch);
-      setCommands(commandTexts(result.commands));
-      setCopyEnv(result.envFiles.filter((file) => DEFAULT_COPY_ENV.has(file)));
-      setServices(result.services.map((service) => ({ ...service, include: true })));
-      setOverrides(formatEnvLines(result.envOverrides));
-      if (!worktreeRoot) setWorktreeRoot(await defaultWorktreeRoot(result.root));
+      found = await detectRepo(path);
     } catch (detectError) {
       setError(getErrorMessage(detectError));
+      setBusy(null);
+      return;
+    }
+    setDetection(found);
+    setRepoPath(found.root);
+    setBaseBranch(found.defaultBranch);
+    setCommands(found.commands);
+    setCopyEnv(found.envFiles.filter((file) => DEFAULT_COPY_ENV.has(file)));
+    setServices(found.services);
+    setOverrides(found.envOverrides);
+    try {
+      if (!worktreeRoot) setWorktreeRoot(await defaultWorktreeRoot());
+      setBusy("analyze");
+      const proposed = await analyzeRepo(found.root);
+      setAnalysis(proposed);
+      setCommands(proposed.commands);
+      setServices(proposed.services);
+      setCopyEnv(proposed.copyEnv);
+      setOverrides(proposed.envOverrides);
+    } catch (analyzeError) {
+      setAnalysisError(getErrorMessage(analyzeError));
     } finally {
       setBusy(null);
     }
@@ -181,23 +189,24 @@ function BindingEditor({ project, binding }: { project: Project; binding?: RepoB
     }
   }
 
+  async function changeWorktreeRoot() {
+    const picked = await openFolderDialog({ directory: true, multiple: false });
+    if (typeof picked === "string") setWorktreeRoot(picked);
+  }
+
   async function submit() {
     setBusy("save");
     setError("");
     try {
-      const parsed: RepoCommands = {};
-      for (const name of COMMAND_NAMES) parsed[name] = parseCommand(commands[name]);
       await save({
         projectId: project.id,
         repoPath,
         baseBranch,
         worktreeRoot,
-        commands: parsed,
+        commands,
         copyEnv,
-        services: services
-          .filter((service) => service.include)
-          .map(({ include: _include, ...service }) => service),
-        envOverrides: parseEnvLines(overrides),
+        services,
+        envOverrides: overrides,
         updatedAt: 0,
       });
       toast({ title: "Repository saved", description: `${project.name} runs in ${repoPath}` });
@@ -256,24 +265,44 @@ function BindingEditor({ project, binding }: { project: Project; binding?: RepoB
             disabled={!repoPath || !!busy}
             onClick={() => void detect()}
           >
-            {busy === "detect" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-            Detect
+            {(busy === "detect" || busy === "analyze") && (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            )}
+            Analyze
           </Button>
         </div>
       </div>
 
-      {detection && (
+      {busy === "analyze" && (
+        <p className="text-muted-foreground text-[12px]" role="status">
+          Reading the repository with AI to work out its commands and services…
+        </p>
+      )}
+      {detection && busy !== "analyze" && (
         <div className="bg-muted/40 space-y-1 rounded-md border p-2 text-[12px]" role="status">
           <p>
-            Detected <strong>{detection.ecosystem ?? "no known project type"}</strong>
+            {analysis ? (
+              <>
+                <strong>{analysis.summary || "Analyzed by AI"}</strong>
+              </>
+            ) : (
+              <>
+                Detected <strong>{detection.ecosystem ?? "no known project type"}</strong>
+              </>
+            )}
             {detection.remoteUrl ? ` · ${detection.remoteUrl}` : " · no origin remote"}
           </p>
-          {detection.notes.map((note) => (
+          {analysisError && (
+            <p className="text-amber-600 dark:text-amber-400">
+              AI analysis failed ({analysisError}); using a guess from the repo files.
+            </p>
+          )}
+          {[...(analysis ? [] : detection.notes), ...(analysis?.notes ?? [])].map((note) => (
             <p key={note} className="text-amber-600 dark:text-amber-400">
               {note}
             </p>
           ))}
-          {detection.missingExecutables.length > 0 && (
+          {detection.missingExecutables.length > 0 && !analysis && (
             <p className="text-destructive">
               Not installed on this machine: {detection.missingExecutables.join(", ")}
             </p>
@@ -284,151 +313,34 @@ function BindingEditor({ project, binding }: { project: Project; binding?: RepoB
               {detection.missingEnvKeys.join(", ")}
             </p>
           )}
-          {detection.serviceEnvKeys.length > 0 && (
-            <p>Service settings: {detection.serviceEnvKeys.join(", ")}</p>
-          )}
-          {detection.composeFiles.length > 0 && (
-            <p>Compose files: {detection.composeFiles.join(", ")}</p>
-          )}
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <Label htmlFor="harness-base-branch">Base branch</Label>
-          <Input
-            id="harness-base-branch"
-            value={baseBranch}
-            onChange={(event) => setBaseBranch(event.target.value)}
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="harness-worktree-root">Worktree folder</Label>
-          <Input
-            id="harness-worktree-root"
-            value={worktreeRoot}
-            onChange={(event) => setWorktreeRoot(event.target.value)}
-          />
-        </div>
-      </div>
-
-      <fieldset className="space-y-2">
-        <legend className="text-[12px] font-medium">
-          Commands the app runs for you (the agent cannot run anything else)
-        </legend>
-        {COMMAND_NAMES.map((name) => (
-          <div key={name} className="grid grid-cols-[64px_1fr] items-center gap-2">
-            <Label htmlFor={`harness-command-${name}`} className="text-[12px]">
-              {name}
-            </Label>
-            <Input
-              id={`harness-command-${name}`}
-              aria-label={`${name} command`}
-              className="font-mono text-[12px]"
-              placeholder="not set"
-              value={commands[name]}
-              onChange={(event) =>
-                setCommands((current) => ({ ...current, [name]: event.target.value }))
-              }
-            />
-          </div>
-        ))}
-      </fieldset>
-
-      <fieldset className="space-y-2" aria-label="Services">
-        <legend className="text-[12px] font-medium">
-          Services started per run with Docker (own database, random local ports)
-        </legend>
-        {services.length === 0 && (
-          <p className="text-muted-foreground text-[12px]">
-            None. The run uses whatever its .env points at.
-          </p>
-        )}
-        {services.map((service, index) => (
-          <div
-            key={service.name}
-            className="grid grid-cols-[auto_80px_1fr_72px] items-center gap-2"
-            aria-label={`Service ${service.name}`}
+      <dl className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-1 text-[12px]">
+        <dt className="text-muted-foreground">Base branch</dt>
+        <dd className="font-mono" aria-label="Base branch">
+          {baseBranch || "—"} <span className="text-muted-foreground font-sans">(from GitHub)</span>
+        </dd>
+        <dt className="text-muted-foreground">Worktree folder</dt>
+        <dd className="flex items-start gap-2">
+          <span className="font-mono break-all" aria-label="Worktree folder">
+            {worktreeRoot || "—"}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-5 shrink-0 px-1.5 text-[11px]"
+            onClick={() => void changeWorktreeRoot()}
           >
-            <input
-              type="checkbox"
-              aria-label={`Start ${service.name}`}
-              checked={service.include}
-              onChange={(event) =>
-                setServices((current) =>
-                  current.map((entry, i) =>
-                    i === index ? { ...entry, include: event.target.checked } : entry,
-                  ),
-                )
-              }
-            />
-            <span className="font-mono text-[12px]">{service.name}</span>
-            <Input
-              aria-label={`${service.name} image`}
-              className="font-mono text-[12px]"
-              value={service.image}
-              onChange={(event) =>
-                setServices((current) =>
-                  current.map((entry, i) =>
-                    i === index ? { ...entry, image: event.target.value } : entry,
-                  ),
-                )
-              }
-            />
-            <Input
-              aria-label={`${service.name} port`}
-              className="font-mono text-[12px]"
-              inputMode="numeric"
-              value={service.port || ""}
-              onChange={(event) =>
-                setServices((current) =>
-                  current.map((entry, i) =>
-                    i === index ? { ...entry, port: Number(event.target.value) || 0 } : entry,
-                  ),
-                )
-              }
-            />
-          </div>
-        ))}
-        <Label htmlFor="harness-env-overrides" className="text-[12px]">
-          Per-run .env values (KEY=value; use {"{services.<name>.host}"}, {"{services.<name>.port}"}
-          , {"{run.port}"})
-        </Label>
-        <textarea
-          id="harness-env-overrides"
-          className="border-input bg-background w-full rounded-md border p-2 font-mono text-[12px]"
-          rows={3}
-          value={overrides}
-          placeholder="DATABASE_URL=postgres://app:app@{services.db.host}:{services.db.port}/app"
-          onChange={(event) => setOverrides(event.target.value)}
-        />
-      </fieldset>
-
-      {envChoices.length > 0 && (
-        <fieldset className="space-y-1">
-          <legend className="text-[12px] font-medium">
-            Env files copied into each worktree (the agent can read them)
-          </legend>
-          <div className="flex flex-wrap gap-3">
-            {envChoices.map((file) => (
-              <label key={file} className="flex items-center gap-1.5 font-mono text-[12px]">
-                <input
-                  type="checkbox"
-                  checked={copyEnv.includes(file)}
-                  onChange={(event) =>
-                    setCopyEnv((current) =>
-                      event.target.checked
-                        ? [...current, file]
-                        : current.filter((entry) => entry !== file),
-                    )
-                  }
-                />
-                {file}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-      )}
+            Change
+          </Button>
+        </dd>
+      </dl>
+      <p className="text-muted-foreground text-[11px]">
+        Commands, services and env values are worked out by AI and saved as a .config.json file next
+        to the worktrees. If one does not work, fix it in that file.
+      </p>
 
       {error && (
         <p className="text-destructive text-[12px]" role="alert">
@@ -494,11 +406,8 @@ function RepositoriesSection() {
   const sorted = useMemo(() => {
     const orgName = new Map(organizations.map((org) => [org.id, org.name]));
     return projects
-      .map((project) => ({
-        project,
-        label: `${orgName.get(project.orgId) ?? ""}: ${project.name}`,
-      }))
-      .sort((a, b) => a.label.localeCompare(b.label));
+      .map((project) => ({ project, org: orgName.get(project.orgId) ?? "" }))
+      .sort((a, b) => a.project.name.localeCompare(b.project.name));
   }, [organizations, projects]);
   const selected = projects.find((project) => project.id === selectedId);
 
@@ -510,13 +419,13 @@ function RepositoriesSection() {
   return (
     <section aria-label="Repositories" className="grid grid-cols-[220px_1fr] gap-4">
       <ul className="max-h-[50vh] space-y-1 overflow-y-auto text-[13px]">
-        {sorted.map(({ project, label }) => {
+        {sorted.map(({ project, org }) => {
           const binding = bindings.find((entry) => entry.projectId === project.id);
           return (
             <li key={project.id}>
               <button
                 type="button"
-                aria-label={label}
+                aria-label={`${org}: ${project.name}`}
                 aria-pressed={project.id === selectedId}
                 className={cn(
                   "hover:bg-muted w-full rounded-md px-2 py-1.5 text-left",
@@ -524,9 +433,9 @@ function RepositoriesSection() {
                 )}
                 onClick={() => setSelectedId(project.id)}
               >
-                <span className="block truncate font-medium">{label}</span>
+                <span className="block truncate font-medium">{project.name}</span>
                 <span className="text-muted-foreground block truncate text-[11px]">
-                  {binding ? binding.repoPath : "Not bound"}
+                  {org} · {binding ? "Bound" : "Not bound"}
                 </span>
               </button>
             </li>
@@ -808,18 +717,18 @@ function ExternalAgentsSection() {
       ) : (
         <div className="flex items-center gap-2">
           <Label htmlFor="board-hours">Allow for</Label>
-          <select
-            id="board-hours"
-            className="h-8 rounded-md border px-2 text-[13px]"
-            value={hours}
-            onChange={(event) => setHours(Number(event.target.value))}
-          >
-            {BOARD_ACCESS_HOURS.map((option) => (
-              <option key={option} value={option}>
-                {option} {option === 1 ? "hour" : "hours"}
-              </option>
-            ))}
-          </select>
+          <Select value={String(hours)} onValueChange={(value) => setHours(Number(value))}>
+            <SelectTrigger id="board-hours" aria-label="Allow for" className="h-8 w-28 text-[13px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {BOARD_ACCESS_HOURS.map((option) => (
+                <SelectItem key={option} value={String(option)}>
+                  {option} {option === 1 ? "hour" : "hours"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button
             type="button"
             size="sm"

@@ -217,7 +217,8 @@ pub struct RunTools {
     journal: Arc<Journal>,
     control: Arc<Control>,
     worktree: PathBuf,
-    commands: RepoCommands,
+    /// Starts as the run's commands; `set_command` replaces one when the agent fixes it.
+    commands: Mutex<RepoCommands>,
     skills_dir: PathBuf,
     phase: AtomicU8,
     plan: Mutex<Option<String>>,
@@ -240,7 +241,7 @@ impl RunTools {
             journal,
             control,
             worktree,
-            commands,
+            commands: Mutex::new(commands),
             skills_dir,
             phase: AtomicU8::new(Phase::Planning as u8),
             plan: Mutex::new(None),
@@ -309,7 +310,14 @@ impl RunTools {
     fn allowed_tools(&self) -> &'static [&'static str] {
         match self.phase() {
             Phase::Planning => &["skill_list", "skill_get", "git", "get_log", "submit_plan"],
-            Phase::Implementing => &["skill_list", "skill_get", "git", "get_log", "run"],
+            Phase::Implementing => &[
+                "skill_list",
+                "skill_get",
+                "git",
+                "get_log",
+                "run",
+                "set_command",
+            ],
             Phase::Reviewing => &["skill_list", "skill_get", "git", "get_log", "submit_review"],
             Phase::Drafting => &[
                 "skill_list",
@@ -483,9 +491,7 @@ impl RunTools {
 
     fn start_dev(&self) -> Result<String, String> {
         let spec = self
-            .commands
-            .dev
-            .clone()
+            .command("dev")
             .ok_or("this repository has no dev command in Setup")?;
         let mut dev = self.dev.lock().unwrap();
         if let Some((process, port)) = dev.as_mut() {
@@ -544,7 +550,13 @@ impl RunTools {
                 let files: Vec<String> = arguments
                     .get("files")
                     .and_then(Value::as_array)
-                    .map(|files| files.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                    .map(|files| {
+                        files
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_string)
+                            .collect()
+                    })
                     .unwrap_or_default();
                 if files.is_empty() {
                     return Err("files: list the .hurl files to run".into());
@@ -562,20 +574,96 @@ impl RunTools {
                         .ok_or_else(|| format!("{file} is not a .hurl file in the worktree"))?;
                     args.push(relative);
                 }
-                self.execute("hurl", &CommandSpec { executable: "hurl".into(), args })
+                self.execute(
+                    "hurl",
+                    &CommandSpec {
+                        executable: "hurl".into(),
+                        args,
+                        ..CommandSpec::default()
+                    },
+                )
             }
-            "build" | "test" | "lint" => {
-                let spec = match command {
-                    "build" => self.commands.build.clone(),
-                    "test" => self.commands.test.clone(),
-                    _ => self.commands.lint.clone(),
-                }
-                .ok_or_else(|| format!("this repository has no {command} command in Setup"))?;
+            "build" | "test" | "lint" | "install" | "migrate" => {
+                let spec = self
+                    .command(command)
+                    .ok_or_else(|| format!("this repository has no {command} command in Setup"))?;
                 self.execute(command, &spec)
             }
-            "install" => Err("dependencies are installed by the app; edit the manifest and say so in your report".into()),
-            other => Err(format!("unknown command \"{other}\"; use build, test, lint, dev or hurl")),
+            other => Err(format!(
+                "unknown command \"{other}\"; use build, test, lint, install, migrate, dev or hurl"
+            )),
         }
+    }
+
+    fn command(&self, name: &str) -> Option<CommandSpec> {
+        self.commands.lock().unwrap().slot_mut(name)?.clone()
+    }
+
+    /// The agent fixes a project command that is wrong (not its code): for this run, and in
+    /// the config file beside the worktrees so the next run starts with the fix.
+    fn set_command(&self, arguments: &Value) -> Result<String, String> {
+        let name = arguments.get("name").and_then(Value::as_str).unwrap_or("");
+        let executable = arguments
+            .get("executable")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        let spec = if executable.is_empty() {
+            None
+        } else {
+            let mut fields = arguments.clone();
+            if let Some(object) = fields.as_object_mut() {
+                object.remove("name");
+            }
+            let spec: CommandSpec = serde_json::from_value(fields).map_err(|e| {
+                format!("{e}; args is a list of strings, env a list of {{key, value}}, then a list of commands")
+            })?;
+            // Bare tool names only: a path could point the app at a script the agent just wrote.
+            for part in std::iter::once(&spec).chain(&spec.then) {
+                let tool = part.executable.trim();
+                if tool.contains(['/', '\\']) || tool.contains(char::is_whitespace) {
+                    return Err(format!("`{tool}` must be a tool name on PATH (e.g. bun), not a path or a command line; put the rest in args"));
+                }
+            }
+            super::bindings::check_command(name, &spec)?;
+            Some(spec)
+        };
+        *self
+            .commands
+            .lock()
+            .unwrap()
+            .slot_mut(name)
+            .ok_or_else(|| {
+                format!(
+                    "unknown command \"{name}\"; use install, build, test, lint, dev or migrate"
+                )
+            })? = spec.clone();
+        self.journal.update(|record| {
+            if let Some(slot) = record.commands.slot_mut(name) {
+                *slot = spec.clone();
+            }
+        });
+        let shown = spec
+            .as_ref()
+            .map_or_else(|| "removed".to_string(), CommandSpec::shown_chain);
+        self.journal.push(EventKind::Agent {
+            kind: "command_set".into(),
+            text: format!("{name}: {shown}"),
+        });
+        let record = self.journal.record();
+        let saved = match self.worktree.parent() {
+            Some(root) => super::bindings::set_config_command(
+                &super::bindings::config_file(root, &record.project_id),
+                name,
+                spec,
+            )?,
+            None => false,
+        };
+        Ok(if saved {
+            format!("{name} is now `{shown}` for this run and the next ones. Run it again with mcp__harness__run.")
+        } else {
+            format!("{name} is now `{shown}` for this run. Run it again with mcp__harness__run.")
+        })
     }
 
     fn submit_plan(&self, arguments: &Value) -> Result<String, String> {
@@ -610,8 +698,9 @@ impl ToolHost for RunTools {
             json!({ "name": "skill_get", "description": "Load a skill from JiraSync Hub: SKILL.md by default, or a file it links to (e.g. references/hurl.md).", "inputSchema": { "type": "object", "properties": { "name": string, "file": string }, "required": ["name"] } }),
             json!({ "name": "git", "description": "Read-only git information for the worktree.", "inputSchema": { "type": "object", "properties": { "op": { "type": "string", "enum": ["status", "diff", "log", "show"] } }, "required": ["op"] } }),
             json!({ "name": "get_log", "description": "Read a page of the full output of an earlier run (its logId) or of the dev server (\"dev\").", "inputSchema": { "type": "object", "properties": { "logId": string, "offset": { "type": "number" }, "limit": { "type": "number" } }, "required": ["logId"] } }),
-            json!({ "name": "run", "description": "Ask the app to execute a project command in the worktree: build, test, lint, dev (starts the dev server) or hurl (runs .hurl files against dev). The owner sees it live. Returns status, exitCode, logId and the output tail.", "inputSchema": { "type": "object", "properties": { "command": { "type": "string", "enum": ["build", "test", "lint", "dev", "hurl"] }, "files": { "type": "array", "items": string } }, "required": ["command"] } }),
-            json!({ "name": "submit_plan", "description": "Submit your implementation plan (markdown: goal, files to change, steps, checks to run) for the owner to approve. Only during planning.", "inputSchema": { "type": "object", "properties": { "plan": string }, "required": ["plan"] } }),
+            json!({ "name": "run", "description": "Ask the app to execute a project command in the worktree: build, test, lint, install, migrate, dev (starts the dev server) or hurl (runs .hurl files against dev). The owner sees it live. Returns status, exitCode, logId and the output tail.", "inputSchema": { "type": "object", "properties": { "command": { "type": "string", "enum": ["build", "test", "lint", "install", "migrate", "dev", "hurl"] }, "files": { "type": "array", "items": string } }, "required": ["command"] } }),
+            json!({ "name": "set_command", "description": "Fix a project command that is itself wrong (wrong flags, folder or script name), without asking: name is install, build, test, lint, dev or migrate; executable is a tool name on PATH (never a shell); args is the rest; env sets variables for it; then lists more commands run after it while each passes (e.g. installing two sub-repos). An empty executable removes the command. It applies to this run and is saved for later runs. Fix your code instead when the code is what fails.", "inputSchema": { "type": "object", "properties": { "name": { "type": "string", "enum": ["install", "build", "test", "lint", "dev", "migrate"] }, "executable": string, "args": { "type": "array", "items": string }, "env": { "type": "array", "items": { "type": "object", "properties": { "key": string, "value": string }, "required": ["key", "value"] } }, "then": { "type": "array", "items": { "type": "object", "properties": { "executable": string, "args": { "type": "array", "items": string }, "env": { "type": "array" } }, "required": ["executable"] } } }, "required": ["name", "executable"] } }),
+            json!({ "name": "submit_plan", "description": "Submit your implementation plan (markdown: goal, what you reuse instead of writing new code, files to change, steps, what you skipped, checks to run) for the owner to approve. Only during planning.", "inputSchema": { "type": "object", "properties": { "plan": string }, "required": ["plan"] } }),
             json!({ "name": "submit_review", "description": "Submit your independent review of the change: verdict approve or concerns, a short summary, and findings (file + issue) for anything that does not match the task, is risky, or is untested. Only while reviewing.", "inputSchema": { "type": "object", "properties": { "verdict": { "type": "string", "enum": ["approve", "concerns"] }, "summary": string, "findings": { "type": "array", "items": { "type": "object", "properties": { "file": string, "issue": string }, "required": ["issue"] } } }, "required": ["verdict", "summary"] } }),
             json!({ "name": "submit_pr_draft", "description": "Submit the commit message and pull request text for the accepted change. title and commitMessage: English conventional commit (feat: ..., fix: ...). summary, reason, changes, impact: Thai markdown bullets grounded in the actual diff. Do not write test results or AI attribution; the app adds the testing section from its own checks.", "inputSchema": { "type": "object", "properties": { "title": string, "commitMessage": string, "summary": string, "reason": string, "changes": string, "impact": string }, "required": ["title", "commitMessage", "summary", "reason", "changes", "impact"] } }),
             json!({ "name": "approve", "description": "Permission handler used by the app. Not for the agent.", "inputSchema": { "type": "object", "properties": { "tool_name": string, "input": { "type": "object" }, "tool_use_id": string }, "required": ["tool_name", "input"] } }),
@@ -641,6 +730,7 @@ impl ToolHost for RunTools {
             "git" => self.git(&arguments),
             "get_log" => self.get_log(&arguments),
             "run" => self.run(&arguments),
+            "set_command" => self.set_command(&arguments),
             "submit_plan" => self.submit_plan(&arguments),
             "submit_review" => {
                 let review = validate_review(&arguments)?;
@@ -682,6 +772,7 @@ mod tests {
         CommandSpec {
             executable: executable.into(),
             args: args.iter().map(|a| a.to_string()).collect(),
+            ..CommandSpec::default()
         }
     }
 
@@ -856,6 +947,129 @@ mod tests {
             tools.exec_ms() > 0,
             "execution time is tracked for the budget"
         );
+    }
+
+    #[test]
+    fn the_agent_fixes_a_wrong_command_for_this_run_and_the_saved_config() {
+        let root = TempDir::new("tools-setcmd");
+        let worktree = root.path().join("run1");
+        fs::create_dir_all(&worktree).unwrap();
+        let config = root.path().join("p.config.json");
+        fs::write(
+            &config,
+            r#"{"commands":{"test":{"executable":"git","args":["not-a-command"]}},"copyEnv":["api/.env"]}"#,
+        )
+        .unwrap();
+        let journal_dir = TempDir::new("tools-setcmd-journal");
+        let record = RunRecord {
+            run_id: "abc123".into(),
+            project_id: "p".into(),
+            status: RunStatus::Running,
+            ..RunRecord::default()
+        };
+        let journal = Arc::new(
+            Journal::create(journal_dir.path().join("abc123"), record, Arc::new(|_| {})).unwrap(),
+        );
+        let tools = RunTools::new(
+            journal.clone(),
+            Arc::new(Control::default()),
+            worktree,
+            RepoCommands {
+                test: Some(cmd("git", &["not-a-command"])),
+                ..RepoCommands::default()
+            },
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/harness-skills"),
+        );
+
+        // Planning is read-only: no command changes before the plan is approved.
+        let early = json!({ "name": "test", "executable": "git", "args": ["--version"] });
+        assert!(tools.call("set_command", early.clone()).is_err());
+        tools.set_phase(Phase::Implementing);
+        assert_eq!(
+            parse(tools.call("run", json!({ "command": "test" })))["status"],
+            "failed"
+        );
+
+        let saved = tools.call("set_command", early).unwrap();
+        assert!(saved.contains("next ones"), "{saved}");
+        assert_eq!(
+            parse(tools.call("run", json!({ "command": "test" })))["status"],
+            "passed"
+        );
+        assert_eq!(
+            journal.record().commands.test,
+            Some(cmd("git", &["--version"]))
+        );
+        let text = fs::read_to_string(&config).unwrap();
+        assert!(text.contains("--version"), "{text}");
+        assert!(
+            text.contains("api/.env"),
+            "the rest of the config is kept: {text}"
+        );
+
+        // A path or a command line is refused, and so is an unknown slot.
+        for bad in [
+            json!({ "name": "test", "executable": "./scripts/x.sh" }),
+            json!({ "name": "test", "executable": "bun test" }),
+            json!({ "name": "test", "executable": "powershell", "args": ["-Command", "bun test"] }),
+            json!({ "name": "test", "executable": "CMD.EXE", "args": ["/c", "bun test"] }),
+            json!({ "name": "deploy", "executable": "bun" }),
+            json!({ "name": "test", "executable": "bun", "args": "test" }),
+        ] {
+            assert!(tools.call("set_command", bad.clone()).is_err(), "{bad}");
+        }
+        assert_eq!(
+            journal.record().commands.test,
+            Some(cmd("git", &["--version"])),
+            "a refused change leaves the command as it was"
+        );
+    }
+
+    #[test]
+    fn a_command_chain_runs_in_order_with_its_own_env_and_stops_at_a_failure() {
+        let fx = fixture(RepoCommands::default());
+        let tools = &fx.tools;
+        tools.set_phase(Phase::Implementing);
+        let env = json!([
+            { "key": "GIT_CONFIG_COUNT", "value": "1" },
+            { "key": "GIT_CONFIG_KEY_0", "value": "user.nickname" },
+            { "key": "GIT_CONFIG_VALUE_0", "value": "from-env" }
+        ]);
+        tools
+            .call(
+                "set_command",
+                json!({ "name": "test", "executable": "git", "args": ["--version"],
+                        "then": [{ "executable": "git", "args": ["config", "user.nickname"], "env": env }] }),
+            )
+            .unwrap();
+        let passed = parse(tools.call("run", json!({ "command": "test" })));
+        assert_eq!(passed["status"], "passed");
+        let tail = passed["tail"].as_str().unwrap();
+        assert!(
+            tail.contains("git version") && tail.contains("from-env"),
+            "{tail}"
+        );
+
+        // A failing first command stops the chain: the second never starts.
+        tools
+            .call(
+                "set_command",
+                json!({ "name": "build", "executable": "git", "args": ["not-a-command"],
+                        "then": [{ "executable": "git", "args": ["config", "user.nickname"], "env": env }] }),
+            )
+            .unwrap();
+        let failed = parse(tools.call("run", json!({ "command": "build" })));
+        assert_eq!(failed["status"], "failed");
+        assert!(!failed["tail"].as_str().unwrap().contains("from-env"));
+
+        // A chain is one level deep, and a shell is refused inside it too.
+        for bad in [
+            json!({ "name": "lint", "executable": "git", "then": [{ "executable": "git", "then": [{ "executable": "git" }] }] }),
+            json!({ "name": "lint", "executable": "git", "then": [{ "executable": "pwsh", "args": ["-c", "x"] }] }),
+            json!({ "name": "lint", "executable": "git", "env": [{ "key": "BAD KEY", "value": "x" }] }),
+        ] {
+            assert!(tools.call("set_command", bad.clone()).is_err(), "{bad}");
+        }
     }
 
     #[test]

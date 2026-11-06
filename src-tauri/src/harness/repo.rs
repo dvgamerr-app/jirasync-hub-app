@@ -2,7 +2,7 @@
 // service env keys for any bound repo, deterministically from its files (no AI, no tokens).
 // The owner reviews and saves the result as a binding; runs only use the saved binding.
 use super::docker::{parse_compose, propose_overrides, EnvVar, ServiceSpec};
-use super::exec::{git, resolve_executable};
+use super::exec::{git, resolve_executable, run};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fs;
@@ -11,17 +11,48 @@ use std::time::Duration;
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(20);
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandSpec {
     pub executable: String,
+    #[serde(default)]
     pub args: Vec<String>,
+    /// Extra environment for this command only (instead of a shell's `KEY=value cmd`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<EnvVar>,
+    /// Commands run after this one, in order, while each succeeds (instead of a shell's `&&`),
+    /// e.g. installing two sub-repos. They have no `then` of their own.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub then: Vec<CommandSpec>,
+}
+
+impl CommandSpec {
+    /// `KEY=value tool args` for this command alone, as the owner reads it in the run log.
+    pub fn shown(&self) -> String {
+        self.env
+            .iter()
+            .map(|var| format!("{}={}", var.key, var.value))
+            .chain(std::iter::once(self.executable.clone()))
+            .chain(self.args.iter().cloned())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// The command and its `then` chain, written the way a shell reader expects (`a && b`).
+    pub fn shown_chain(&self) -> String {
+        std::iter::once(self)
+            .chain(&self.then)
+            .map(CommandSpec::shown)
+            .collect::<Vec<_>>()
+            .join(" && ")
+    }
 }
 
 fn spec(executable: &str, args: &[&str]) -> CommandSpec {
     CommandSpec {
         executable: executable.into(),
         args: args.iter().map(|arg| arg.to_string()).collect(),
+        ..CommandSpec::default()
     }
 }
 
@@ -38,6 +69,18 @@ pub struct RepoCommands {
 }
 
 impl RepoCommands {
+    pub fn slot_mut(&mut self, name: &str) -> Option<&mut Option<CommandSpec>> {
+        Some(match name {
+            "install" => &mut self.install,
+            "build" => &mut self.build,
+            "test" => &mut self.test,
+            "lint" => &mut self.lint,
+            "dev" => &mut self.dev,
+            "migrate" => &mut self.migrate,
+            _ => return None,
+        })
+    }
+
     pub fn all(&self) -> [(&'static str, Option<&CommandSpec>); 6] {
         [
             ("install", self.install.as_ref()),
@@ -289,6 +332,10 @@ pub fn detect_files(root: &Path) -> FileDetection {
             .push("no known manifest found; set the commands by hand".into());
     }
     detection.ecosystem = ecosystems.into_iter().next();
+    // Qlty lints every language in the repo with one command, so it replaces per-language lint.
+    if root.join(".qlty").join("qlty.toml").is_file() {
+        detection.commands.lint = Some(spec("qlty", &["check", "--all"]));
+    }
 
     detection.env_files = ENV_CANDIDATES
         .iter()
@@ -353,7 +400,31 @@ pub fn git_root(path: &Path) -> Result<PathBuf, String> {
     Ok(PathBuf::from(root))
 }
 
+/// The default branch GitHub reports for origin (needs `gh` and a GitHub remote).
+fn github_default_branch(root: &Path) -> Option<String> {
+    let gh = resolve_executable("gh")?;
+    let output = run(
+        &gh,
+        &[
+            "repo",
+            "view",
+            "--json",
+            "defaultBranchRef",
+            "-q",
+            ".defaultBranchRef.name",
+        ],
+        Some(root),
+        GIT_TIMEOUT,
+    )
+    .ok()?;
+    let branch = output.stdout.trim();
+    (output.ok() && !branch.is_empty()).then(|| branch.to_string())
+}
+
 pub fn default_branch(root: &Path) -> String {
+    if let Some(branch) = github_default_branch(root) {
+        return branch;
+    }
     if let Ok(head) = git(
         &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
         root,
@@ -416,6 +487,26 @@ mod tests {
             "no lint script, no lint command"
         );
         assert!(detection.notes.is_empty(), "{:?}", detection.notes);
+    }
+
+    #[test]
+    fn qlty_config_makes_qlty_the_lint_command() {
+        let dir = TempDir::new("qlty");
+        dir.write("package.json", r#"{"scripts":{"lint":"eslint ."}}"#);
+        dir.write("bun.lock", "{}");
+        dir.write(".qlty/qlty.toml", "config_version = \"0\"");
+        assert_eq!(
+            detect_files(dir.path()).commands.lint,
+            Some(spec("qlty", &["check", "--all"]))
+        );
+
+        let plain = TempDir::new("no-qlty");
+        plain.write("package.json", r#"{"scripts":{"lint":"eslint ."}}"#);
+        plain.write("bun.lock", "{}");
+        assert_eq!(
+            detect_files(plain.path()).commands.lint,
+            Some(spec("bun", &["run", "lint"]))
+        );
     }
 
     #[test]

@@ -410,6 +410,7 @@ pub(super) enum StepOutcome {
 /// Turns one stdout line into journal events (e.g. Claude's stream-json); `None` = plain line.
 pub(super) type LineParser = fn(&str, &str) -> Option<Vec<EventKind>>;
 
+#[derive(Clone, Copy)]
 pub(super) struct Step<'a> {
     pub name: &'a str,
     pub command: &'a CommandSpec,
@@ -539,10 +540,7 @@ fn spawn_streamed(
             command.executable
         )
     })?;
-    let shown = std::iter::once(command.executable.as_str())
-        .chain(command.args.iter().map(String::as_str))
-        .collect::<Vec<_>>()
-        .join(" ");
+    let shown = command.shown();
     journal.push(EventKind::StepStart {
         step: name.into(),
         command: shown,
@@ -564,6 +562,9 @@ fn spawn_streamed(
     }
     for (key, value) in step.env {
         process.env(key, value);
+    }
+    for var in &command.env {
+        process.env(&var.key, &var.value);
     }
     hide_console(&mut process);
     #[cfg(unix)]
@@ -628,12 +629,27 @@ fn spawn_streamed(
     Ok((child, group, finished, reader_count))
 }
 
-/// Runs one command to completion, streaming each output line into the journal.
+/// Runs a command and then each of its `then` commands while they succeed, streaming every
+/// output line into the journal. The chain ends at the first command that does not exit 0.
 pub(super) fn run_step(
     journal: &Arc<Journal>,
     control: &Control,
     step: &Step,
 ) -> Result<StepOutcome, String> {
+    let mut outcome = run_one(journal, control, step)?;
+    for next in &step.command.then {
+        if outcome != StepOutcome::Exited(0) {
+            break;
+        }
+        let mut chained = *step;
+        chained.command = next;
+        outcome = run_one(journal, control, &chained)?;
+    }
+    Ok(outcome)
+}
+
+/// Runs one command to completion, streaming each output line into the journal.
+fn run_one(journal: &Arc<Journal>, control: &Control, step: &Step) -> Result<StepOutcome, String> {
     if control.cancelled() {
         return Ok(StepOutcome::Cancelled);
     }
@@ -1011,7 +1027,9 @@ impl RunManager {
         std::thread::spawn(move || {
             let result = pipeline(&journal, &control, &request).and_then(|status| {
                 match (&env, &request.context) {
-                    (Some(env), Some(context)) if status == RunStatus::Prepared => {
+                    (Some(env), Some(context))
+                        if matches!(status, RunStatus::Prepared | RunStatus::Failed) =>
+                    {
                         let run = AgentRun {
                             journal: &journal,
                             control: &control,
@@ -1019,8 +1037,15 @@ impl RunManager {
                             run_dir: &dir,
                         };
                         run.write_context(context)?;
+                        // `Failed` here means install failed: the agent repairs it first.
+                        if status == RunStatus::Failed {
+                            if let Some(stopped) = run.repair_install()? {
+                                return Ok(stopped);
+                            }
+                        }
                         run.plan(None)
                     }
+                    _ if status == RunStatus::Failed => Err("install failed".into()),
                     _ => Ok(status),
                 }
             });
@@ -1185,6 +1210,8 @@ fn pipeline(
             &Step::new("install", install, &cwd, INSTALL_TIMEOUT),
         )? {
             StepOutcome::Exited(0) => {}
+            // A coding agent fixes a failed install itself (see `repair_install`).
+            StepOutcome::Exited(_) if request.context.is_some() => return Ok(RunStatus::Failed),
             StepOutcome::Exited(code) => return Err(format!("install failed (exit code {code})")),
             StepOutcome::Cancelled => return Ok(RunStatus::Cancelled),
             StepOutcome::TimedOut | StepOutcome::OverBudget => {
@@ -1279,6 +1306,7 @@ mod tests {
         CommandSpec {
             executable: executable.into(),
             args: args.iter().map(|a| a.to_string()).collect(),
+            ..CommandSpec::default()
         }
     }
 

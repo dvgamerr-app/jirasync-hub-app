@@ -235,6 +235,7 @@ impl AgentRun<'_> {
         let command = CommandSpec {
             executable: launcher.executable.display().to_string(),
             args,
+            ..CommandSpec::default()
         };
 
         let budget = self.env.budget;
@@ -475,9 +476,70 @@ impl AgentRun<'_> {
         Ok(RunStatus::AwaitingPlan)
     }
 
+    /// A setup command (`install`, `migrate`) failed: the agent fixes the cause itself, in the
+    /// repo or in the command, and the app runs the command again; the owner is not asked.
+    /// Gives up after `MAX_REPAIRS` rounds. `Err("stopped")` when the owner stopped the run.
+    fn repair_setup(&self, name: &str) -> Result<(), String> {
+        let worktree = self.worktree()?;
+        for _ in 0..MAX_REPAIRS {
+            self.journal.update(|record| record.attempts += 1);
+            self.journal.push(EventKind::Agent {
+                kind: "notice".into(),
+                text: format!("{name} failed; the agent is fixing it"),
+            });
+            self.journal.set_status(RunStatus::Running, None);
+            let lines = self.journal.step_lines(name);
+            let tail = lines[lines.len().saturating_sub(FAILURE_TAIL_LINES)..].join("\n");
+            let (outcome, _) = self.invoke(
+                Phase::Implementing,
+                &claude::setup_repair_prompt(name, &tail),
+            )?;
+            if self.agent_outcome(outcome)?.is_some() {
+                return Err("stopped".into());
+            }
+            // The agent may have replaced the command; run what the record has now.
+            let command = self
+                .journal
+                .record()
+                .commands
+                .slot_mut(name)
+                .cloned()
+                .flatten();
+            let Some(command) = command else {
+                return Ok(());
+            };
+            match run_step(
+                self.journal,
+                self.control,
+                &Step::new(name, &command, &worktree, CHECK_TIMEOUT),
+            )? {
+                StepOutcome::Exited(0) => return Ok(()),
+                StepOutcome::Cancelled => return Err("stopped".into()),
+                _ => {}
+            }
+        }
+        Err(format!(
+            "{name} still fails after {MAX_REPAIRS} repair rounds"
+        ))
+    }
+
+    /// Install failed while preparing the worktree: repaired by the agent before it plans.
+    pub fn repair_install(&self) -> Result<Option<RunStatus>, String> {
+        match self.repair_setup("install") {
+            Ok(()) => Ok(None),
+            Err(_) if self.control.cancelled() => Ok(Some(RunStatus::Cancelled)),
+            Err(error) => Err(error),
+        }
+    }
+
     /// Starts the run's service containers, writes the per-run env values into the worktree
-    /// `.env`, runs migrations, does `work`, then always removes the containers.
-    fn with_services<T>(&self, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    /// `.env`, runs migrations, does `work`, then always removes the containers. With
+    /// `repair`, a failed migration goes to the agent to fix instead of failing the run.
+    fn with_services<T>(
+        &self,
+        repair: bool,
+        work: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
         let record = self.journal.record();
         let migrate = record.commands.migrate.clone();
         if record.services.is_empty() && record.env_overrides.is_empty() && migrate.is_none() {
@@ -536,12 +598,22 @@ impl AgentRun<'_> {
                         value: docker::render(&var.value, &running, run_port),
                     })
                     .collect();
-                docker::apply_env(&worktree.join(".env"), &values)?;
+                // The values go where the app reads its env: the files copied into this run
+                // (e.g. `api/.env` in a sub-repo), or the root `.env` when none was copied.
+                let targets = if record.copy_env.is_empty() {
+                    vec![".env".to_string()]
+                } else {
+                    record.copy_env.clone()
+                };
+                for target in &targets {
+                    docker::apply_env(&worktree.join(target), &values)?;
+                }
                 self.journal.push(EventKind::Output {
                     step: "services".into(),
                     stream: "stdout".into(),
                     text: format!(
-                        "set for this run in .env: {}",
+                        "set for this run in {}: {}",
+                        targets.join(", "),
                         values
                             .iter()
                             .map(|v| v.key.as_str())
@@ -557,6 +629,7 @@ impl AgentRun<'_> {
                     &Step::new("migrate", command, &worktree, CHECK_TIMEOUT),
                 )? {
                     StepOutcome::Exited(0) => {}
+                    StepOutcome::Exited(_) if repair => self.repair_setup("migrate")?,
                     StepOutcome::Exited(code) => {
                         return Err(format!("migrate failed (exit code {code})"))
                     }
@@ -581,7 +654,7 @@ impl AgentRun<'_> {
 
     /// Implement → final checks by the app → up to two repair rounds → ready for review.
     pub fn implement(&self, first_prompt: String) -> Result<RunStatus, String> {
-        self.with_services(|| self.implement_rounds(first_prompt))
+        self.with_services(true, || self.implement_rounds(first_prompt))
     }
 
     fn implement_rounds(&self, first_prompt: String) -> Result<RunStatus, String> {
@@ -770,7 +843,7 @@ impl AgentRun<'_> {
 
         if record.verified_digest.as_deref() != Some(tree_digest(&worktree)?.as_str()) {
             self.note("the change moved after its checks; running them again");
-            let checks = self.with_services(|| self.verify())?;
+            let checks = self.with_services(false, || self.verify())?;
             let failed: Vec<&str> = checks
                 .iter()
                 .filter(|check| check.status != "passed")
@@ -936,6 +1009,7 @@ impl AgentRun<'_> {
         let command = CommandSpec {
             executable: executable.into(),
             args,
+            ..CommandSpec::default()
         };
         self.checked(name, &command, &[], &worktree)
     }
@@ -953,6 +1027,7 @@ impl AgentRun<'_> {
         let command = CommandSpec {
             executable: gh.executable.display().to_string(),
             args: argv,
+            ..CommandSpec::default()
         };
         self.checked(name, &command, &env, &worktree)
     }

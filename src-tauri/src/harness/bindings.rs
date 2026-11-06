@@ -2,7 +2,7 @@
 // executes there. Stored per machine in the app data folder, never in a repo, because they
 // hold absolute paths.
 use super::docker::{EnvVar, ServiceSpec};
-use super::repo::{git_root, RepoCommands};
+use super::repo::{git_root, CommandSpec, RepoCommands};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Component, Path};
@@ -48,7 +48,7 @@ pub fn load(path: &Path) -> Result<Vec<RepoBinding>, String> {
                     file.version
                 ));
             }
-            Ok(file.bindings)
+            Ok(file.bindings.into_iter().map(overlay_config).collect())
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
         Err(error) => Err(format!("could not read {}: {error}", path.display())),
@@ -77,6 +77,28 @@ pub fn is_safe_relative_path(value: &str) -> bool {
         && path
             .components()
             .all(|component| matches!(component, Component::Normal(_)))
+}
+
+/// Shells and command interpreters: a command line handed to one of them is a shell the agent
+/// was never given, so a command whose executable is one of these is refused.
+const SHELLS: &[&str] = &[
+    "powershell",
+    "pwsh",
+    "cmd",
+    "bash",
+    "sh",
+    "zsh",
+    "fish",
+    "dash",
+    "ksh",
+    "wsl",
+    "env",
+];
+
+pub fn is_shell(executable: &str) -> bool {
+    let name = executable.trim().to_ascii_lowercase();
+    let name = name.strip_suffix(".exe").unwrap_or(&name);
+    SHELLS.contains(&name)
 }
 
 pub fn is_valid_branch_name(value: &str) -> bool {
@@ -116,27 +138,12 @@ pub fn validate(mut binding: RepoBinding) -> Result<RepoBinding, String> {
         return Err("worktree folder must be outside the repository".into());
     }
     binding.worktree_root = worktree_root.to_string();
-    for (name, command) in binding.commands.all() {
-        if let Some(command) = command {
-            if command.executable.trim().is_empty() {
-                return Err(format!("{name} command has no executable"));
-            }
-            if command
-                .args
-                .iter()
-                .chain(std::iter::once(&command.executable))
-                .any(|part| part.contains('\0'))
-            {
-                return Err(format!("{name} command contains an invalid character"));
-            }
-        }
-    }
-    for file in &binding.copy_env {
-        if !is_safe_relative_path(file) {
-            return Err(format!("\"{file}\" must be a path inside the repository"));
-        }
-    }
-    validate_services(&binding.services, &binding.env_overrides)?;
+    check_config(
+        &binding.commands,
+        &binding.copy_env,
+        &binding.services,
+        &binding.env_overrides,
+    )?;
     binding.copy_env.sort();
     binding.copy_env.dedup();
     binding.updated_at = std::time::SystemTime::now()
@@ -144,6 +151,151 @@ pub fn validate(mut binding: RepoBinding) -> Result<RepoBinding, String> {
         .map(|d| d.as_millis() as u64)
         .unwrap_or_default();
     Ok(binding)
+}
+
+/// One command and its `then` chain: an executable that is not a shell, no NUL bytes, valid
+/// env keys, and a chain one level deep.
+pub fn check_command(name: &str, command: &CommandSpec) -> Result<(), String> {
+    for (index, part) in std::iter::once(command).chain(&command.then).enumerate() {
+        let executable = part.executable.trim();
+        if executable.is_empty() {
+            return Err(format!("{name} command has no executable"));
+        }
+        if is_shell(executable) {
+            return Err(format!(
+                "{name}: {executable} is a shell; use the tool itself, `env` for variables and `then` for more commands"
+            ));
+        }
+        if index > 0 && !part.then.is_empty() {
+            return Err(format!(
+                "{name}: a `then` command cannot have its own `then`"
+            ));
+        }
+        if part
+            .args
+            .iter()
+            .chain(std::iter::once(&part.executable))
+            .chain(part.env.iter().map(|var| &var.value))
+            .any(|text| text.contains('\0'))
+        {
+            return Err(format!("{name} command contains an invalid character"));
+        }
+        if part.env.iter().any(|var| !is_env_key(&var.key)) {
+            return Err(format!("{name} command has an invalid env key"));
+        }
+    }
+    Ok(())
+}
+
+fn check_config(
+    commands: &RepoCommands,
+    copy_env: &[String],
+    services: &[ServiceSpec],
+    overrides: &[EnvVar],
+) -> Result<(), String> {
+    for (name, command) in commands.all() {
+        if let Some(command) = command {
+            check_command(name, command)?;
+        }
+    }
+    for file in copy_env {
+        if !is_safe_relative_path(file) {
+            return Err(format!("\"{file}\" must be a path inside the repository"));
+        }
+    }
+    validate_services(services, overrides)
+}
+
+// ── Config file beside the worktrees ─────────────────────────────────────────────────────────
+// What the AI worked out (commands, services, env) lives in `<worktree folder>/<project>.config.json`
+// so it can be corrected by editing that file (by hand or by an AI) without the Setup form. It is
+// read back every time bindings are loaded, so a fixed command is used by the next run.
+
+#[derive(Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct RunConfig {
+    commands: RepoCommands,
+    copy_env: Vec<String>,
+    services: Vec<ServiceSpec>,
+    env_overrides: Vec<EnvVar>,
+}
+
+pub fn config_path(binding: &RepoBinding) -> std::path::PathBuf {
+    config_file(Path::new(&binding.worktree_root), &binding.project_id)
+}
+
+pub fn config_file(worktree_root: &Path, project_id: &str) -> std::path::PathBuf {
+    let name: String = project_id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    worktree_root.join(format!("{name}.config.json"))
+}
+
+/// Replaces one command in an existing config file, so a command the agent fixed is used by
+/// later runs too. Returns false when there is no config file to update.
+pub fn set_config_command(
+    path: &Path,
+    name: &str,
+    command: Option<CommandSpec>,
+) -> Result<bool, String> {
+    let Ok(text) = fs::read_to_string(path) else {
+        return Ok(false);
+    };
+    let mut config: RunConfig = serde_json::from_str(&text)
+        .map_err(|e| format!("{} is not a valid config file: {e}", path.display()))?;
+    *config
+        .commands
+        .slot_mut(name)
+        .ok_or_else(|| format!("unknown command \"{name}\""))? = command;
+    let text = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    fs::write(path, text).map_err(|e| format!("could not write {}: {e}", path.display()))?;
+    Ok(true)
+}
+
+fn write_config(binding: &RepoBinding) -> Result<(), String> {
+    let path = config_path(binding);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let text = serde_json::to_string_pretty(&RunConfig {
+        commands: binding.commands.clone(),
+        copy_env: binding.copy_env.clone(),
+        services: binding.services.clone(),
+        env_overrides: binding.env_overrides.clone(),
+    })
+    .map_err(|e| e.to_string())?;
+    fs::write(&path, text).map_err(|e| format!("could not write {}: {e}", path.display()))
+}
+
+/// The config file's values over the stored binding. A missing or invalid file changes nothing.
+fn overlay_config(mut binding: RepoBinding) -> RepoBinding {
+    let Ok(text) = fs::read_to_string(config_path(&binding)) else {
+        return binding;
+    };
+    let Ok(config) = serde_json::from_str::<RunConfig>(&text) else {
+        return binding;
+    };
+    if check_config(
+        &config.commands,
+        &config.copy_env,
+        &config.services,
+        &config.env_overrides,
+    )
+    .is_ok()
+    {
+        binding.commands = config.commands;
+        binding.copy_env = config.copy_env;
+        binding.services = config.services;
+        binding.env_overrides = config.env_overrides;
+    }
+    binding
 }
 
 fn is_env_key(key: &str) -> bool {
@@ -225,6 +377,7 @@ fn resolved(path: &Path) -> std::path::PathBuf {
 
 pub fn save(path: &Path, binding: RepoBinding) -> Result<RepoBinding, String> {
     let binding = validate(binding)?;
+    write_config(&binding)?;
     let mut bindings = load(path)?;
     bindings.retain(|existing| existing.project_id != binding.project_id);
     bindings.push(binding.clone());
@@ -236,6 +389,9 @@ pub fn save(path: &Path, binding: RepoBinding) -> Result<RepoBinding, String> {
 pub fn delete(path: &Path, project_id: &str) -> Result<(), String> {
     let mut bindings = load(path)?;
     let before = bindings.len();
+    if let Some(removed) = bindings.iter().find(|b| b.project_id == project_id) {
+        let _ = fs::remove_file(config_path(removed));
+    }
     bindings.retain(|existing| existing.project_id != project_id);
     if bindings.len() != before {
         store(path, &bindings)?;
@@ -243,16 +399,9 @@ pub fn delete(path: &Path, project_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Default worktree folder: short and outside any repo (`<drive>:\wt` on Windows).
-pub fn default_worktree_root(repo_path: &Path, home: Option<&Path>) -> String {
-    if cfg!(windows) {
-        if let Some(Component::Prefix(prefix)) = repo_path.components().next() {
-            let drive = prefix.as_os_str().to_string_lossy();
-            return format!("{drive}\\wt");
-        }
-    }
-    home.map(|home| home.join(".jirasync").join("wt").display().to_string())
-        .unwrap_or_else(|| "/tmp/jirasync-wt".into())
+/// Default worktree folder: inside the app's own data folder, so it is never in a repo.
+pub fn default_worktree_root(app_data: &Path) -> String {
+    app_data.join("worktrees").display().to_string()
 }
 
 #[cfg(test)]
@@ -271,6 +420,7 @@ mod tests {
                 test: Some(CommandSpec {
                     executable: "bun".into(),
                     args: vec!["run".into(), "test".into()],
+                    ..CommandSpec::default()
                 }),
                 ..RepoCommands::default()
             },
@@ -313,6 +463,37 @@ mod tests {
     }
 
     #[test]
+    fn config_file_beside_the_worktrees_is_written_and_wins_when_edited() {
+        let repo = TempDir::new("cfg-repo");
+        repo.init_repo("main");
+        let worktrees = TempDir::new("cfg-wt");
+        let store_dir = TempDir::new("cfg-store");
+        let file = store_dir.path().join("bindings.json");
+        let saved = save(&file, binding(repo.path(), worktrees.path())).unwrap();
+
+        let config = config_path(&saved);
+        assert_eq!(config.parent().unwrap(), worktrees.path());
+        let text = fs::read_to_string(&config).unwrap();
+        assert!(text.contains("\"test\""), "{text}");
+
+        // Fixing the command in the file is what the next run uses.
+        let edited = text.replace("\"run\"", "\"exec\"");
+        fs::write(&config, edited).unwrap();
+        let loaded = load(&file).unwrap();
+        assert_eq!(loaded[0].commands.test.as_ref().unwrap().args[0], "exec");
+
+        // A broken file is ignored instead of breaking every run.
+        fs::write(&config, "{ not json").unwrap();
+        assert_eq!(
+            load(&file).unwrap()[0].commands.test.as_ref().unwrap().args[0],
+            "run"
+        );
+
+        delete(&file, "proj-acc1-PRJ").unwrap();
+        assert!(!config.exists(), "removing the binding removes its config");
+    }
+
+    #[test]
     fn rejects_invalid_bindings_without_writing() {
         let repo = TempDir::new("bind-bad");
         repo.init_repo("main");
@@ -347,6 +528,7 @@ mod tests {
         bad.commands.test = Some(CommandSpec {
             executable: " ".into(),
             args: vec![],
+            ..CommandSpec::default()
         });
         assert!(save(&file, bad).unwrap_err().contains("no executable"));
 
