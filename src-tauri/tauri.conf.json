@@ -29,6 +29,9 @@
     ],
     "macOS": {
       "signingIdentity": "-"
+    },
+    "resources": {
+      "resources/harness-skills/": "resources/harness-skills/"
     }
   },
   "plugins": {

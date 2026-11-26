@@ -34,6 +34,7 @@ import { useShallow } from "zustand/react/shallow";
 
 const COMPACT_COLUMN_COUNT = 4;
 const FULL_COLUMN_COUNT = 9;
+const TASK_ROW_HEIGHT = 48;
 const EMPTY_OPTIONS: string[] = [];
 
 function hasStoryPointRuleViolation(task: Pick<Task, "type" | "storyLevel">): boolean {
@@ -108,6 +109,7 @@ const EpicHeaderRow = memo(function EpicHeaderRow({
   return (
     <TableRow
       data-index={dataIndex}
+      style={{ height: TASK_ROW_HEIGHT }}
       className={cn(
         "cursor-pointer border-l-2 border-l-purple-400 bg-purple-50/40 hover:bg-purple-50/60 dark:bg-purple-950/20 dark:hover:bg-purple-950/30",
         isSelected && "border-l-primary bg-primary/5",
@@ -142,7 +144,7 @@ const EpicHeaderRow = memo(function EpicHeaderRow({
         <Zap className="mx-auto h-3.5 w-3.5 text-purple-500" />
       </TableCell>
       <TableCell className="py-2">
-        <StatusBadge status={epic.status} />
+        <StatusBadge status={epic.status} truncate />
       </TableCell>
       {showExtendedColumns && (
         <>
@@ -312,7 +314,7 @@ export function TaskTable({ tasks: allTasks }: { tasks: Task[] }) {
   const virtualizer = useVirtualizer({
     count: flatRows.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 48,
+    estimateSize: () => TASK_ROW_HEIGHT,
     overscan: 12,
   });
 
@@ -515,8 +517,9 @@ const TaskRow = memo(function TaskRow({
   return (
     <TableRow
       data-index={dataIndex}
+      style={{ height: TASK_ROW_HEIGHT }}
       className={cn(
-        "group h-12 cursor-pointer",
+        "group cursor-pointer",
         hasStoryPointViolation &&
           "bg-red-50/80 hover:bg-red-50 dark:bg-red-950/20 dark:hover:bg-red-950/30",
         isAssignedToSomeoneElse && "opacity-70",

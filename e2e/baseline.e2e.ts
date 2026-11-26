@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { FakeJira } from "./fake-jira";
-import { getTask, openApp, row, syncButton } from "./helpers";
+import { getTask, openAiBoard, openApp, row, syncButton } from "./helpers";
 
 // Harness sanity checks: the app syncs from the fake Jira and renders the result.
 test.describe("baseline", () => {
@@ -30,6 +30,16 @@ test.describe("baseline", () => {
     expect(jira.requests).toHaveLength(0);
   });
 
+  test("narrow task menu omits AI Board", async ({ page }) => {
+    await page.setViewportSize({ width: 600, height: 700 });
+    await openApp(page, null);
+    await page.getByRole("button", { name: "Open task menu" }).click();
+
+    const menu = page.getByRole("dialog", { name: "Task Manager" });
+    await expect(menu.getByRole("button", { name: "My Work", exact: true })).toBeVisible();
+    await expect(menu.getByRole("link", { name: "AI Board", exact: true })).toHaveCount(0);
+  });
+
   test("navigation reuses memory without pulling or rereading task collections, while manual sync still updates the active page", async ({
     page,
   }) => {
@@ -56,7 +66,7 @@ test.describe("baseline", () => {
         });
       }
     });
-    await page.getByRole("link", { name: "AI Board", exact: true }).click();
+    await openAiBoard(page);
     await expect(
       page.getByRole("button", { name: "PRJ-1: Cached task", exact: true }),
     ).toBeVisible();
@@ -73,7 +83,7 @@ test.describe("baseline", () => {
     jira.delay((request) => request.path === "search/jql", 500, 1);
     await syncButton(page).click();
     await expect(syncButton(page)).toBeDisabled();
-    await page.getByRole("link", { name: "AI Board", exact: true }).click();
+    await openAiBoard(page);
     await expect(page.getByRole("button", { name: "Sync board", exact: true })).toBeDisabled();
     await expect(
       page.getByRole("button", { name: "PRJ-2: Arrived during manual sync", exact: true }),

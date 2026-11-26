@@ -3,6 +3,8 @@
 วันที่: 2026-11-01 (แก้ไขหลัง review)  
 สถานะ: พัฒนา MVP แล้ว; ยังไม่ release และยังไม่เริ่ม gate ทดลองใช้ 2 สัปดาห์
 
+แผนระยะถัดไปตามโจทย์ใหม่: [Agent Execution และ Personal Development Harness](agent-execution-harness-plan.md) สำหรับสั่ง Claude/Codex ผ่านแอปและคุมงานในเครื่อง; ยังเป็นข้อเสนอ ไม่ใช่ฟีเจอร์ที่ implement แล้ว
+
 ## เป้าหมาย
 
 ลดงานซ้ำตอนต้นและตอนท้ายของการทำ ticket กับ AI โดยใช้ข้อมูลที่แอปมีอยู่แล้ว (ticket ที่ sync ไว้, note, worklog, comment) ไม่สร้างระบบติดตาม session ซ้อนกับ repo
@@ -11,14 +13,14 @@
 
 ## 1. Pain และสิ่งที่แอปนี้ช่วยได้จริง
 
-| Pain                                         | แนวทาง                                                                                   | ทำในรุ่นแรก              |
-| -------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------ |
-| ต้องประกอบ prompt จาก Jira ซ้ำ               | `Copy for AI` แปลง ticket (รวม ADF description) เป็น Markdown พร้อม copy                 | ใช่                      |
-| กลับมาวันถัดไปแล้วลืมว่าถึงไหน               | ใช้ note เดิม (local-only) เป็น handoff พร้อม template และแนบเข้า context ได้            | ใช่                      |
-| จบงานแล้วต้องเขียนสรุปกลับ Jira และ log เวลา | Dialog `Summarize to Jira` วางสรุปจาก AI แก้แล้วส่ง comment พร้อมกรอก worklog ในที่เดียว | ใช่                      |
-| Ticket เขียนไม่ครบ แล้ว AI ตัดสินใจแทน       | Context มีหัวข้อ "คำถามที่ต้องถามก่อนลงมือ" ให้ AI ตอบก่อน implement                     | ใช่ (ข้อความใน template) |
-| หลาย ticket หลาย session ตามไม่ทัน           | ใช้ branch/PR/handoff ใน repo; แอปไม่เก็บสถานะ session ที่ต้องกรอกเอง                    | ไม่                      |
-| AI บอกว่าเสร็จแต่ไม่รู้ว่าตรวจอะไร           | หลักฐานจริงอยู่ที่ CI/PR; แอปไม่ทำ checkbox "ยืนยันแล้ว" ที่ไม่มีหลักฐานรองรับ           | ไม่                      |
+| Pain                                    | แนวทาง                                                                           | ทำในรุ่นแรก              |
+| --------------------------------------- | -------------------------------------------------------------------------------- | ---------------------- |
+| ต้องประกอบ prompt จาก Jira ซ้ำ            | `Copy for AI` แปลง ticket (รวม ADF description) เป็น Markdown พร้อม copy           | ใช่                     |
+| กลับมาวันถัดไปแล้วลืมว่าถึงไหน                 | ใช้ note เดิม (local-only) เป็น handoff พร้อม template และแนบเข้า context ได้          | ใช่                     |
+| จบงานแล้วต้องเขียนสรุปกลับ Jira และ log เวลา | Dialog `Summarize to Jira` วางสรุปจาก AI แก้แล้วส่ง comment พร้อมกรอก worklog ในที่เดียว | ใช่                     |
+| Ticket เขียนไม่ครบ แล้ว AI ตัดสินใจแทน       | Context มีหัวข้อ "คำถามที่ต้องถามก่อนลงมือ" ให้ AI ตอบก่อน implement                       | ใช่ (ข้อความใน template) |
+| หลาย ticket หลาย session ตามไม่ทัน        | ใช้ branch/PR/handoff ใน repo; แอปไม่เก็บสถานะ session ที่ต้องกรอกเอง                  | ไม่                     |
+| AI บอกว่าเสร็จแต่ไม่รู้ว่าตรวจอะไร             | หลักฐานจริงอยู่ที่ CI/PR; แอปไม่ทำ checkbox "ยืนยันแล้ว" ที่ไม่มีหลักฐานรองรับ                   | ไม่                     |
 
 เหตุผลที่ตัด session/checkpoint/review ออก:
 
@@ -88,30 +90,30 @@ Logic ใหม่เป็น pure function:
 
 ## 4. ลำดับ implementation
 
-| ลำดับ | ไฟล์                                                                                                           | จุดตรวจรับ                                                                                    |
-| ----- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| 1     | `src/lib/adf-content.ts`, `src/lib/ai-context.ts`                                                              | ADF → Markdown รักษาข้อความ/code/link; search เดิมไม่เปลี่ยน                                  |
-| 2     | `TaskDetailPanel.tsx` + dialog `Copy for AI`                                                                   | Preview ตรงกับที่ copy; note แนบเฉพาะเมื่อเลือก; ใช้ได้ offline                               |
-| 3     | `TaskDetailPanel.tsx` (note) — `Insert handoff template`                                                       | ต่อท้าย note เดิม ไม่ทำให้ dirty และระบุ lifecycle ของ note                                   |
-| 4     | Dialog `Summarize to Jira` + `src/store/task-store.ts`                                                         | แยกปุ่มและผล comment/worklog; draft ตรึง account/task และกลับมาเปิดต่อได้ระหว่างเปิดแอป       |
-| 5     | `addWorkLog`, `LogWorkModal.tsx`, callers ใน `TaskDetailPanel.tsx`/`TaskTable.tsx` และ tests เดิมที่เกี่ยวข้อง | รอผล IndexedDB ก่อนแจ้งสำเร็จ/ล้างฟอร์ม; error เก็บข้อมูลไว้; retry ไม่ทำส่วนที่สำเร็จแล้วซ้ำ |
-| 6     | Tests + `docs/user-guide.th.md`                                                                                | Positive/negative ครบตามข้อ 5 และคู่มือระบุ lifecycle ของ note/draft กับสถานะ pending worklog |
+| ลำดับ | ไฟล์                                                                                                      | จุดตรวจรับ                                                                                |
+| ---- | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 1    | `src/lib/adf-content.ts`, `src/lib/ai-context.ts`                                                        | ADF → Markdown รักษาข้อความ/code/link; search เดิมไม่เปลี่ยน                                  |
+| 2    | `TaskDetailPanel.tsx` + dialog `Copy for AI`                                                             | Preview ตรงกับที่ copy; note แนบเฉพาะเมื่อเลือก; ใช้ได้ offline                                 |
+| 3    | `TaskDetailPanel.tsx` (note) — `Insert handoff template`                                                 | ต่อท้าย note เดิม ไม่ทำให้ dirty และระบุ lifecycle ของ note                                   |
+| 4    | Dialog `Summarize to Jira` + `src/store/task-store.ts`                                                   | แยกปุ่มและผล comment/worklog; draft ตรึง account/task และกลับมาเปิดต่อได้ระหว่างเปิดแอป          |
+| 5    | `addWorkLog`, `LogWorkModal.tsx`, callers ใน `TaskDetailPanel.tsx`/`TaskTable.tsx` และ tests เดิมที่เกี่ยวข้อง | รอผล IndexedDB ก่อนแจ้งสำเร็จ/ล้างฟอร์ม; error เก็บข้อมูลไว้; retry ไม่ทำส่วนที่สำเร็จแล้วซ้ำ           |
+| 6    | Tests + `docs/user-guide.th.md`                                                                          | Positive/negative ครบตามข้อ 5 และคู่มือระบุ lifecycle ของ note/draft กับสถานะ pending worklog |
 
 ไม่เพิ่ม dependency และไม่อัปเกรด packages ในงานนี้
 
 ## 5. เกณฑ์ตรวจรับ
 
-| Positive                                                              | Negative                                                                                                          |
-| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Context มี key, description (Markdown), parent ครบ                    | ไม่มี note ถ้าไม่ได้เลือก, ไม่มี credentials/ข้อมูลข้าม account                                                   |
-| ADF code/link/ตัวพิมพ์ถูกรักษา                                        | Search ใน description ทำงานเหมือนเดิม                                                                             |
-| Handoff template ต่อท้าย note เดิม                                    | Insert template ไม่ทำให้ task dirty และไม่เรียก Jira                                                              |
-| Summarize โพสต์ comment ได้และสร้าง worklog ตามเวลาที่กรอก            | ไม่มีการโพสต์/log เวลาจนกว่าผู้ใช้กด; post fail แล้วข้อความไม่หาย                                                 |
-| Comment สำเร็จและ worklog ผิดพลาด แสดงผลแยกกันและลองเฉพาะ worklog ได้ | ไม่โพสต์ comment ซ้ำเมื่อลอง worklog ใหม่ และไม่เกิดรายการซ้ำจากการกดระหว่างกำลังทำ                               |
-| Worklog บันทึก IndexedDB สำเร็จจึงแจ้งว่าเก็บแล้วและรอ push           | DB write ล้มเหลวแล้วไม่แจ้งสำเร็จ ไม่ล้างข้อมูลฟอร์ม และไม่แสดงว่า push แล้ว                                      |
-| ปิด/เปิด dialog ของ A ได้ draft และผลเดิม; เปิด B ได้ข้อมูลของ B      | เปลี่ยน ticket ระหว่างกรอก/ส่งแล้วไม่ส่ง draft ของ A ไป B หรือข้าม account                                        |
-| Target ที่ยังอยู่ส่งตาม payload ณ ตอนกดได้                            | Task/account ที่ถูกลบทำให้ operation แจ้ง error โดยไม่มี side effect; comment ที่ผลไม่แน่ชัดไม่ถูกส่งซ้ำอัตโนมัติ |
-| Copy for AI ใช้ได้ขณะ offline                                         | การเปิด/copy context ไม่ทำให้มี request ไป Jira                                                                   |
+| Positive                                                          | Negative                                                                                       |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Context มี key, description (Markdown), parent ครบ                 | ไม่มี note ถ้าไม่ได้เลือก, ไม่มี credentials/ข้อมูลข้าม account                                           |
+| ADF code/link/ตัวพิมพ์ถูกรักษา                                         | Search ใน description ทำงานเหมือนเดิม                                                            |
+| Handoff template ต่อท้าย note เดิม                                   | Insert template ไม่ทำให้ task dirty และไม่เรียก Jira                                               |
+| Summarize โพสต์ comment ได้และสร้าง worklog ตามเวลาที่กรอก             | ไม่มีการโพสต์/log เวลาจนกว่าผู้ใช้กด; post fail แล้วข้อความไม่หาย                                        |
+| Comment สำเร็จและ worklog ผิดพลาด แสดงผลแยกกันและลองเฉพาะ worklog ได้ | ไม่โพสต์ comment ซ้ำเมื่อลอง worklog ใหม่ และไม่เกิดรายการซ้ำจากการกดระหว่างกำลังทำ                       |
+| Worklog บันทึก IndexedDB สำเร็จจึงแจ้งว่าเก็บแล้วและรอ push               | DB write ล้มเหลวแล้วไม่แจ้งสำเร็จ ไม่ล้างข้อมูลฟอร์ม และไม่แสดงว่า push แล้ว                                |
+| ปิด/เปิด dialog ของ A ได้ draft และผลเดิม; เปิด B ได้ข้อมูลของ B          | เปลี่ยน ticket ระหว่างกรอก/ส่งแล้วไม่ส่ง draft ของ A ไป B หรือข้าม account                              |
+| Target ที่ยังอยู่ส่งตาม payload ณ ตอนกดได้                               | Task/account ที่ถูกลบทำให้ operation แจ้ง error โดยไม่มี side effect; comment ที่ผลไม่แน่ชัดไม่ถูกส่งซ้ำอัตโนมัติ |
+| Copy for AI ใช้ได้ขณะ offline                                       | การเปิด/copy context ไม่ทำให้มี request ไป Jira                                                    |
 
 - Pure logic: unit tests ใน `bun test` (`adf-content`, `ai-context`)
 - E2E หนึ่งไฟล์ `e2e/ai-handoff.e2e.ts` ใช้ fake Jira และ shims เดิม
@@ -130,22 +132,22 @@ Logic ใหม่เป็น pure function:
 
 จดผลด้วยมือระหว่างทดลอง โดยยังไม่เพิ่ม analytics หรือ telemetry:
 
-| สิ่งที่จด                                   | ข้อมูลที่ใช้ตัดสิน                                                   |
-| ------------------------------------------- | -------------------------------------------------------------------- |
-| จำนวน ticket ที่ทดลองและใช้แต่ละฟีเจอร์จริง | จำนวนโอกาสใช้งานเทียบกับจำนวนที่เลือกใช้ ไม่ดูแค่ระยะเวลา 2 สัปดาห์  |
-| งานที่ยังต้องประกอบ context/คัดลอกซ้ำ       | ติดที่ข้อมูลไม่ครบหรือขั้นตอนส่งต่อ และมีตัวอย่าง ticket ใด          |
-| ที่อยู่ของ handoff ที่ใช้กลับมาทำต่อจริง    | Note ในแอปหรือ repo และต้องเขียนซ้ำกี่ครั้ง                          |
-| เวลาที่ใช้สรุปและ log งาน                   | ตัวอย่างก่อน/หลังใช้ dialog พร้อมปัญหาที่พบ เช่น retry หรือข้อมูลหาย |
+| สิ่งที่จด                                | ข้อมูลที่ใช้ตัดสิน                                             |
+| ------------------------------------ | ------------------------------------------------------- |
+| จำนวน ticket ที่ทดลองและใช้แต่ละฟีเจอร์จริง | จำนวนโอกาสใช้งานเทียบกับจำนวนที่เลือกใช้ ไม่ดูแค่ระยะเวลา 2 สัปดาห์ |
+| งานที่ยังต้องประกอบ context/คัดลอกซ้ำ      | ติดที่ข้อมูลไม่ครบหรือขั้นตอนส่งต่อ และมีตัวอย่าง ticket ใด           |
+| ที่อยู่ของ handoff ที่ใช้กลับมาทำต่อจริง       | Note ในแอปหรือ repo และต้องเขียนซ้ำกี่ครั้ง                     |
+| เวลาที่ใช้สรุปและ log งาน                | ตัวอย่างก่อน/หลังใช้ dialog พร้อมปัญหาที่พบ เช่น retry หรือข้อมูลหาย |
 
 ถ้ายังมีจำนวน ticket ที่ทดลองน้อย ให้ระบุว่าข้อมูลยังไม่พอสำหรับขยาย scope และทดลองต่อก่อนตัดสินระยะถัดไป
 
 ## 7. ระยะต่อยอด (ทำต่อเมื่อ gate ข้อ 6 ยืนยันว่าจำเป็น)
 
-| ระยะ                   | สิ่งที่จะเพิ่ม                                                                           | เงื่อนไข/ข้อควรระวัง                                                                                                                                                                                                             |
-| ---------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2: AI อ่าน context เอง | Local bridge/MCP ให้ AI อ่าน context และส่ง draft handoff/summary กลับ (ไม่ส่ง Jira เอง) | IndexedDB อยู่ใน WebView จึงต้องผ่านแอปไปยัง store เดิม; แยกสิทธิ์อ่านกับเขียน draft และตรวจตัวตน client ตาม [MCP security guidance](https://modelcontextprotocol.io/docs/2025-11-25/tutorials/security/security_best_practices) |
-| 3: Repo/Git            | ผูก ticket กับ repo/branch, อ่าน diff/commit เป็นหลักฐาน                                 | เพิ่มสิทธิ์อ่านเฉพาะ repo ที่ผู้ใช้เลือก ตาม [Tauri File System](https://v2.tauri.app/plugin/file-system/); ต้อง `bun run cg:check` และตรวจบน Tauri จริง                                                                         |
-| 4: Workspace/session   | ตาราง `devWorkspaces`/`devSessions`, project context, รายการ Development ใน sidebar      | ทำเมื่อมีข้อมูลว่า note อย่างเดียวไม่พอ; schema ใหม่เพิ่มเป็น entry ถัดไปใน `SCHEMA_VERSIONS` เท่านั้น และ cleanup ตอนลบบัญชีต้องครอบคลุมข้อมูลใหม่                                                                              |
+| ระยะ                  | สิ่งที่จะเพิ่ม                                                                            | เงื่อนไข/ข้อควรระวัง                                                                                                                                                                                                   |
+| --------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 2: AI อ่าน context เอง | Local bridge/MCP ให้ AI อ่าน context และส่ง draft handoff/summary กลับ (ไม่ส่ง Jira เอง)  | IndexedDB อยู่ใน WebView จึงต้องผ่านแอปไปยัง store เดิม; แยกสิทธิ์อ่านกับเขียน draft และตรวจตัวตน client ตาม [MCP security guidance](https://modelcontextprotocol.io/docs/2025-11-25/tutorials/security/security_best_practices) |
+| 3: Repo/Git           | ผูก ticket กับ repo/branch, อ่าน diff/commit เป็นหลักฐาน                                 | เพิ่มสิทธิ์อ่านเฉพาะ repo ที่ผู้ใช้เลือก ตาม [Tauri File System](https://v2.tauri.app/plugin/file-system/); ต้อง `bun run cg:check` และตรวจบน Tauri จริง                                                                         |
+| 4: Workspace/session  | ตาราง `devWorkspaces`/`devSessions`, project context, รายการ Development ใน sidebar | ทำเมื่อมีข้อมูลว่า note อย่างเดียวไม่พอ; schema ใหม่เพิ่มเป็น entry ถัดไปใน `SCHEMA_VERSIONS` เท่านั้น และ cleanup ตอนลบบัญชีต้องครอบคลุมข้อมูลใหม่                                                                                        |
 
 Bridge (ระยะ 2) มาก่อน Git และ workspace เพราะเป็นส่วนที่ตัด copy/paste ซึ่งเป็นแรงเสียดทานหลักได้จริง ส่วน Git และ workspace เพิ่มข้อมูลที่ต้องดูแลมากขึ้น
 
@@ -193,12 +195,12 @@ Bridge (ระยะ 2) มาก่อน Git และ workspace เพรา�
 
 ## 11. สถานะ AI แยกจาก workflow ของคนใน Jira
 
-| การกระทำ              | ผลต่อ AI Board                           | ผลต่อ Jira                              |
-| --------------------- | ---------------------------------------- | --------------------------------------- |
-| AI เริ่มงาน/รอ review | เปลี่ยน Doing/Review และบันทึกในเครื่อง  | ไม่เปลี่ยนสถานะและไม่ทำให้ dirty        |
-| AI ทำเสร็จ            | เปลี่ยน Done                             | ไม่ส่ง transition หรือเปลี่ยน Jira Done |
-| คนปิดงานใน Jira       | Pull บันทึก AI Done และ `jiraDone: true` | อ่านผลจาก Jira เท่านั้น                 |
-| คนเปิดงาน Jira ใหม่   | ปลด lock แต่คง AI Done จนกว่าจะย้ายเอง   | ไม่ส่งการเปลี่ยนกลับจาก AI              |
+| การกระทำ            | ผลต่อ AI Board                          | ผลต่อ Jira                          |
+| ------------------- | -------------------------------------- | ---------------------------------- |
+| AI เริ่มงาน/รอ review | เปลี่ยน Doing/Review และบันทึกในเครื่อง      | ไม่เปลี่ยนสถานะและไม่ทำให้ dirty        |
+| AI ทำเสร็จ           | เปลี่ยน Done                             | ไม่ส่ง transition หรือเปลี่ยน Jira Done |
+| คนปิดงานใน Jira      | Pull บันทึก AI Done และ `jiraDone: true` | อ่านผลจาก Jira เท่านั้น                |
+| คนเปิดงาน Jira ใหม่   | ปลด lock แต่คง AI Done จนกว่าจะย้ายเอง    | ไม่ส่งการเปลี่ยนกลับจาก AI              |
 
 - `src/lib/ai-board.ts` เป็น pure model ของคอลัมน์/สถานะ AI การปิดงาน Jira ดู done category รวม custom status และชื่อ legacy ตามพฤติกรรมเดิมของแอป
 - เพิ่ม `aiBoardStates` ใน schema v3 โดยคง v1/v2 เดิม ID เป็น task ID ที่แยก account แล้ว พร้อม account index, status, Jira completion flag และ updatedAt

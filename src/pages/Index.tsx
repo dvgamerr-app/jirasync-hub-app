@@ -27,6 +27,7 @@ import {
   Undo2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { Input } from "@/components/ui/input";
 import {
   AlertDialog,
@@ -312,18 +313,6 @@ const Index = () => {
             <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-[11px] tabular-nums">
               {filteredTasks.length}
             </span>
-            {dirtyCount > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground hover:text-foreground h-6 gap-1 px-1.5 text-[11px]"
-                disabled={discarding}
-                onClick={() => setDiscardConfirmOpen(true)}
-              >
-                <Undo2 className="h-3 w-3" />
-                Discard all
-              </Button>
-            )}
             <div className="border-border bg-muted/30 flex items-center rounded-md border p-0.5">
               {TASK_STATUS_FILTERS.map((filter) => (
                 <button
@@ -392,6 +381,19 @@ const Index = () => {
               />
               <span className="hidden sm:inline">Sync</span>
             </Button>
+            {dirtyCount > 0 && (
+              <Button
+                variant="destructive"
+                size="sm"
+                className="h-7 gap-1.5 text-[12px]"
+                aria-label="Discard"
+                disabled={discarding}
+                onClick={() => setDiscardConfirmOpen(true)}
+              >
+                <Undo2 className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Discard</span>
+              </Button>
+            )}
 
             {waitingForSync > 0 && (
               <span role="status" className="text-muted-foreground text-[11px] whitespace-nowrap">
@@ -496,13 +498,14 @@ const Index = () => {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={discarding}>Cancel</AlertDialogCancel>
             <AlertDialogAction
+              className={buttonVariants({ variant: "destructive" })}
               disabled={discarding}
               onClick={(e) => {
                 e.preventDefault();
                 void handleDiscardAllDirtyTasks();
               }}
             >
-              {discarding ? "Discarding..." : "Discard all"}
+              {discarding ? "Discarding..." : "Discard"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -10,6 +10,7 @@ import {
   pushButton,
   row,
   setSeverity,
+  syncButton,
   toasts,
 } from "./helpers";
 
@@ -165,6 +166,23 @@ test.describe("epic progress follows Jira's status category", () => {
 
     await expect(row(page, "EP-1")).toContainText("0% Done");
   });
+
+  test("Epic and task rows have the same height with and without the detail panel", async ({
+    page,
+  }) => {
+    const jira = epicWith([{ key: "EP-2", status: "In Progress" }]);
+    await openApp(page, jira, { waitFor: "EP-2" });
+    const epic = row(page, "EP-1");
+    const task = row(page, "EP-2");
+
+    await expect(task).toHaveJSProperty("offsetHeight", 48);
+    await expect(epic).toHaveJSProperty("offsetHeight", 48);
+
+    await openTask(page, "EP-1");
+
+    await expect(task).toHaveJSProperty("offsetHeight", 48);
+    await expect(epic).toHaveJSProperty("offsetHeight", 48);
+  });
 });
 
 test.describe("syncing one task reports why it failed", () => {
@@ -200,6 +218,59 @@ test.describe("syncing one task reports why it failed", () => {
     await expect(panel.getByRole("button", { name: "Sync", exact: true })).toHaveCount(0);
     await expect(toasts(page).filter({ hasText: "Could not sync" })).toHaveCount(0);
     expect(jira.mustGet("PRJ-1").priority).toBe("High");
+  });
+});
+
+test.describe("Discard next to Sync", () => {
+  test("confirming restores unsynced tasks", async ({ page }) => {
+    const jira = new FakeJira();
+    jira.addIssue({ key: "PRJ-1", priority: "Medium" });
+    jira.addIssue({ key: "PRJ-2", priority: "Medium" });
+    await openApp(page, jira, { waitFor: "PRJ-1" });
+    await setSeverity(page, await openTask(page, "PRJ-1"), "Critical");
+    await setSeverity(page, await openTask(page, "PRJ-2"), "Low");
+
+    const discard = syncButton(page).locator("xpath=following-sibling::*[1]");
+    await expect(discard).toHaveAccessibleName("Discard");
+    const pauseAnimation = await page.addStyleTag({
+      content: '[role="alertdialog"] { animation-play-state: paused !important; }',
+    });
+    await discard.click();
+    const dialog = page.getByRole("alertdialog", { name: "Discard all local changes?" });
+    await expect(dialog).toContainText("2 unsynced task(s)");
+    const distanceFromCenter = await dialog.evaluate((element) => {
+      const { x, y, width, height } = element.getBoundingClientRect();
+      return Math.hypot(x + width / 2 - innerWidth / 2, y + height / 2 - innerHeight / 2);
+    });
+    expect(distanceFromCenter).toBeLessThan(1);
+    await pauseAnimation.evaluate((style) => {
+      style.parentNode?.removeChild(style);
+    });
+    await dialog.getByRole("button", { name: "Discard", exact: true }).click();
+
+    await expect(dialog).toBeHidden();
+    await expect(
+      page.locator("header").getByRole("button", { name: "Discard", exact: true }),
+    ).toHaveCount(0);
+    expect(await getTask(page, "PRJ-1")).toMatchObject({ severity: "Medium", isDirty: false });
+    expect(await getTask(page, "PRJ-2")).toMatchObject({ severity: "Medium", isDirty: false });
+  });
+
+  test("cancelling keeps unsynced changes", async ({ page }) => {
+    const jira = new FakeJira();
+    jira.addIssue({ key: "PRJ-1", priority: "Medium" });
+    await openApp(page, jira, { waitFor: "PRJ-1" });
+    const discard = page.locator("header").getByRole("button", { name: "Discard", exact: true });
+    await expect(discard).toHaveCount(0);
+    await setSeverity(page, await openTask(page, "PRJ-1"), "Critical");
+
+    await discard.click();
+    const dialog = page.getByRole("alertdialog", { name: "Discard all local changes?" });
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+
+    await expect(dialog).toBeHidden();
+    await expect(discard).toBeEnabled();
+    expect(await getTask(page, "PRJ-1")).toMatchObject({ severity: "Critical", isDirty: true });
   });
 });
 

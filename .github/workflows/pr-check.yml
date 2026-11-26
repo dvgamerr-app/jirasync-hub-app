@@ -82,8 +82,14 @@ jobs:
           if-no-files-found: ignore
 
   rust:
-    name: Rust Check
-    runs-on: ubuntu-latest
+    name: Rust Check (${{ matrix.os }})
+    # The harness kills process trees and drives git differently per platform (Job Objects on
+    # Windows, process groups on macOS/Linux), so its tests run on every supported desktop OS.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -94,11 +100,19 @@ jobs:
         with:
           workspaces: src-tauri
       - name: Install Linux dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - name: cargo check
         run: cargo check --manifest-path src-tauri/Cargo.toml
+      - name: Harness tests
+        # Tests that need Claude, Codex or Docker are #[ignore] and do not run here.
+        run: |
+          git config --global user.name "ci"
+          git config --global user.email "ci@example.invalid"
+          git config --global init.defaultBranch main
+          cargo test --manifest-path src-tauri/Cargo.toml --lib
 
   qlty:
     name: Qlty Analysis
@@ -229,7 +243,7 @@ jobs:
             let body = `## 💎 PR Quality · Qlty\n\n**${results.gate.result === 'success' ? '✅ CI checks passed' : '❌ CI checks need attention'}** · Commit \`${sha.slice(0,7)}\` · [Run #${context.runNumber}](${runUrl})\n\n`;
             body += '| Check | Result | Details |\n|:--|:--|:--|\n';
             for (const [key,name] of definitions) {
-              const job = jobs.find(j => j.name === name);
+              const job = jobs.find(j => j.name === name || j.name.startsWith(`${name} (`));
               body += `| ${name} | ${symbols[results[key].result] || results[key].result} | [Logs](${job?.html_url || runUrl}) |\n`;
             }
             body += '\n<details><summary>Build and test steps</summary>\n\n';

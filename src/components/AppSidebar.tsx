@@ -64,12 +64,6 @@ export function AppSidebar({ onOpenSettings }: AppSidebarProps) {
 
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto px-2.5 py-2">
-        <a
-          href="#/ai-board"
-          className="text-muted-foreground hover:bg-accent hover:text-accent-foreground mb-1 flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px]"
-        >
-          <FolderKanban className="h-3.5 w-3.5" /> AI Board
-        </a>
         <button
           onClick={() => startTransition(() => setTaskScopeFilter("my-work"))}
           className={cn(

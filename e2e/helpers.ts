@@ -59,6 +59,12 @@ export async function openApp(
   }
 }
 
+export async function openAiBoard(page: Page) {
+  await page.evaluate(() => {
+    window.location.hash = "/ai-board";
+  });
+}
+
 export function row(page: Page, key: string): Locator {
   return page.getByRole("row").filter({ hasText: key }).first();
 }
