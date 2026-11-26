@@ -1,7 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import { test } from "@playwright/test";
 import { FakeJira } from "./fake-jira";
-import { readE2EState, openApp } from "./helpers";
+import { readE2EState, openAiBoard, openApp } from "./helpers";
 import type { E2EHarnessState } from "./shims/state";
 import type { DoctorReport, RepoAnalysis, RepoBinding, RepoDetection } from "@/lib/harness";
 
@@ -84,7 +84,7 @@ async function openBoard(page: Page) {
   const jira = new FakeJira();
   jira.addIssue({ key: "PRJ-1", summary: "Board work" });
   await openApp(page, jira, { waitFor: "PRJ-1" });
-  await page.getByRole("link", { name: "AI Board", exact: true }).click();
+  await openAiBoard(page);
   await expect(page.getByTestId("ai-board")).toBeVisible();
 }
 

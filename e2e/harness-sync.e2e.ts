@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { FakeJira } from "./fake-jira";
-import { openApp, readE2EState } from "./helpers";
+import { openAiBoard, openApp, readE2EState } from "./helpers";
 import { readyDoctorReport, type E2EHarnessState } from "./shims/state";
 
 async function seed(page: Page, harness: Partial<E2EHarnessState>, savePath: string | null = null) {
@@ -23,7 +23,7 @@ async function openSync(page: Page) {
   jira.addIssue({ key: "PRJ-1", summary: "Board work" });
   jira.addIssue({ key: "PRJ-2", summary: "Other work" });
   await openApp(page, jira, { waitFor: "PRJ-1" });
-  await page.getByRole("link", { name: "AI Board", exact: true }).click();
+  await openAiBoard(page);
   return jira;
 }
 

@@ -1,10 +1,18 @@
 import { expect, test, type Page } from "@playwright/test";
 import { adfParagraph, FakeJira } from "./fake-jira";
-import { getTask, idbAll, openApp, openTask, setNote, syncButton, toasts } from "./helpers";
+import {
+  getTask,
+  idbAll,
+  openAiBoard,
+  openApp,
+  openTask,
+  setNote,
+  syncButton,
+  toasts,
+} from "./helpers";
 
 async function openBoardTask(page: Page, key: string) {
-  if (!page.url().endsWith("#/ai-board"))
-    await page.getByRole("link", { name: "AI Board", exact: true }).click();
+  if (!page.url().endsWith("#/ai-board")) await openAiBoard(page);
   await page.getByRole("button", { name: new RegExp(`^${key}:`) }).click();
   return page.getByRole("complementary", { name: `Board details ${key}`, exact: true });
 }

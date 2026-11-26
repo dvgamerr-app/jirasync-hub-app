@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { FakeJira } from "./fake-jira";
-import { openApp, readE2EState } from "./helpers";
+import { openAiBoard, openApp, readE2EState } from "./helpers";
 import { readyDoctorReport, type E2EHarnessState } from "./shims/state";
 import type { RepoBinding } from "@/lib/harness";
 
@@ -37,7 +37,7 @@ async function openBoard(page: Page) {
   await openApp(page, jira, { waitFor: "PRJ-1" });
   // The private note must never reach external agents.
   await page.evaluate(() => localStorage.setItem("jirasync-harness-setup-seen", "1"));
-  await page.getByRole("link", { name: "AI Board", exact: true }).click();
+  await openAiBoard(page);
   await expect(page.getByTestId("ai-board")).toBeVisible();
 }
 

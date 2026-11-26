@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { FakeJira } from "./fake-jira";
-import { openApp, readE2EState } from "./helpers";
+import { openAiBoard, openApp, readE2EState } from "./helpers";
 import { emptyRunRecord, readyDoctorReport, type E2EHarnessState } from "./shims/state";
 import type { RepoBinding, RunEvent, RunEventKind, RunRecord } from "@/lib/harness";
 
@@ -61,7 +61,7 @@ async function openTaskOnBoard(page: Page) {
   const jira = new FakeJira();
   jira.addIssue({ key: "PRJ-1", summary: "Board work" });
   await openApp(page, jira, { waitFor: "PRJ-1" });
-  await page.getByRole("link", { name: "AI Board", exact: true }).click();
+  await openAiBoard(page);
   await page.getByRole("button", { name: "PRJ-1: Board work" }).click();
   return page.getByRole("complementary", { name: "Board details PRJ-1" });
 }

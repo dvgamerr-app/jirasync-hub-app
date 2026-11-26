@@ -1,6 +1,15 @@
 import { expect, test } from "@playwright/test";
 import { adfParagraph, FakeJira } from "./fake-jira";
-import { accountFor, getTask, idbAll, openApp, openTask, row, setNote } from "./helpers";
+import {
+  accountFor,
+  getTask,
+  idbAll,
+  openAiBoard,
+  openApp,
+  openTask,
+  row,
+  setNote,
+} from "./helpers";
 
 function boardJira() {
   const jira = new FakeJira();
@@ -64,11 +73,12 @@ test("board is a separate page and returning keeps the original task layout and 
   const orgPosition = await page
     .getByRole("button", { name: "SCG Digital Office", exact: true })
     .boundingBox();
-  const projectPosition = await page
+  const jiraProject = page
     .locator("aside")
-    .getByRole("button", { name: "Project PRJ PRJ", exact: true })
-    .boundingBox();
-  await page.getByRole("link", { name: "AI Board", exact: true }).click();
+    .getByRole("button", { name: "Project PRJ PRJ", exact: true });
+  const projectPosition = await jiraProject.boundingBox();
+  await expect(page.getByRole("link", { name: "AI Board", exact: true })).toHaveCount(0);
+  await openAiBoard(page);
   await expect(page).toHaveURL(/#\/ai-board$/);
   await expect(page.getByTestId("ai-board")).toBeVisible();
   const organization = page.getByRole("button", { name: "SCG Digital Office", exact: true });
@@ -76,13 +86,14 @@ test("board is a separate page and returning keeps the original task layout and 
     name: "SCG Digital Office: Project PRJ",
     exact: true,
   });
-  expect(await organization.boundingBox()).toEqual(orgPosition);
-  expect(await project.boundingBox()).toEqual(projectPosition);
+  const boardOrgPosition = await organization.boundingBox();
+  expect(boardOrgPosition).toEqual({ ...orgPosition, y: expect.any(Number) });
+  expect(await project.boundingBox()).toEqual({ ...projectPosition, y: expect.any(Number) });
   await organization.click();
   await expect(project).toBeHidden();
   await organization.click();
   await expect(project).toBeVisible();
-  expect(await organization.boundingBox()).toEqual(orgPosition);
+  expect(await organization.boundingBox()).toEqual(boardOrgPosition);
   await expect(page.getByRole("region", { name: "Task board", exact: true })).toBeVisible();
   await expect(
     page.getByRole("button", { name: "PRJ-1: Pending work", exact: true }),
@@ -95,6 +106,7 @@ test("board is a separate page and returning keeps the original task layout and 
   expect(
     await page.getByRole("button", { name: "SCG Digital Office", exact: true }).boundingBox(),
   ).toEqual(orgPosition);
+  expect(await jiraProject.boundingBox()).toEqual(projectPosition);
   await expect(row(page, "PRJ-2")).toBeVisible();
   await expect(row(page, "PRJ-1")).toHaveCount(0);
   await expect(
@@ -118,7 +130,7 @@ test("space visibility persists independently of Jira while project search and t
   });
   jira.addIssue({ key: "BETA-1", summary: "Beta work" });
   await openApp(page, jira, { waitFor: "ALPHA-1" });
-  await page.getByRole("link", { name: "AI Board", exact: true }).click();
+  await openAiBoard(page);
   await page.getByRole("button", { name: "Acme: Project ALPHA", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Project ALPHA" })).toBeVisible();
   await expect(
@@ -212,7 +224,7 @@ test("space visibility persists independently of Jira while project search and t
   await page.getByRole("link", { name: "My Work", exact: true }).click();
   await expect(row(page, "ALPHA-1")).toBeVisible();
   await expect(row(page, "BETA-1")).toBeVisible();
-  await page.getByRole("link", { name: "AI Board", exact: true }).click();
+  await openAiBoard(page);
   await page.getByRole("button", { name: "Show Acme: Project ALPHA", exact: true }).click();
   await expect(
     page.getByRole("heading", { level: 1, name: "All projects", exact: true }),
@@ -236,7 +248,7 @@ test("AI progress persists independently of Jira, including offline AI completio
     blockedStatuses: ["In Review", "Done"],
   });
   await openApp(page, jira, { waitFor: "PRJ-1" });
-  await page.getByRole("link", { name: "AI Board", exact: true }).click();
+  await openAiBoard(page);
   const card = page.getByRole("button", { name: "PRJ-1: Move this task", exact: true });
   await expect(
     page
@@ -283,7 +295,7 @@ test("Jira completion closes AI work in one direction and reopening Jira does no
   jira.statuses = ["Open", "QA", "Resolved"];
   const issue = jira.addIssue({ key: "PRJ-1", summary: "Human and AI workflows", status: "QA" });
   await openApp(page, jira, { waitFor: "PRJ-1" });
-  await page.getByRole("link", { name: "AI Board", exact: true }).click();
+  await openAiBoard(page);
   const card = page.getByRole("button", { name: "PRJ-1: Human and AI workflows", exact: true });
   await expect(page.getByRole("region", { name: "QA column", exact: true })).toHaveCount(0);
   await card.dragTo(page.getByRole("region", { name: "Review column", exact: true }));
@@ -325,7 +337,7 @@ test("board detail supports offline context and handoff, summary drafts, and a s
     description: adfParagraph("Original API Description"),
   });
   await openApp(page, jira, { waitFor: "PRJ-1" });
-  await page.getByRole("link", { name: "AI Board", exact: true }).click();
+  await openAiBoard(page);
   await page.getByRole("button", { name: "PRJ-1: Work with AI", exact: true }).click();
   const detail = page.getByRole("complementary", { name: "Board details PRJ-1" });
   await expect(detail.getByText("Original API Description", { exact: true })).toBeVisible();
