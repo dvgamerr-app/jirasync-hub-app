@@ -28,26 +28,26 @@
 
 ## ฟีเจอร์
 
-|     | ฟีเจอร์                         | ทำอะไรได้                                                                       |
-| --- | ------------------------------- | ------------------------------------------------------------------------------- |
-| 🔄  | **Incremental sync**            | ดึงเฉพาะที่เปลี่ยนทุกชั่วโมงเบื้องหลัง และสั่ง full sync เองได้                 |
+|     | ฟีเจอร์                         | ทำอะไรได้                                                                     |
+| --- | ----------------------------- | ---------------------------------------------------------------------------- |
+| 🔄  | **Incremental sync**          | ดึงเฉพาะที่เปลี่ยนทุกชั่วโมงเบื้องหลัง และสั่ง full sync เองได้                            |
 | ✏️  | **แก้ไขออฟไลน์**                | Status, type, severity, story level, mandays, note (เก็บในเครื่อง) และ worklogs |
-| 🚀  | **Push แบบเลือกได้**            | ส่งทีละ task หรือทั้งหมด โดยดู dirty ระดับ field                                |
-| ⏱️  | **Worklogs**                    | เพิ่ม/ลบเวลา มี preview การตีความ (`2` = 2 ชั่วโมง, `1d 4h 30m` ก็ได้)          |
+| 🚀  | **Push แบบเลือกได้**            | ส่งทีละ task หรือทั้งหมด โดยดู dirty ระดับ field                                    |
+| ⏱️  | **Worklogs**                  | เพิ่ม/ลบเวลา มี preview การตีความ (`2` = 2 ชั่วโมง, `1d 4h 30m` ก็ได้)               |
 | 🔀  | **เปลี่ยน status ตาม workflow** | ผ่าน Jira transitions ถ้าพลาดจะบอกสาเหตุ                                        |
-| ↩️  | **Discard**                     | คืนค่าจาก Jira ได้ทีละ task หรือทั้งหมด                                         |
-| 📊  | **Export CSV**                  | รายเดือน, UTF-8 BOM เปิดใน Excel ได้, เตือนถ้ามีเวลาที่ยังไม่ push              |
-| 🏢  | **หลาย account**                | หลาย Jira Cloud site พร้อมกัน และตั้ง story point field แยกต่อโปรเจกต์          |
-| 🔐  | **Keychain**                    | เก็บ API token ใน credential store ของ OS                                       |
-| 🖥️  | **Desktop จริง**                | Tauri 2 บน Windows, macOS, Linux พร้อมระบบอัปเดตในตัว                           |
+| ↩️  | **Discard**                   | คืนค่าจาก Jira ได้ทีละ task หรือทั้งหมด                                             |
+| 📊  | **Export CSV**                | รายเดือน, UTF-8 BOM เปิดใน Excel ได้, เตือนถ้ามีเวลาที่ยังไม่ push                     |
+| 🏢  | **หลาย account**              | หลาย Jira Cloud site พร้อมกัน และตั้ง story point field แยกต่อโปรเจกต์             |
+| 🔐  | **Keychain**                  | เก็บ API token ใน credential store ของ OS                                     |
+| 🖥️  | **Desktop จริง**               | Tauri 2 บน Windows, macOS, Linux พร้อมระบบอัปเดตในตัว                           |
 
 <details>
 <summary>ภาพเพิ่มเติม</summary>
 
-|                                                                                 |                                                               |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+|                                                                                |                                                              |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------ |
 | <img src="docs/screenshots/task-detail.png" alt="รายละเอียด task และ worklogs"> | <img src="docs/screenshots/export.png" alt="หน้า Export CSV"> |
-| <img src="docs/screenshots/settings.png" alt="ตั้งค่า Jira account">            | <img src="docs/screenshots/tasks-light.png" alt="ธีมสว่าง">   |
+| <img src="docs/screenshots/settings.png" alt="ตั้งค่า Jira account">              | <img src="docs/screenshots/tasks-light.png" alt="ธีมสว่าง">    |
 
 </details>
 
@@ -55,11 +55,11 @@
 
 ดาวน์โหลดล่าสุดจาก [**GitHub Releases**](https://github.com/dvgamerr-app/jirasync-hub-app/releases/latest)
 
-| OS      | ไฟล์                                                                            |
-| ------- | ------------------------------------------------------------------------------- |
-| Windows | `.exe` / `.msi` (มี `.exe` เปิดตรงได้ด้วย ต้องมี WebView2 Runtime)              |
+| OS      | ไฟล์                                                                      |
+| ------- | ------------------------------------------------------------------------ |
+| Windows | `.exe` / `.msi` (มี `.exe` เปิดตรงได้ด้วย ต้องมี WebView2 Runtime)             |
 | macOS   | `.dmg` (ยังไม่ผ่าน notarisation ดู[วิธีอนุญาตแอป](docs/user-guide.th.md#macos)) |
-| Linux   | `.AppImage` / `.deb`                                                            |
+| Linux   | `.AppImage` / `.deb`                                                     |
 
 ## เริ่มใช้งานใน 4 ขั้นตอน
 

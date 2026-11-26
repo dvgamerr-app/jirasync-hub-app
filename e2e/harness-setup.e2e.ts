@@ -245,20 +245,20 @@ test("when the AI pass fails the guess from the repo files is kept and the reaso
 });
 
 test("a folder that is not a git repo shows why and saves nothing", async ({ page }) => {
+  const folder = "C:\\Users\\me\\Downloads";
+  const error = `${folder} is not inside a git repository`;
   await seedHarness(page, {
     doctor: report(),
     detections: {
-      "C:\Users\me\Downloads": "C:\Users\me\Downloads is not inside a git repository",
+      [folder]: error,
     },
   });
   await openBoard(page);
   const dialog = await openRepoEditor(page);
 
-  await dialog.getByLabel("Repository folder").fill("C:\Users\me\Downloads");
+  await dialog.getByLabel("Repository folder").fill(folder);
   await dialog.getByRole("button", { name: "Analyze" }).click();
-  await expect(dialog.getByRole("alert")).toHaveText(
-    "C:\Users\me\Downloads is not inside a git repository",
-  );
+  await expect(dialog.getByRole("alert")).toHaveText(error);
   await expect(dialog.getByRole("button", { name: "Save repository" })).toBeDisabled();
   expect(await harnessCalls(page)).not.toContain("harness_analyze_repo");
   expect(await harnessCalls(page)).not.toContain("harness_save_binding");
@@ -270,7 +270,7 @@ test("removing a binding asks first and keeps it when the owner backs out", asyn
     projectId: PROJECT_ID,
     repoPath: "C:/src/service",
     baseBranch: "develop",
-    worktreeRoot: "D:\wt",
+    worktreeRoot: "D:\\wt",
     commands: { test: { executable: "npm", args: ["test"] } },
     copyEnv: [".env"],
     services: [],

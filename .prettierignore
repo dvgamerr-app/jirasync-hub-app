@@ -1,5 +1,6 @@
 build
 dist
 node_modules
+.qlty/out
 bun.lock
 src-tauri
