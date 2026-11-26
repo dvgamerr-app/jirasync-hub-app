@@ -166,6 +166,23 @@ test.describe("epic progress follows Jira's status category", () => {
 
     await expect(row(page, "EP-1")).toContainText("0% Done");
   });
+
+  test("Epic and task rows have the same height with and without the detail panel", async ({
+    page,
+  }) => {
+    const jira = epicWith([{ key: "EP-2", status: "In Progress" }]);
+    await openApp(page, jira, { waitFor: "EP-2" });
+    const epic = row(page, "EP-1");
+    const task = row(page, "EP-2");
+
+    await expect(task).toHaveJSProperty("offsetHeight", 48);
+    await expect(epic).toHaveJSProperty("offsetHeight", 48);
+
+    await openTask(page, "EP-1");
+
+    await expect(task).toHaveJSProperty("offsetHeight", 48);
+    await expect(epic).toHaveJSProperty("offsetHeight", 48);
+  });
 });
 
 test.describe("syncing one task reports why it failed", () => {
